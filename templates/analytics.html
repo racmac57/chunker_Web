@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics - Enterprise Chunker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/dashboard.css') }}" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-cogs"></i> Enterprise Chunker
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/upload"><i class="fas fa-upload"></i> Upload</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/files"><i class="fas fa-folder"></i> Files</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/analytics"><i class="fas fa-chart-bar"></i> Analytics</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/settings"><i class="fas fa-cog"></i> Settings</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Total Files</h6>
+                                <h3 id="total-files">0</h3>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-file-alt fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Total Chunks</h6>
+                                <h3 id="total-chunks">0</h3>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-puzzle-piece fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Success Rate</h6>
+                                <h3 id="success-rate">0%</h3>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-check-circle fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h6 class="card-title">Avg Processing Time</h6>
+                                <h3 id="avg-time">0s</h3>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-clock fa-2x"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-pie"></i> Processing Status Distribution</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="statusChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-line"></i> Processing Over Time</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="timeChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Department Stats -->
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-building"></i> Department Statistics</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Department</th>
+                                        <th>Files Processed</th>
+                                        <th>Chunks Created</th>
+                                        <th>Success Rate</th>
+                                        <th>Avg Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="department-stats">
+                                    <tr>
+                                        <td colspan="5" class="text-center">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-exclamation-triangle"></i> Recent Errors</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="error-list">
+                            <div class="text-center text-muted">No recent errors</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        class AnalyticsManager {
+            constructor() {
+                this.statusChart = null;
+                this.timeChart = null;
+                this.init();
+            }
+
+            init() {
+                this.initCharts();
+                this.loadAnalytics();
+                this.startPeriodicUpdates();
+            }
+
+            initCharts() {
+                // Status Distribution Chart
+                const statusCtx = document.getElementById('statusChart');
+                if (statusCtx) {
+                    this.statusChart = new Chart(statusCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Completed', 'Failed', 'Processing', 'Queued'],
+                            datasets: [{
+                                data: [0, 0, 0, 0],
+                                backgroundColor: [
+                                    '#28a745',
+                                    '#dc3545',
+                                    '#ffc107',
+                                    '#17a2b8'
+                                ],
+                                borderWidth: 2,
+                                borderColor: '#fff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom'
+                                }
+                            }
+                        }
+                    });
+                }
+
+                // Time Series Chart
+                const timeCtx = document.getElementById('timeChart');
+                if (timeCtx) {
+                    this.timeChart = new Chart(timeCtx, {
+                        type: 'line',
+                        data: {
+                            labels: [],
+                            datasets: [{
+                                label: 'Files Processed',
+                                data: [],
+                                borderColor: '#007bff',
+                                backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: {
+                                    beginAtZero: true
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            async loadAnalytics() {
+                try {
+                    // Load summary stats
+                    await this.loadSummaryStats();
+                    
+                    // Load department stats
+                    await this.loadDepartmentStats();
+                    
+                    // Load error list
+                    await this.loadErrorList();
+                    
+                } catch (error) {
+                    console.error('Error loading analytics:', error);
+                }
+            }
+
+            async loadSummaryStats() {
+                try {
+                    const response = await fetch('/api/analytics');
+                    const data = await response.json();
+                    
+                    if (data.summary) {
+                        document.getElementById('total-files').textContent = data.summary.total_files || 0;
+                        document.getElementById('total-chunks').textContent = data.summary.total_chunks || 0;
+                        document.getElementById('success-rate').textContent = data.summary.success_rate || '0%';
+                        document.getElementById('avg-time').textContent = data.summary.avg_processing_time || '0s';
+                    }
+                } catch (error) {
+                    console.error('Error loading summary stats:', error);
+                }
+            }
+
+            async loadDepartmentStats() {
+                try {
+                    const response = await fetch('/api/analytics/departments');
+                    const data = await response.json();
+                    
+                    const tbody = document.getElementById('department-stats');
+                    if (data.departments && data.departments.length > 0) {
+                        let html = '';
+                        data.departments.forEach(dept => {
+                            html += `
+                                <tr>
+                                    <td><strong>${dept.name}</strong></td>
+                                    <td>${dept.files_processed}</td>
+                                    <td>${dept.chunks_created}</td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-success" style="width: ${dept.success_rate}%">
+                                                ${dept.success_rate}%
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>${dept.avg_processing_time}</td>
+                                </tr>
+                            `;
+                        });
+                        tbody.innerHTML = html;
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No department data available</td></tr>';
+                    }
+                } catch (error) {
+                    console.error('Error loading department stats:', error);
+                }
+            }
+
+            async loadErrorList() {
+                try {
+                    const response = await fetch('/api/analytics/errors');
+                    const data = await response.json();
+                    
+                    const container = document.getElementById('error-list');
+                    if (data.errors && data.errors.length > 0) {
+                        let html = '';
+                        data.errors.slice(0, 5).forEach(error => {
+                            html += `
+                                <div class="alert alert-danger alert-sm mb-2">
+                                    <small>
+                                        <strong>${error.type}</strong><br>
+                                        ${error.message}<br>
+                                        <span class="text-muted">${this.formatTime(error.timestamp)}</span>
+                                    </small>
+                                </div>
+                            `;
+                        });
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = '<div class="text-center text-muted">No recent errors</div>';
+                    }
+                } catch (error) {
+                    console.error('Error loading error list:', error);
+                }
+            }
+
+            updateCharts(data) {
+                if (this.statusChart && data.status_distribution) {
+                    this.statusChart.data.datasets[0].data = [
+                        data.status_distribution.completed || 0,
+                        data.status_distribution.failed || 0,
+                        data.status_distribution.processing || 0,
+                        data.status_distribution.queued || 0
+                    ];
+                    this.statusChart.update();
+                }
+
+                if (this.timeChart && data.time_series) {
+                    this.timeChart.data.labels = data.time_series.labels || [];
+                    this.timeChart.data.datasets[0].data = data.time_series.data || [];
+                    this.timeChart.update();
+                }
+            }
+
+            startPeriodicUpdates() {
+                setInterval(() => {
+                    this.loadAnalytics();
+                }, 30000); // Update every 30 seconds
+            }
+
+            formatTime(timestamp) {
+                const date = new Date(timestamp);
+                const now = new Date();
+                const diff = now - date;
+                
+                if (diff < 60000) {
+                    return 'Just now';
+                } else if (diff < 3600000) {
+                    return `${Math.floor(diff / 60000)}m ago`;
+                } else if (diff < 86400000) {
+                    return `${Math.floor(diff / 3600000)}h ago`;
+                } else {
+                    return date.toLocaleDateString();
+                }
+            }
+        }
+
+        // Initialize analytics
+        let analyticsManager;
+        document.addEventListener('DOMContentLoaded', () => {
+            analyticsManager = new AnalyticsManager();
+        });
+    </script>
+</body>
+</html>
