@@ -25,6 +25,9 @@ This project has been migrated to C:/_chunker on 2025-08-25 18:58:28.
 - [x] All other files output as .txt
 - [x] Automatic file organization and archiving
 - [x] Database tracking and logging
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters while preserving readability
+- [x] **Timestamp-organized output** - Output folders include processing timestamp (YYYY_MM_DD_HH_MM_SS_) for chronological organization
 
 ## Configuration
 

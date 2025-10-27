@@ -4,18 +4,15 @@
 
 ### 1. Start the System
 ```bash
-# Option 1: Use the automated startup script (Recommended)
-python start_dashboard.py
-
-# Option 2: Manual startup
-pip install -r requirements.txt
-python web_dashboard.py
+# Start the watcher (monitors 02_data for new files)
+python watcher_splitter.py
 ```
 
-### 2. Access the Dashboard
-- **URL**: http://localhost:5000
-- **Default Port**: 5000
-- **Browser**: Any modern web browser
+### 2. Process Files
+- **Input**: Drop files into `02_data/` directory
+- **Output**: Processed files appear in `04_output/` with timestamp prefixes
+- **Archive**: Original files moved to `03_archive/admin/` after processing
+- **Logs**: Check `logs/watcher.log` for processing details
 
 ---
 

@@ -186,25 +186,33 @@ def log_system_metrics():
 
 def chunk_text_enhanced(text, limit, department_config):
     """Enhanced chunking with department-specific rules"""
+    logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
     if not text or len(text.strip()) < 10:
-        logger.warning("Text too short for chunking")
+        logger.warning("Text too short for chunking - skipping")
         return []
     
     try:
         sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
         if not sentences:
-            logger.warning("No sentences found in text")
+            logger.warning("No sentences found in text - skipping")
             return []
         
         # Apply department-specific chunking rules
+        original_sentence_count = len(sentences)
         if department_config.get("enable_redaction"):
             sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {original_sentence_count} -> {len(sentences)} sentences")
         
         chunks = []
         max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        logger.info(f"Chunking parameters - Max chars per chunk: {max_chars}, Target sentences per chunk: {limit}")
         
         current_chunk = []
         current_length = 0
+        chunk_count = 0
         
         for sentence in sentences:
             sentence_length = len(sentence)
@@ -216,6 +224,8 @@ def chunk_text_enhanced(text, limit, department_config):
                 chunk_text = " ".join(current_chunk)
                 if len(chunk_text.strip()) > 0:
                     chunks.append(chunk_text)
+                    chunk_count += 1
+                    logger.debug(f"Created chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
                 
                 current_chunk = [sentence]
                 current_length = sentence_length
@@ -228,9 +238,11 @@ def chunk_text_enhanced(text, limit, department_config):
             chunk_text = " ".join(current_chunk)
             if len(chunk_text.strip()) > 0:
                 chunks.append(chunk_text)
+                chunk_count += 1
+                logger.debug(f"Created final chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
         
         session_stats["total_sentences_processed"] += len(sentences)
-        logger.info(f"Created {len(chunks)} chunks from {len(sentences)} sentences")
+        logger.info(f"Chunking complete - Created {len(chunks)} chunks from {len(sentences)} sentences (avg: {len(sentences)/len(chunks):.1f} sentences/chunk)")
         return chunks
         
     except Exception as e:
@@ -290,7 +302,9 @@ def process_file_enhanced(file_path, config):
     department_config = get_department_config(file_path)
     department = department_config.get("department", "default")
     
-    logger.info(f"Processing file: {file_path.name} (Department: {department})")
+    # Safe filename logging to avoid encoding issues
+    safe_filename = file_path.name.encode('ascii', 'replace').decode('ascii')
+    logger.info(f"Processing file: {safe_filename} (Department: {department})")
     
     try:
         # Wait for file stability
@@ -358,11 +372,27 @@ def process_file_enhanced(file_path, config):
 
         # Prepare output with organized folder structure
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        clean_base = Path(file_path.name).stem.replace(" ", "_")
+        
+        # Enhanced filename sanitization
+        import re
+        clean_base = Path(file_path.name).stem
+        # Remove or replace problematic characters
+        clean_base = re.sub(r'[^\w\s-]', '', clean_base)  # Remove special chars except word chars, spaces, hyphens
+        clean_base = clean_base.replace(" ", "_")  # Replace spaces with underscores
+        clean_base = re.sub(r'_+', '_', clean_base)  # Replace multiple underscores with single
+        clean_base = clean_base.strip('_')  # Remove leading/trailing underscores
+        
+        # Ensure the name isn't too long (Windows path limit)
+        # Account for timestamp prefix (19 chars) + separators + chunk files
+        max_filename_length = 50  # Reduced to account for timestamp prefix
+        if len(clean_base) > max_filename_length:
+            clean_base = clean_base[:max_filename_length]
+        
         output_folder = config.get("output_dir", "output")
         
-        # Create folder named after the source file
-        file_output_folder = Path(output_folder) / clean_base
+        # Create folder named after the source file with timestamp prefix
+        timestamp_prefix = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        file_output_folder = Path(output_folder) / f"{timestamp_prefix}_{clean_base}"
         os.makedirs(file_output_folder, exist_ok=True)
         
         chunk_files = []
