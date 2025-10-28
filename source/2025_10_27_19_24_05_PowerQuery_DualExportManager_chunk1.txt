@@ -1,0 +1,142 @@
+Sub ExportAllQueriesToCentralFolders()
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim pq As WorkbookQuery
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim LOCAL_ROOT As String, timeStamp As String, exportDate As String
+    Dim folderName As String, folderOneDrive As String, folderLocal As String
+    Dim queryPathOD As String, queryPathLocal As String
+    Dim codeLines() As String, content As String
+    Dim combinedCode As String, rawCode As String
+    Dim i As Long, rowCount As Variant
+    Dim formatChoice As String, ext As String, wrapCode As String
+    Dim exportFile As Object, combinedFile As Object, readmeFile As Object, rawFile As Object
+    Dim startTime As Double
+    Dim folderPath As Variant
+    Dim rowCounts As Object: Set rowCounts = CreateObject("Scripting.Dictionary")
+
+    Const ONEDRIVE_ROOT As String = "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Excel\MCode\Exports"
+    LOCAL_ROOT = "C:\Users\" & Environ$("Username") & "\Documents\Hackensack_Backups\MCode\Exports"
+
+    formatChoice = LCase(InputBox("Export format: txt, md, csv", "Choose Format", "md"))
+    Select Case formatChoice
+        Case "txt": ext = ".txt": wrapCode = ""
+        Case "md": ext = ".md": wrapCode = "```powerquery"
+        Case "csv": ext = ".csv": wrapCode = ""
+        Case Else: MsgBox "Unsupported format": Exit Sub
+    End Select
+
+    exportDate = Format(Date, "yyyy_mm_dd")
+    timeStamp = Format(Now, "yyyy-mm-dd-HH-MM-SS") & " (EST)"
+    folderName = CleanFileName(fso.GetBaseName(wb.Name)) & "_" & exportDate
+    folderOneDrive = ONEDRIVE_ROOT & "\" & folderName
+    folderLocal = LOCAL_ROOT & "\" & folderName
+
+    EnsureFolderExists folderOneDrive
+    EnsureFolderExists folderLocal
+
+    combinedCode = "🕒 " & timeStamp & vbCrLf & "# Combined M Code Export from " & wb.Name & vbCrLf & vbCrLf
+    rawCode = ""
+    startTime = Timer
+
+    For Each pq In wb.Queries
+        If pq.Formula = "" Then GoTo NextQuery
+
+        ' Row count
+        rowCount = "N/A"
+        On Error Resume Next
+        rowCount = Evaluate("=ROWS(" & pq.Name & ")")
+        If Err.Number <> 0 Or IsEmpty(rowCount) Then rowCount = "N/A"
+        On Error GoTo 0
+        rowCounts(pq.Name) = CStr(rowCount)
+
+        ' Numbered M code
+        codeLines = Split(pq.Formula, vbLf)
+        content = ""
+        For i = LBound(codeLines) To UBound(codeLines)
+            content = content & Format(i + 1, "000") & ": " & codeLines(i) & vbCrLf
+        Next i
+
+        combinedCode = combinedCode & "# " & pq.Name & " (" & rowCounts(pq.Name) & " rows)" & vbCrLf & content & vbCrLf
+        rawCode = rawCode & "# " & pq.Name & " (" & rowCounts(pq.Name) & " rows)" & vbCrLf & pq.Formula & vbCrLf & vbCrLf
+
+        ' OneDrive export
+        queryPathOD = folderOneDrive & "\" & CleanFileName(pq.Name) & ext
+        If Not IsFileLocked(queryPathOD) Then
+            Set exportFile = fso.CreateTextFile(queryPathOD, True)
+            exportFile.WriteLine "🕒 " & timeStamp
+            exportFile.WriteLine "# " & pq.Name & " (" & rowCounts(pq.Name) & " rows)"
+            If wrapCode <> "" Then exportFile.WriteLine wrapCode
+            exportFile.WriteLine content
+            If wrapCode <> "" Then exportFile.WriteLine "```"
+            exportFile.Close
+        End If
+
+        ' Local export
+        queryPathLocal = folderLocal & "\" & CleanFileName(pq.Name) & ext
+        If Not IsFileLocked(queryPathLocal) Then
+            Set exportFile = fso.CreateTextFile(queryPathLocal, True)
+            exportFile.WriteLine "🕒 " & timeStamp
+            exportFile.WriteLine "# " & pq.Name & " (" & rowCounts(pq.Name) & " rows)"
+            If wrapCode <> "" Then exportFile.WriteLine wrapCode
+            exportFile.WriteLine content
+            If wrapCode <> "" Then exportFile.WriteLine "```"
+            exportFile.Close
+        End If
+NextQuery:
+        DoEvents
+    Next pq
+
+    ' Combined + raw + README
+    For Each folderPath In Array(folderOneDrive, folderLocal)
+        Set combinedFile = fso.CreateTextFile(folderPath & "\_ALL_QUERIES" & ext, True)
+        combinedFile.Write combinedCode: combinedFile.Close
+
+        Set rawFile = fso.CreateTextFile(folderPath & "\ALL_RAW_MCODE.txt", True)
+        rawFile.Write rawCode: rawFile.Close
+
+        Set readmeFile = fso.CreateTextFile(folderPath & "\README.md", True)
+        readmeFile.WriteLine "# M Code Export - " & wb.Name
+        readmeFile.WriteLine "- Format: " & UCase(ext)
+        readmeFile.WriteLine "- Exported: " & Now
+        For Each pq In wb.Queries
+            If rowCounts.Exists(pq.Name) Then
+                readmeFile.WriteLine "- " & pq.Name & " (" & CStr(rowCounts(pq.Name)) & " rows)"
+            Else
+                readmeFile.WriteLine "- " & pq.Name & " (N/A rows)"
+            End If
+        Next pq
+        readmeFile.Close
+    Next folderPath
+
+    MsgBox "✅ Export complete in " & Format(Timer - startTime, "0.00") & " seconds." & vbCrLf & _
+           "OneDrive: " & folderOneDrive & vbCrLf & _
+           "Local: " & folderLocal, vbInformation
+End Sub
+
+Private Sub EnsureFolderExists(fullPath As String)
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim parts() As String: parts = Split(fullPath, "\")
+    Dim currentPath As String, i As Long
+    currentPath = parts(0)
+    If Len(currentPath) = 2 And Right(currentPath, 1) = ":" Then currentPath = currentPath & "\"
+
+    For i = 1 To UBound(parts)
+        currentPath = currentPath & "\" & parts(i)
+        If Not fso.FolderExists(currentPath) Then fso.CreateFolder(currentPath)
+    Next i
+End Sub
+
+Private Function CleanFileName(str As String) As String
+    Dim regex As Object: Set regex = CreateObject("VBScript.RegExp")
+    regex.Pattern = "[^\w\- ]"
+    CleanFileName = Trim(regex.Replace(str, "_"))
+End Function
+
+Private Function IsFileLocked(filePath As String) As Boolean
+    On Error Resume Next
+    Dim fnum As Integer: fnum = FreeFile()
+    Open filePath For Binary Access Read Write Lock Read Write As #fnum
+    Close fnum
+    IsFileLocked = (Err.Number <> 0)
+    Err.Clear
+End Function

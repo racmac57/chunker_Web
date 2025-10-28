@@ -1,0 +1,143 @@
+Sub ArchiveCompstatWithLogsAndBackup()
+
+    Dim ws As Worksheet, lo As ListObject, exportWb As Workbook
+    Dim exportWbs As Collection, sheetToDelete As Collection, deletedSheets As Collection
+    Dim pathBase As String, yearFolder As String
+    Dim sheetName As String, sheetYear As String, yearKey As String
+    Dim i As Long, y As Variant
+    Dim deleteConfirm As VbMsgBoxResult
+    Dim exportLog As String
+    Dim logSheet As Worksheet
+    Dim backupFileName As String
+    Dim logFileName As String
+    Dim fNum As Integer
+    Dim logTime As String
+
+    ' === PATH SETUP ===
+    pathBase = "C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Compstat\Archive_Compstat\"
+    logTime = Format(Now, "yyyy-mm-dd hh:mm:ss")
+
+    ' === INITIALIZE COLLECTIONS ===
+    Set exportWbs = New Collection
+    Set sheetToDelete = New Collection
+    Set deletedSheets = New Collection
+    exportLog = "=== Compstat Archive Run @ " & logTime & " ===" & vbCrLf
+
+    ' === BACKUP CURRENT WORKBOOK ===
+    backupFileName = pathBase & "Backup_Compstat_" & Format(Now, "yyyymmdd_hhmmss") & ".xlsm"
+    ThisWorkbook.SaveCopyAs backupFileName
+    exportLog = exportLog & "Backup created: " & backupFileName & vbCrLf & vbCrLf
+
+    ' === PROCESS SHEETS ===
+    For i = ThisWorkbook.Worksheets.Count To 1 Step -1
+        Set ws = ThisWorkbook.Worksheets(i)
+        sheetName = ws.Name
+
+        ' Detect pattern like "23_01" and convert to "2023"
+        If Len(sheetName) >= 5 And Mid(sheetName, 3, 1) = "_" Then
+            sheetYear = "20" & Left(sheetName, 2)
+
+            ' Make year folder if not exist
+            yearFolder = pathBase & sheetYear & "\"
+            If Dir(yearFolder, vbDirectory) = "" Then MkDir yearFolder
+
+            ' Create year-specific export workbook
+            On Error Resume Next
+            Set exportWb = exportWbs(sheetYear)
+            If exportWb Is Nothing Then
+                Set exportWb = Workbooks.Add
+                exportWbs.Add exportWb, sheetYear
+            End If
+            On Error GoTo 0
+
+            ' Copy the sheet
+            ws.Copy After:=exportWb.Sheets(exportWb.Sheets.Count)
+            exportLog = exportLog & "✔ Exported: Sheet '" & sheetName & "' to " & sheetYear & vbCrLf
+
+            ' Mark sheet for deletion if all tables match year
+            Dim isSafeToDelete As Boolean: isSafeToDelete = True
+            For Each lo In ws.ListObjects
+                If Not InStr(lo.Name, "_" & Right(sheetYear, 2) & "_") > 0 Then
+                    isSafeToDelete = False
+                    Exit For
+                End If
+            Next lo
+            If isSafeToDelete Then
+                sheetToDelete.Add ws
+                exportLog = exportLog & "🗑 Marked for deletion: '" & sheetName & "'" & vbCrLf
+            End If
+        End If
+    Next i
+
+    ' === CONFIRM DELETION ===
+    If sheetToDelete.Count > 0 Then
+        deleteConfirm = MsgBox("The following sheets will be deleted:" & vbCrLf & _
+            JoinSheetNames(sheetToDelete) & vbCrLf & "Proceed? ", vbYesNo + vbExclamation, "Confirm Deletion")
+        If deleteConfirm = vbYes Then
+            Application.DisplayAlerts = False
+            For Each ws In sheetToDelete
+                deletedSheets.Add ws.Name
+                ws.Delete
+            Next ws
+            Application.DisplayAlerts = True
+            exportLog = exportLog & vbCrLf & "🧹 Deleted sheets: " & deletedSheets.Count & vbCrLf
+        Else
+            exportLog = exportLog & vbCrLf & "⚠ Deletion canceled by user." & vbCrLf
+        End If
+    End If
+
+    ' === SAVE EXPORT WORKBOOKS ===
+    For Each y In exportWbs
+        Set exportWb = y
+        yearKey = exportWbs.Key(exportWbs.Count)
+        yearFolder = pathBase & yearKey & "\"
+
+        ' Delete default empty sheet if present
+        On Error Resume Next
+        If exportWb.Sheets.Count = 1 And exportWb.Sheets(1).UsedRange.Address = "$A$1" Then exportWb.Sheets(1).Delete
+        On Error GoTo 0
+
+        exportWb.SaveAs Filename:=yearFolder & "Compstat_" & yearKey & "_" & Format(Now, "yyyymmdd_hhmmss") & ".xlsx"
+        exportWb.Close SaveChanges:=False
+        exportLog = exportLog & "💾 Saved export file to: " & yearFolder & vbCrLf
+    Next y
+
+    ' === WRITE LOG TO TEXT FILE (APPEND) ===
+    logFileName = pathBase & "Compstat_Export_Log.txt"
+    fNum = FreeFile
+    Open logFileName For Append As #fNum
+        Print #fNum, exportLog & vbCrLf & String(80, "-")
+    Close #fNum
+
+    ' === WRITE/APPEND TO "Log" SHEET ===
+    On Error Resume Next
+    Set logSheet = ThisWorkbook.Sheets("Log")
+    If logSheet Is Nothing Then
+        Set logSheet = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        logSheet.Name = "Log"
+        logSheet.Range("A1:B1").Value = Array("Timestamp", "Event")
+    End If
+    On Error GoTo 0
+
+    Dim nextRow As Long
+    nextRow = logSheet.Cells(logSheet.Rows.Count, 1).End(xlUp).Row + 1
+    logSheet.Cells(nextRow, 1).Value = Now
+    logSheet.Cells(nextRow, 2).Value = exportLog
+
+    ' === FINAL MESSAGE ===
+    MsgBox "✅ Archive complete!" & vbCrLf & _
+           "✔ Backup saved" & vbCrLf & _
+           "✔ Exported sheets: " & exportWbs.Count & vbCrLf & _
+           "✔ Deleted sheets: " & deletedSheets.Count & vbCrLf & _
+           "📄 Logs updated in workbook and text file", vbInformation
+
+End Sub
+
+Function JoinSheetNames(sheetList As Collection) As String
+    Dim result As String
+    Dim ws As Worksheet
+    For Each ws In sheetList
+        result = result & ws.Name & vbCrLf
+    Next ws
+    JoinSheetNames = result
+End Function

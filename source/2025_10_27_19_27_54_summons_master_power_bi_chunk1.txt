@@ -1,0 +1,113 @@
+import pandas as pd
+import re
+
+# === 1. LOAD FILES ===
+summons_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\Summons\Court\May_2025.xlsx"
+assignment_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_REFERENCE\ASSIGNMENT_MASTER\Assignment_Master.xlsm"
+ordinance_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\CityOrdinances.xlsx"
+title39_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Title39_Full.xlsx"
+date_dim_path = r"date_dimension.xlsx"
+
+summons_df = pd.read_excel(summons_path, header=None)
+assignment_df = pd.read_excel(assignment_path)
+ordinance_df = pd.read_excel(ordinance_path)
+title39_df = pd.read_excel(title39_path)
+date_dim = pd.read_excel(date_dim_path)
+
+# === 2. CLEAN SUMMONS HEADERS ===
+# Find the row with "OFFICER" to use as header
+header_row = summons_df[summons_df.apply(lambda x: x.astype(str).str.contains("OFFICER").any(), axis=1)].index[0]
+headers = summons_df.iloc[header_row].tolist()
+headers.insert(0, "BADGE_NUMBER")
+headers.insert(2, "ORI")  # Insert ORI after OFFICER
+
+data = summons_df.iloc[header_row + 1:].copy()
+data.columns = headers
+data.reset_index(drop=True, inplace=True)
+
+# Standardize column names
+data.columns = [col.strip().upper().replace(" ", "_") for col in data.columns]
+
+# === 3. CAST COLUMNS ===
+date_cols = ["ISSUE_DATE", "DISPOSITION_DATE", "PAYMENT_DATE"]
+money_cols = ["TOTAL_PAID_AMOUNT", "ASSESSED_AMOUNT", "FINE_AMOUNT", "COST_AMOUNT", "MISC_AMOUNT"]
+
+for col in date_cols:
+    data[col] = pd.to_datetime(data[col], errors='coerce')
+
+for col in money_cols:
+    data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
+
+# === 4. CLEAN ASSIGNMENT DATA ===
+assignment_df["BADGE_NUMBER"] = assignment_df["BADGE_NUMBER"].astype(str).str.zfill(4)
+assignment_df["FIRST_INITIAL"] = assignment_df["FIRST_NAME"].str[0].str.upper()
+assignment_df["LAST_NAME"] = assignment_df["LAST_NAME"].str.strip().str.upper()
+
+# === 5. EXTRACT NAME INFO FROM SUMMONS ===
+def parse_officer_name(name):
+    parts = str(name).strip().split()
+    if len(parts) >= 3:
+        return parts[1][0].upper(), parts[2].upper()
+    return None, None
+
+data[["FIRST_INITIAL", "LAST_NAME"]] = data["OFFICER_NAME"].apply(
+    lambda x: pd.Series(parse_officer_name(x))
+)
+
+# === 6. MERGE WITH ASSIGNMENTS ===
+data = pd.merge(
+    data,
+    assignment_df,
+    how="left",
+    on=["FIRST_INITIAL", "LAST_NAME"],
+    suffixes=("", "_ASSIGN")
+)
+
+data["OFFICER_MATCHED"] = data["BADGE_NUMBER_ASSIGN"].notna()
+
+# === 7. NORMALIZE VIOLATION CODES ===
+data["VIOLATION_NUMBER"] = data["VIOLATION_NUMBER"].astype(str).str.strip()
+data["NORMALIZED_VIOLATION"] = data["VIOLATION_NUMBER"].str.replace(r"[A-Z]$", "", regex=True)
+
+title39_df["NORMALIZED_CODE"] = title39_df["Violation Number"].astype(str).str.replace(r"[A-Z]$", "", regex=True)
+title39_map = title39_df.drop_duplicates("NORMALIZED_CODE").set_index("NORMALIZED_CODE")["Description"]
+
+ordinance_df.columns = ["Section", "Description"]
+ordinance_df["Section"] = ordinance_df["Section"].astype(str).str.strip()
+ordinance_map = ordinance_df.set_index("Section")["Description"]
+
+# === 8. MAP VIOLATION DESCRIPTIONS ===
+data["VIOLATION_DESCRIPTION"] = data["VIOLATION_NUMBER"].map(ordinance_map)
+data["VIOLATION_DESCRIPTION"] = data["VIOLATION_DESCRIPTION"].fillna(
+    data["NORMALIZED_VIOLATION"].map(title39_map)
+)
+
+# === 9. ENHANCEMENTS ===
+data["IS_PAID"] = data["TOTAL_PAID_AMOUNT"] > 0
+data["IS_WEEKEND"] = data["ISSUE_DATE"].dt.weekday >= 5
+data["DAY_NAME"] = data["ISSUE_DATE"].dt.strftime("%A")
+
+# Violation frequency classification
+violation_counts = data["VIOLATION_NUMBER"].value_counts()
+hi = violation_counts.quantile(0.9)
+lo = violation_counts[violation_counts > 1].quantile(0.1)
+
+def classify_freq(v):
+    c = violation_counts.get(v, 0)
+    if c >= hi: return "High Frequency"
+    if c <= lo: return "Rare"
+    return "Medium Frequency"
+
+data["VIOLATION_FREQUENCY_CLASS"] = data["VIOLATION_NUMBER"].apply(classify_freq)
+
+# === 10. EXPORT ===
+data.to_excel("summons_fact_enhanced.xlsx", index=False)
+
+officer_dim = data[["BADGE_NUMBER_ASSIGN", "FIRST_NAME", "LAST_NAME", "Squad", "ASSIGNMENT"]].drop_duplicates()
+officer_dim.to_excel("officer_dimension.xlsx", index=False)
+
+violations_dim = data[["VIOLATION_NUMBER", "VIOLATION_DESCRIPTION"]].drop_duplicates()
+violations_dim.columns = ["Violation_Code", "Violation_Description"]
+violations_dim.to_excel("violations_dimension.xlsx", index=False)
+
+print("✅ ETL complete. Output files are ready.")

@@ -1,0 +1,287 @@
+Sub DetCompStat()
+'
+' DetCompStat Macro - Corrected and Optimized Version
+' Formats Detective CompStat report with proper styling and layout
+' Last Updated: 2025-05-27
+'
+
+    ' Disable screen updating and automatic calculation for performance
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+    
+    On Error GoTo ErrorHandler
+    
+    ' Clear any existing selections
+    Application.CutCopyMode = False
+    
+    ' === STEP 1: Set Global Font Properties ===
+    With ActiveSheet.Cells.Font
+        .Name = "Aptos"
+        .Size = 12
+        .Strikethrough = False
+        .Superscript = False
+        .Subscript = False
+        .OutlineFont = False
+        .Shadow = False
+        .Underline = xlUnderlineStyleNone
+        .TintAndShade = 0
+        .ThemeFont = xlThemeFontNone
+    End With
+    
+    ' Auto-fit all columns and rows initially
+    ActiveSheet.Cells.EntireColumn.AutoFit
+    ActiveSheet.Cells.EntireRow.AutoFit
+    
+    ' === STEP 2: Format Row Numbers (A3:A20) ===
+    With Range("A3:A20")
+        .HorizontalAlignment = xlRight
+        .VerticalAlignment = xlTop
+        .WrapText = False
+        .IndentLevel = 0
+    End With
+    
+    ' === STEP 3: Format Header Row (A2:O2) ===
+    With Range("A2:O2")
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = True
+        .IndentLevel = 0
+    End With
+    
+    ' === STEP 4: Format Title Row (A1:O1) ===
+    With Range("A1:O1")
+        ' First unmerge if already merged
+        If .MergeCells Then .UnMerge
+        
+        ' Set formatting properties
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlBottom
+        .WrapText = True
+        .IndentLevel = 0
+        
+        ' Merge cells and set font size
+        .Merge
+        .Font.Size = 14
+    End With
+    
+    ' === STEP 5: Format Bottom Summary Row (A21:O21) ===
+    With Range("A21:O21")
+        .Font.Size = 14
+        .Interior.Pattern = xlSolid
+        .Interior.PatternColorIndex = xlAutomatic
+        .Interior.Color = 10092543  ' Light blue color
+        .Interior.TintAndShade = 0
+    End With
+    
+    ' === STEP 6: Set Specific Column Widths ===
+    ' Use arrays for cleaner code
+    Dim columnWidths As Variant
+    columnWidths = Array(0, 13.67, 35.67, 0, 0, 13.17, 15.5, 0, 19.33, 0, 0, 0, 15, 0, 15.83)
+    
+    Dim i As Integer
+    For i = 1 To 15 ' Columns A through O
+        If columnWidths(i - 1) > 0 Then
+            Columns(i).ColumnWidth = columnWidths(i - 1)
+        End If
+    Next i
+    
+    ' Auto-fit specific columns that weren't set manually
+    Columns("A:A").EntireColumn.AutoFit
+    Columns("M:M").EntireColumn.AutoFit
+    
+    ' === STEP 7: Add Borders to Main Data Range ===
+    With Range("A2:O21").Borders
+        ' Clear diagonal borders
+        .Item(xlDiagonalDown).LineStyle = xlNone
+        .Item(xlDiagonalUp).LineStyle = xlNone
+        
+        ' Set outer borders (medium weight)
+        .Item(xlEdgeLeft).LineStyle = xlContinuous
+        .Item(xlEdgeLeft).ColorIndex = 0
+        .Item(xlEdgeLeft).Weight = xlMedium
+        
+        .Item(xlEdgeTop).LineStyle = xlContinuous
+        .Item(xlEdgeTop).ColorIndex = 0
+        .Item(xlEdgeTop).Weight = xlMedium
+        
+        .Item(xlEdgeBottom).LineStyle = xlContinuous
+        .Item(xlEdgeBottom).ColorIndex = 0
+        .Item(xlEdgeBottom).Weight = xlMedium
+        
+        .Item(xlEdgeRight).LineStyle = xlContinuous
+        .Item(xlEdgeRight).ColorIndex = 0
+        .Item(xlEdgeRight).Weight = xlMedium
+        
+        ' Set inner borders (thin weight)
+        .Item(xlInsideVertical).LineStyle = xlContinuous
+        .Item(xlInsideVertical).Color = -16777216  ' Black
+        .Item(xlInsideVertical).Weight = xlThin
+        
+        .Item(xlInsideHorizontal).LineStyle = xlContinuous
+        .Item(xlInsideHorizontal).Color = -16777216  ' Black
+        .Item(xlInsideHorizontal).Weight = xlThin
+    End With
+    
+    ' === STEP 8: Configure Page Setup ===
+    Application.PrintCommunication = False
+    
+    With ActiveSheet.PageSetup
+        ' Clear print titles and area
+        .PrintTitleRows = ""
+        .PrintTitleColumns = ""
+        .PrintArea = ""
+        
+        ' Clear headers and footers
+        .LeftHeader = ""
+        .CenterHeader = ""
+        .RightHeader = ""
+        .LeftFooter = ""
+        .CenterFooter = ""
+        .RightFooter = ""
+        
+        ' Set margins (in inches)
+        .LeftMargin = Application.InchesToPoints(0.7)
+        .RightMargin = Application.InchesToPoints(0.7)
+        .TopMargin = Application.InchesToPoints(0.75)
+        .BottomMargin = Application.InchesToPoints(0.75)
+        .HeaderMargin = Application.InchesToPoints(0.3)
+        .FooterMargin = Application.InchesToPoints(0.3)
+        
+        ' Set print options
+        .PrintHeadings = False
+        .PrintGridlines = False
+        .PrintComments = xlPrintNoComments
+        .PrintQuality = 600
+        .CenterHorizontally = False
+        .CenterVertically = False
+        .Orientation = xlLandscape
+        .Draft = False
+        .PaperSize = xlPaperLetter
+        .FirstPageNumber = xlAutomatic
+        .Order = xlDownThenOver
+        .BlackAndWhite = False
+        .Zoom = 31
+        .PrintErrors = xlPrintErrorsDisplayed
+        .OddAndEvenPagesHeaderFooter = False
+        .DifferentFirstPageHeaderFooter = False
+        .ScaleWithDocHeaderFooter = True
+        .AlignMarginsHeaderFooter = True
+    End With
+    
+    Application.PrintCommunication = True
+    
+    ' === STEP 9: Copy Formatting from Column N to Column O (if needed) ===
+    If Not IsEmpty(Range("N2")) Then
+        Range("N2").Copy
+        Range("O2").PasteSpecial Paste:=xlPasteFormats, Operation:=xlNone, _
+            SkipBlanks:=False, Transpose:=False
+        Application.CutCopyMode = False
+    End If
+    
+    ' === STEP 10: Final Cleanup ===
+    ' Remove any page breaks that might interfere
+    ActiveSheet.ResetAllPageBreaks
+    
+    ' Select a neutral cell to finish
+    Range("A1").Select
+    
+    ' Success message
+    MsgBox "DetCompStat formatting completed successfully! ", vbInformation, "Formatting Complete"
+    
+    GoTo CleanExit
+    
+ErrorHandler:
+    ' Error handling
+    MsgBox "An error occurred while formatting: " & Err.Description, vbCritical, "Error"
+    Application.CutCopyMode = False
+    
+CleanExit:
+    ' Re-enable Excel features
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+    
+End Sub
+
+' === HELPER SUBROUTINES ===
+
+Sub QuickDetCompStatFormat()
+'
+' Quick version of DetCompStat formatting with minimal options
+' Use this for faster execution when you don't need all the page setup
+'
+    Application.ScreenUpdating = False
+    On Error Resume Next
+    
+    ' Basic formatting
+    With ActiveSheet.Cells.Font
+        .Name = "Aptos"
+        .Size = 12
+    End With
+    
+    ' Auto-fit
+    ActiveSheet.Cells.EntireColumn.AutoFit
+    ActiveSheet.Cells.EntireRow.AutoFit
+    
+    ' Key formatting
+    Range("A1:O1").Merge
+    Range("A1:O1").Font.Size = 14
+    Range("A1:O1").HorizontalAlignment = xlCenter
+    
+    Range("A2:O2").HorizontalAlignment = xlCenter
+    Range("A2:O2").WrapText = True
+    
+    Range("A3:A20").HorizontalAlignment = xlRight
+    
+    Range("A21:O21").Font.Size = 14
+    Range("A21:O21").Interior.Color = 10092543
+    
+    ' Add borders
+    With Range("A2:O21").Borders
+        .Item(xlEdgeLeft).Weight = xlMedium
+        .Item(xlEdgeTop).Weight = xlMedium
+        .Item(xlEdgeBottom).Weight = xlMedium
+        .Item(xlEdgeRight).Weight = xlMedium
+        .Item(xlInsideVertical).Weight = xlThin
+        .Item(xlInsideHorizontal).Weight = xlThin
+    End With
+    
+    Range("A1").Select
+    Application.ScreenUpdating = True
+    
+    MsgBox "Quick formatting completed! ", vbInformation
+    
+End Sub
+
+Sub ResetDetCompStatFormat()
+'
+' Reset/Clear all formatting applied by DetCompStat macro
+'
+    Dim response As VbMsgBoxResult
+    response = MsgBox("This will clear all formatting from the current sheet. Continue? ", vbYesNo + vbQuestion, "Reset Formatting")
+    
+    If response = vbYes Then
+        Application.ScreenUpdating = False
+        
+        ' Clear all formatting
+        ActiveSheet.Cells.Clear
+        ActiveSheet.Cells.ClearFormats
+        
+        ' Reset page setup to defaults
+        With ActiveSheet.PageSetup
+            .Orientation = xlPortrait
+            .Zoom = 100
+            .PrintArea = ""
+        End With
+        
+        ' Reset column widths
+        ActiveSheet.Columns.AutoFit
+        
+        Range("A1").Select
+        Application.ScreenUpdating = True
+        
+        MsgBox "Formatting has been reset. ", vbInformation
+    End If
+    
+End Sub

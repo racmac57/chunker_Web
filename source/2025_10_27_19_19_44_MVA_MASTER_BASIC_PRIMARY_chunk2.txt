@@ -1,0 +1,196 @@
+TOP CRASH LOCATIONS - Enhanced with historical comparisons
+    LocationAnalysis = Table.Group(
+        Table.SelectRows(CurrentMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SortedLocations = Table.Sort(LocationAnalysis, {{"CrashCount", Order.Descending}}),
+    TopLocation = if Table.RowCount(SortedLocations) > 0 then SortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    HotspotLocation = TopLocation[Block],
+    HotspotCount = TopLocation[CrashCount],
+    
+    // Previous Month Top Location Analysis
+    PrevLocationAnalysis = Table.Group(
+        Table.SelectRows(PrevMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    PrevSortedLocations = Table.Sort(PrevLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    PrevTopLocation = if Table.RowCount(PrevSortedLocations) > 0 then PrevSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    PrevHotspotLocation = PrevTopLocation[Block],
+    PrevHotspotCount = PrevTopLocation[CrashCount],
+    
+    // Same Month Last Year Top Location Analysis
+    SameMonthLocationAnalysis = Table.Group(
+        Table.SelectRows(SameMonthLastYearData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SameMonthSortedLocations = Table.Sort(SameMonthLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    SameMonthTopLocation = if Table.RowCount(SameMonthSortedLocations) > 0 then SameMonthSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    SameMonthHotspotLocation = SameMonthTopLocation[Block],
+    SameMonthHotspotCount = SameMonthTopLocation[CrashCount],
+    
+    // YTD Top Location Analysis
+    YTDLocationAnalysis = Table.Group(
+        Table.SelectRows(YTDCurrentData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    YTDSortedLocations = Table.Sort(YTDLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    YTDTopLocation = if Table.RowCount(YTDSortedLocations) > 0 then YTDSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    YTDHotspotLocation = YTDTopLocation[Block],
+    YTDHotspotCount = YTDTopLocation[CrashCount],
+    
+    // YTD Previous Year Top Location Analysis
+    YTDPrevLocationAnalysis = Table.Group(
+        Table.SelectRows(YTDPreviousData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    YTDPrevSortedLocations = Table.Sort(YTDPrevLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    YTDPrevTopLocation = if Table.RowCount(YTDPrevSortedLocations) > 0 then YTDPrevSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    YTDPrevHotspotLocation = YTDPrevTopLocation[Block],
+    YTDPrevHotspotCount = YTDPrevTopLocation[CrashCount],
+    
+    // Location-based change calculations
+    LocationChangeMonth = try (HotspotCount - PrevHotspotCount) / PrevHotspotCount otherwise 0,
+    LocationChangeYear = try (HotspotCount - SameMonthHotspotCount) / SameMonthHotspotCount otherwise 0,
+    LocationChangeYTD = try (YTDHotspotCount - YTDPrevHotspotCount) / YTDPrevHotspotCount otherwise 0,
+    
+    // Previous Month Operational Data - Fixed Table vs List issue
+    PrevRushHourAM = Table.RowCount(Table.SelectRows(PrevMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    PrevRushHourPM = Table.RowCount(Table.SelectRows(PrevMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    PrevTotalRushHour = PrevRushHourAM + PrevRushHourPM,
+    PrevMorningPeak = List.Count(List.Select(PrevMonthData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    PrevEveningPeak = List.Count(List.Select(PrevMonthData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    PrevTrafficCases = Table.SelectRows(PrevMonthData, each [Squad] <> null and [Squad] = "TFR"),
+    PrevTrafficSupplements = Table.SelectRows(PrevTrafficCases, each [IsSupplement] <> null and [IsSupplement] = true),
+    PrevClosedCases = List.Count(List.Select(PrevTrafficSupplements[FinalCaseStatus], each _ <> null and _ <> "Open" and _ <> "Case_Status")),
+    PrevClosureRate = if Table.RowCount(PrevTrafficSupplements) > 0 then PrevClosedCases / Table.RowCount(PrevTrafficSupplements) else 0,
+    
+    // Same Month Last Year Operational Data - Fixed Table vs List issue
+    SameMonthRushHourAM = Table.RowCount(Table.SelectRows(SameMonthLastYearData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    SameMonthRushHourPM = Table.RowCount(Table.SelectRows(SameMonthLastYearData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    SameMonthTotalRushHour = SameMonthRushHourAM + SameMonthRushHourPM,
+    SameMonthMorningPeak = List.Count(List.Select(SameMonthLastYearData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    SameMonthEveningPeak = List.Count(List.Select(SameMonthLastYearData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    // YTD Operational Metrics
+    YTDRushHourAM = Table.RowCount(Table.SelectRows(YTDCurrentData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    YTDRushHourPM = Table.RowCount(Table.SelectRows(YTDCurrentData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    YTDMorningPeak = List.Count(List.Select(YTDCurrentData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    YTDEveningPeak = List.Count(List.Select(YTDCurrentData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    YTDPrevRushHourAM = Table.RowCount(Table.SelectRows(YTDPreviousData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    YTDPrevRushHourPM = Table.RowCount(Table.SelectRows(YTDPreviousData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    YTDPrevMorningPeak = List.Count(List.Select(YTDPreviousData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    YTDPrevEveningPeak = List.Count(List.Select(YTDPreviousData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    // YTD Change Calculations
+    YTDRushAMChange = try (YTDRushHourAM - YTDPrevRushHourAM) / YTDPrevRushHourAM otherwise 0,
+    YTDRushPMChange = try (YTDRushHourPM - YTDPrevRushHourPM) / YTDPrevRushHourPM otherwise 0,
+    YTDMorningChange = try (YTDMorningPeak - YTDPrevMorningPeak) / YTDPrevMorningPeak otherwise 0,
+    YTDEveningChange = try (YTDEveningPeak - YTDPrevEveningPeak) / YTDPrevEveningPeak otherwise 0,
+
+    // === ENHANCED COMPSTAT TABLE WITH OPERATIONAL METRICS ===
+    PrimaryCompStatTable = #table(
+        type table [
+            Metric = text, 
+            Current_Month = text, 
+            Previous_Month = text, 
+            Same_Month_Last_Year = text,
+            Month_vs_Month = text,
+            Month_vs_Year_Ago = text,
+            YTD_Current = text,
+            YTD_Previous = text,
+            YTD_Change = text,
+            Status = text
+        ],
+        {
+            {"Total MVAs", 
+             Text.From(CurrentMVAs), Text.From(PrevMVAs), Text.From(SameMonthLastYear), 
+             Text.From(Number.Round(MVAChangeMonth * 100, 1)) & "%", Text.From(Number.Round(MVAChangeYear * 100, 1)) & "%", 
+             Text.From(YTDCurrent), Text.From(YTDPrevious), Text.From(Number.Round(MVAChangeYTD * 100, 1)) & "%", 
+             if MVAChangeMonth > 0 then "↑ Month Increase" else "↓ Month Decrease"},
+            
+            {"Injury Crashes", 
+             Text.From(CurrentInjuries), Text.From(PrevInjuries), Text.From(SameMonthLastYearInjuries), 
+             Text.From(Number.Round(InjuryChangeMonth * 100, 1)) & "%", Text.From(Number.Round(InjuryChangeYear * 100, 1)) & "%",
+             Text.From(YTDCurrentInjuries), Text.From(YTDPreviousInjuries), Text.From(Number.Round(InjuryChangeYTD * 100, 1)) & "%",
+             if InjuryChangeMonth > 0 then "⚠️ Month Increase" else "✅ Month Decrease"},
+            
+            {"Hit-and-Runs", 
+             Text.From(CurrentHitRuns), Text.From(PrevHitRuns), Text.From(SameMonthLastYearHitRuns), 
+             Text.From(Number.Round(HitRunChangeMonth * 100, 1)) & "%", Text.From(Number.Round(HitRunChangeYear * 100, 1)) & "%",
+             Text.From(YTDCurrentHitRuns), Text.From(YTDPreviousHitRuns), Text.From(Number.Round(HitRunChangeYTD * 100, 1)) & "%",
+             if HitRunChangeMonth > 0 then "⚠️ Month Increase" else "✅ Month Decrease"},
+            
+            {"Rush Hour AM (6-9AM)", 
+             Text.From(RushHourAM), Text.From(PrevRushHourAM), Text.From(SameMonthRushHourAM), 
+             Text.From(Number.Round(try (RushHourAM - PrevRushHourAM) / PrevRushHourAM * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (RushHourAM - SameMonthRushHourAM) / SameMonthRushHourAM * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDRushHourAM), Text.From(YTDPrevRushHourAM), Text.From(Number.Round(YTDRushAMChange * 100, 1)) & "%",
+             if RushHourAM > PrevRushHourAM then "⚠️ AM Increase" else "✅ AM Decrease"},
+            
+            {"Rush Hour PM (3-6PM)", 
+             Text.From(RushHourPM), Text.From(PrevRushHourPM), Text.From(SameMonthRushHourPM), 
+             Text.From(Number.Round(try (RushHourPM - PrevRushHourPM) / PrevRushHourPM * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (RushHourPM - SameMonthRushHourPM) / SameMonthRushHourPM * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDRushHourPM), Text.From(YTDPrevRushHourPM), Text.From(Number.Round(YTDRushPMChange * 100, 1)) & "%",
+             if RushHourPM > PrevRushHourPM then "⚠️ PM Increase" else "✅ PM Decrease"},
+            
+            {"Morning Peak (8AM-12PM)", 
+             Text.From(MorningPeak), Text.From(PrevMorningPeak), Text.From(SameMonthMorningPeak), 
+             Text.From(Number.Round(try (MorningPeak - PrevMorningPeak) / PrevMorningPeak * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (MorningPeak - SameMonthMorningPeak) / SameMonthMorningPeak * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDMorningPeak), Text.From(YTDPrevMorningPeak), Text.From(Number.Round(YTDMorningChange * 100, 1)) & "%",
+             if MorningPeak > PrevMorningPeak then "⚠️ Morning Increase" else "✅ Morning Decrease"},
+            
+            {"Evening Peak (4PM-8PM)", 
+             Text.From(EveningPeak), Text.From(PrevEveningPeak), Text.From(SameMonthEveningPeak), 
+             Text.From(Number.Round(try (EveningPeak - PrevEveningPeak) / PrevEveningPeak * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (EveningPeak - SameMonthEveningPeak) / SameMonthEveningPeak * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDEveningPeak), Text.From(YTDPrevEveningPeak), Text.From(Number.Round(YTDEveningChange * 100, 1)) & "%",
+             if EveningPeak > PrevEveningPeak then "⚠️ Evening Increase" else "✅ Evening Decrease"},
+            
+            {"Traffic Closure Rate", 
+             Text.From(Number.Round(ClosureRate * 100, 1)) & "%", 
+             Text.From(Number.Round(PrevClosureRate * 100, 1)) & "%", 
+             "No Historical Data",
+             if ClosureRate > 0 and PrevClosureRate > 0 then Text.From(Number.Round((ClosureRate - PrevClosureRate) / PrevClosureRate * 100, 1)) & "%" else "0%", 
+             "N/A",
+             "No YTD Data", "No YTD Data", "N/A",
+             if ClosureRate > 0.8 then "✅ Good Performance" else "⚠️ Needs Attention"},
+            
+            {"Top Crash Location", 
+             HotspotLocation & " (" & Text.From(HotspotCount) & ")", 
+             PrevHotspotLocation & " (" & Text.From(PrevHotspotCount) & ")", 
+             SameMonthHotspotLocation & " (" & Text.From(SameMonthHotspotCount) & ")",
+             Text.From(Number.Round(LocationChangeMonth * 100, 1)) & "%", 
+             Text.From(Number.Round(LocationChangeYear * 100, 1)) & "%",
+             YTDHotspotLocation & " (" & Text.From(YTDHotspotCount) & ")", 
+             YTDPrevHotspotLocation & " (" & Text.From(YTDPrevHotspotCount) & ")", 
+             Text.From(Number.Round(LocationChangeYTD * 100, 1)) & "%",
+             if HotspotCount > 5 then "⚠️ Enforcement Target" else "✅ Normal"}
+        }
+    )
+in
+    PrimaryCompStatTable

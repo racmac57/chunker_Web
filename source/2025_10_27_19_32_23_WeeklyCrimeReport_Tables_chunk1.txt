@@ -1,0 +1,126 @@
+import arcpy
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+import os
+import time
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx"
+sym_layer_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\Symbology\7Day.lyrx"
+
+if not os.path.exists(project_path):
+    raise FileNotFoundError(f"Project file not found: {project_path}")
+project = arcpy.mp.ArcGISProject(project_path)
+map_obj = project.listMaps()[0]
+
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True'")
+current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+for file in os.listdir(report_folder):
+    file_path = os.path.join(report_folder, file)
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+layout = next((lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"), None)
+legend = next((l for l in layout.listElements("LEGEND_ELEMENT") if l.name.strip().lower() == "mainlegend"), None)
+map_frame = next((mf for mf in layout.listElements("MAPFRAME_ELEMENT") if mf.name == "Map Frame"), None)
+if map_frame:
+    map_frame.map = map_obj
+
+picture_elem = next((e for e in layout.listElements("PICTURE_ELEMENT") if e.name == "PivotTableImage"), None)
+
+
+def get_time_of_day(hour):
+    if 0 <= hour < 4:
+        return "Early Morning (00:00–03:59)"
+    elif 4 <= hour < 8:
+        return "Morning (04:00–07:59)"
+    elif 8 <= hour < 12:
+        return "Morning Peak (08:00–11:59)"
+    elif 12 <= hour < 16:
+        return "Afternoon (12:00–15:59)"
+    elif 16 <= hour < 20:
+        return "Evening Peak (16:00–19:59)"
+    else:
+        return "Night (20:00–23:59)"
+
+def format_block(full_address):
+    if '&' in full_address:
+        return full_address.strip()
+    try:
+        location = full_address.split(',')[0].strip()
+        parts = location.split(' ')
+        street_number = int(parts[0])
+        street_name = ' '.join(parts[1:])
+        block = (street_number // 100) * 100
+        street_name = (street_name.replace("Street", "St")
+                                  .replace("Avenue", "Ave")
+                                  .replace("Place", "Pl")
+                                  .replace("Way", "Way"))
+        return f"{street_name}, {block} Block"
+    except:
+        return "Unknown Block"
+
+def export_table_image(df, out_img, title=""):
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.axis('off')
+    table = ax.table(cellText=df.values, colLabels=df.columns, loc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.2)
+    if title:
+        plt.title(title)
+    plt.tight_layout()
+    plt.savefig(out_img, dpi=300)
+    plt.close()
+
+# Export crime summary table image from dummy data or later integration point
+summary_df = pd.DataFrame({
+    'TimeOfDay': ['Morning', 'Afternoon'],
+    'Monday': [3, 5],
+    'Tuesday': [1, 4]
+})
+summary_img_path = os.path.join(report_folder, "crime_summary_table.jpg")
+export_table_image(summary_df, summary_img_path, title="Crime Summary Table")
+
+if picture_elem:
+    picture_elem.sourceImage = summary_img_path
+    arcpy.AddMessage("Inserted summary table image into layout.") arcpy.AddMessage(f"Reports exported to: {report_folder}")

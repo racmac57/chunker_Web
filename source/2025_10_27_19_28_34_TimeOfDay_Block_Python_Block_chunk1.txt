@@ -1,0 +1,96 @@
+import arcpy
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+
+# --- CONFIG ---
+project_path = r"C:\Users\carucci_r\...\TimeSCRPATemplet.aprx"  # Update path
+workspace = r"C:\Users\carucci_r\...\YourGDB.gdb"  # Update path
+table_28day_name = "TimeOfDay_Summary_28Day"
+table_ytd_name = "TimeOfDay_Summary_YTD"
+output_folder = r"C:\Output\JPEGs"
+os.makedirs(output_folder, exist_ok=True)
+
+# --- TIME OF DAY FUNCTION ---
+def get_time_of_day(hour):
+    if 8 <= hour <= 11:
+        return "Morning Peak (08:00-11:59)"
+    elif 12 <= hour <= 15:
+        return "Afternoon (12:00-15:59)"
+    elif 16 <= hour <= 19:
+        return "Evening Peak (16:00-19:59)"
+    return "Other"
+
+# --- DATA EXTRACTION FROM FEATURE LAYER (ARCPY ASSUMED) ---
+# Assuming a local or SDE feature class is available
+input_fc = r"C:\Users\carucci_r\...\FeatureLayer"  # Replace
+fields = ["fulladdr", "calldate", "calldow", "callhour"]
+records = [row for row in arcpy.da.SearchCursor(input_fc, fields)]
+df = pd.DataFrame(records, columns=fields)
+df["calldate"] = pd.to_datetime(df["calldate"])
+df["Time of Day"] = df["callhour"].apply(get_time_of_day)
+df["calldow"] = df["calldow"].str[:3]
+df["Block"] = df["calldow"]  # Block is directly the abbreviated day
+
+# --- TIME FILTERS ---
+now = datetime.now()
+start_28 = now - timedelta(days=28)
+start_ytd = datetime(now.year, 1, 1)
+
+summary_28 = pd.pivot_table(
+    df[df["calldate"] >= start_28],
+    values="fulladdr",
+    index=["Time of Day", "Block"],
+    aggfunc="count",
+    fill_value=0
+).reset_index()
+
+summary_ytd = pd.pivot_table(
+    df[df["calldate"] >= start_ytd],
+    values="fulladdr",
+    index=["Time of Day", "Block"],
+    aggfunc="count",
+    fill_value=0
+).reset_index()
+
+# --- CREATE ARCGIS TABLE ---
+def create_arcgis_table(summary_df, table_name):
+    arcpy.CreateTable_management(workspace, table_name)
+    path = os.path.join(workspace, table_name)
+    arcpy.AddField_management(path, "Time_of_Day", "TEXT")
+    arcpy.AddField_management(path, "Block", "TEXT")
+    arcpy.AddField_management(path, "Count", "LONG")
+    with arcpy.da.InsertCursor(path, ["Time_of_Day", "Block", "Count"]) as cursor:
+        for _, row in summary_df.iterrows():
+            cursor.insertRow([row["Time of Day"], row["Block"], row["fulladdr"]])
+
+create_arcgis_table(summary_28, table_28day_name)
+create_arcgis_table(summary_ytd, table_ytd_name)
+
+# --- EXPORT LAYOUTS ---
+project = arcpy.mp.ArcGISProject(project_path)
+layout_28 = next((l for l in project.listLayouts() if l.name == "Layout_28Day"), None)
+layout_ytd = next((l for l in project.listLayouts() if l.name == "Layout_YTD"), None)
+
+if not layout_28 or not layout_ytd:
+    raise Exception("Required layouts not found in project.") # --- UPDATE TABLE FRAME SOURCE ---
+table_frame_28 = next((e for e in layout_28.listElements("TABLEFRAME_ELEMENT") if hasattr(e, 'sourceTable')), None)
+table_frame_ytd = next((e for e in layout_ytd.listElements("TABLEFRAME_ELEMENT") if hasattr(e, 'sourceTable')), None)
+
+if table_frame_28:
+    table_frame_28.sourceTable = os.path.join(workspace, table_28day_name)
+if table_frame_ytd:
+    table_frame_ytd.sourceTable = os.path.join(workspace, table_ytd_name)
+
+layout_28.exportToJPEG(
+    os.path.join(output_folder, "TimeOfDay_Summary_28Day.jpg"),
+    resolution=300,
+    jpeg_quality=100
+)
+layout_ytd.exportToJPEG(
+    os.path.join(output_folder, "TimeOfDay_Summary_YTD.jpg"),
+    resolution=300,
+    jpeg_quality=100
+)
+
+print("Export complete.")

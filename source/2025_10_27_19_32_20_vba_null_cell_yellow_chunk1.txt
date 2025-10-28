@@ -1,0 +1,98 @@
+Sub ApplyConditionalFormattingToAllTablesForNell()
+
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim dataRange As Range
+    Dim cfRule As FormatCondition ' Still declared as FormatCondition
+    Dim i As Long
+
+    ' Define the color for highlighting (RGB values for FFFF99: Red=255, Green=255, Blue=153)
+    Dim HIGHLIGHT_COLOR_RGB As Long
+    HIGHLIGHT_COLOR_RGB = RGB(255, 255, 153)
+
+    Const SEARCH_TEXT As String = "Nell"
+
+    Application.ScreenUpdating = False ' Turn off screen updating for faster execution
+    Application.DisplayAlerts = False ' Turn off alerts to prevent pop-ups
+
+    ' Loop through each worksheet in the workbook
+    For Each ws In ThisWorkbook.Worksheets
+        ' Loop through each table (ListObject) on the current worksheet
+        For Each tbl In ws.ListObjects
+            ' Get the data body range of the table (excluding headers)
+            On Error Resume Next ' Enable error handling for Set dataRange
+            Set dataRange = tbl.DataBodyRange
+            If Err.Number <> 0 Then
+                ' If DataBodyRange fails, skip this table and log it
+                Debug.Print "Error getting DataBodyRange for table '" & tbl.Name & "' on sheet '" & ws.Name & "': " & Err.Description
+                Err.Clear
+                GoTo Next_Table ' Skip to the next table
+            End If
+            On Error GoTo 0 ' Reset error handling
+
+            If Not dataRange Is Nothing Then
+                ' Check if there are any Conditional Formatting rules before looping
+                If dataRange.FormatConditions.Count > 0 Then
+                    ' Loop backwards to safely delete rules
+                    For i = dataRange.FormatConditions.Count To 1 Step -1
+                        ' Specific error handling for retrieving each FormatCondition item
+                        On Error Resume Next ' Enable error handling for Set cfRule
+                        Set cfRule = dataRange.FormatConditions.Item(i)
+                        If Err.Number <> 0 Then
+                            ' If a specific rule can't be retrieved, log the error and skip it
+                            Debug.Print "Error retrieving FormatCondition " & i & " for table '" & tbl.Name & "' on sheet '" & ws.Name & "': " & Err.Description
+                            Err.Clear
+                            GoTo Next_CF_Rule_Iteration ' Skip to the next iteration of the inner loop
+                        End If
+                        On Error GoTo 0 ' Reset error handling
+
+                        ' Ensure we delete only rules for our specific SEARCH_TEXT, case-insensitively
+                        If cfRule.Type = xlTextString Then
+                            ' The InStr check looks for the literal string "Nell" within the rule's formula.
+                            ' CF rule for "contains Nell" often looks like "=NOT(ISERROR(SEARCH(""Nell"",A1)))"
+                            If InStr(1, cfRule.Formula1, """" & SEARCH_TEXT & """", vbTextCompare) > 0 Or _
+                               InStr(1, cfRule.Formula2, """" & SEARCH_TEXT & """", vbTextCompare) > 0 Then
+                                cfRule.Delete
+                            End If
+                        End If
+Next_CF_Rule_Iteration: ' Label to jump to for next iteration of inner loop
+                    Next i
+                End If ' End If dataRange.FormatConditions.Count > 0
+
+                ' Add a new Conditional Formatting rule
+                On Error Resume Next ' Enable error handling for Add method
+                Set cfRule = dataRange.FormatConditions.Add( _
+                    Type:=xlTextString, _
+                    String:=SEARCH_TEXT, _
+                    TextOperator:=xlContains) ' xlContains will find "Nell" within text, use xlEqual if you want exact match
+
+                If Err.Number <> 0 Then
+                    ' If adding the rule fails, log it
+                    Debug.Print "Error adding CF rule for table '" & tbl.Name & "' on sheet '" & ws.Name & "': " & Err.Description
+                    Err.Clear
+                Else
+                    ' Only apply formatting if the rule was successfully added
+                    With cfRule.Interior
+                        .PatternColorIndex = xlAutomatic
+                        .Color = HIGHLIGHT_COLOR_RGB
+                    End With
+
+                    ' Optionally, apply a font color/bolding for better visibility
+                    ' With cfRule.Font
+                    '     .Color = RGB(0, 0, 0) ' Black font
+                    '     .Bold = True
+                    ' End With
+                End If
+                On Error GoTo 0 ' Reset error handling
+
+            End If ' End If Not dataRange Is Nothing
+
+Next_Table: ' Label to jump to for next table
+        Next tbl
+    Next ws
+
+    Application.ScreenUpdating = True ' Turn screen updating back on
+    Application.DisplayAlerts = True ' Turn alerts back on
+    MsgBox "Conditional Formatting rules for 'Nell' applied to all tables! ", vbInformation
+
+End Sub

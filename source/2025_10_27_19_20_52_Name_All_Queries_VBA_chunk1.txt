@@ -1,0 +1,347 @@
+Sub ExtractAllPowerQueryInformation()
+    '=====================================================================
+    ' COMPLETE POWER QUERY EXTRACTION TOOL
+    ' Extracts all queries, transform samples, connections, and metadata
+    ' Created for Police Analytics - Hackensack PD
+    '=====================================================================
+    
+    Dim ws As Worksheet
+    Dim wb As Workbook
+    Dim query As WorkbookQuery
+    Dim connection As WorkbookConnection
+    Dim i As Long, j As Long
+    Dim outputText As String
+    Dim filePath As String
+    Dim fileNum As Integer
+    
+    Set wb = ActiveWorkbook
+    
+    ' Create output file path
+    filePath = wb.Path & "\PowerQuery_Complete_Extract_" & Format(Now, "yyyy-mm-dd_hh-mm-ss") & ".txt"
+    fileNum = FreeFile
+    
+    Open filePath For Output As #fileNum
+    
+    ' Header information
+    Print #fileNum, String(80, "=")
+    Print #fileNum, "COMPLETE POWER QUERY EXTRACTION REPORT"
+    Print #fileNum, "Generated: " & Now()
+    Print #fileNum, "Workbook: " & wb.Name
+    Print #fileNum, "Full Path: " & wb.FullName
+    Print #fileNum, String(80, "=")
+    Print #fileNum, ""
+    
+    '=====================================================================
+    ' SECTION 1: WORKBOOK QUERIES
+    '=====================================================================
+    Print #fileNum, "SECTION 1: ALL WORKBOOK QUERIES (" & wb.Queries.Count & " total)"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    If wb.Queries.Count > 0 Then
+        For i = 1 To wb.Queries.Count
+            Set query = wb.Queries(i)
+            
+            Print #fileNum, "QUERY #" & i & ": " & query.Name
+            Print #fileNum, "Type: " & GetQueryType(query)
+            Print #fileNum, "Description: " & query.Description
+            Print #fileNum, "Created: " & query.formula
+            Print #fileNum, ""
+            Print #fileNum, "M CODE:"
+            Print #fileNum, String(40, "-")
+            Print #fileNum, query.formula
+            Print #fileNum, String(40, "-")
+            Print #fileNum, ""
+            Print #fileNum, ""
+        Next i
+    Else
+        Print #fileNum, "No Power Query queries found in this workbook." Print #fileNum, ""
+    End If
+    
+    '=====================================================================
+    ' SECTION 2: DATA CONNECTIONS
+    '=====================================================================
+    Print #fileNum, "SECTION 2: DATA CONNECTIONS (" & wb.Connections.Count & " total)"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    If wb.Connections.Count > 0 Then
+        For i = 1 To wb.Connections.Count
+            Set connection = wb.Connections(i)
+            
+            Print #fileNum, "CONNECTION #" & i & ": " & connection.Name
+            Print #fileNum, "Type: " & TypeName(connection)
+            Print #fileNum, "Description: " & connection.Description
+            
+            ' Try to get connection details
+            On Error Resume Next
+            If connection.Type = xlConnectionTypeOLEDB Then
+                Print #fileNum, "Connection String: " & connection.OLEDBConnection.connection
+                Print #fileNum, "Command Text: " & connection.OLEDBConnection.CommandText
+            ElseIf connection.Type = xlConnectionTypeODBC Then
+                Print #fileNum, "Connection String: " & connection.ODBCConnection.connection
+                Print #fileNum, "Command Text: " & connection.ODBCConnection.CommandText
+            ElseIf connection.Type = xlConnectionTypeWEB Then
+                Print #fileNum, "Web URL: " & connection.WebTables.WebTables(1).Url
+            ElseIf connection.Type = xlConnectionTypeTEXT Then
+                Print #fileNum, "Text File Path: " & connection.TextConnection.TextFilePath
+            End If
+            On Error GoTo 0
+            
+            Print #fileNum, ""
+        Next i
+    Else
+        Print #fileNum, "No data connections found in this workbook." Print #fileNum, ""
+    End If
+    
+    '=====================================================================
+    ' SECTION 3: WORKSHEET DATA SOURCES
+    '=====================================================================
+    Print #fileNum, "SECTION 3: WORKSHEET DATA SOURCES"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    For Each ws In wb.Worksheets
+        Print #fileNum, "WORKSHEET: " & ws.Name
+        
+        ' Check for ListObjects (Tables)
+        If ws.ListObjects.Count > 0 Then
+            Print #fileNum, "  Tables (" & ws.ListObjects.Count & "):"
+            For j = 1 To ws.ListObjects.Count
+                Print #fileNum, "    - " & ws.ListObjects(j).Name
+                Print #fileNum, "      Range: " & ws.ListObjects(j).Range.Address
+                Print #fileNum, "      Source: " & ws.ListObjects(j).SourceType
+            Next j
+        End If
+        
+        ' Check for QueryTables
+        If ws.QueryTables.Count > 0 Then
+            Print #fileNum, "  Query Tables (" & ws.QueryTables.Count & "):"
+            For j = 1 To ws.QueryTables.Count
+                Print #fileNum, "    - " & ws.QueryTables(j).Name
+                Print #fileNum, "      Destination: " & ws.QueryTables(j).Destination.Address
+                Print #fileNum, "      SQL: " & ws.QueryTables(j).Sql
+            Next j
+        End If
+        
+        ' Check for PivotTables
+        If ws.PivotTables.Count > 0 Then
+            Print #fileNum, "  Pivot Tables (" & ws.PivotTables.Count & "):"
+            For j = 1 To ws.PivotTables.Count
+                Print #fileNum, "    - " & ws.PivotTables(j).Name
+                Print #fileNum, "      Source: " & ws.PivotTables(j).SourceData
+            Next j
+        End If
+        
+        Print #fileNum, ""
+    Next ws
+    
+    '=====================================================================
+    ' SECTION 4: EXTERNAL DATA RANGES
+    '=====================================================================
+    Print #fileNum, "SECTION 4: EXTERNAL DATA RANGES"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    For Each ws In wb.Worksheets
+        If ws.QueryTables.Count > 0 Or ws.ListObjects.Count > 0 Then
+            Print #fileNum, "WORKSHEET: " & ws.Name
+            
+            ' Detailed QueryTable information
+            For j = 1 To ws.QueryTables.Count
+                Dim qt As QueryTable
+                Set qt = ws.QueryTables(j)
+                
+                Print #fileNum, "  QueryTable: " & qt.Name
+                Print #fileNum, "    Connection: " & qt.connection
+                Print #fileNum, "    Command Type: " & qt.CommandType
+                Print #fileNum, "    Command Text: " & qt.CommandText
+                Print #fileNum, "    Refresh On File Open: " & qt.RefreshOnFileOpen
+                Print #fileNum, "    Background Query: " & qt.BackgroundQuery
+                Print #fileNum, ""
+            Next j
+        End If
+    Next ws
+    
+    '=====================================================================
+    ' SECTION 5: WORKBOOK STRUCTURE ANALYSIS
+    '=====================================================================
+    Print #fileNum, "SECTION 5: WORKBOOK STRUCTURE ANALYSIS"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    Print #fileNum, "Total Worksheets: " & wb.Worksheets.Count
+    Print #fileNum, "Total Named Ranges: " & wb.Names.Count
+    Print #fileNum, "Total Queries: " & wb.Queries.Count
+    Print #fileNum, "Total Connections: " & wb.Connections.Count
+    Print #fileNum, ""
+    
+    Print #fileNum, "NAMED RANGES:"
+    For i = 1 To wb.Names.Count
+        On Error Resume Next
+        Print #fileNum, "  " & wb.Names(i).Name & " = " & wb.Names(i).RefersTo
+        On Error GoTo 0
+    Next i
+    Print #fileNum, ""
+    
+    '=====================================================================
+    ' SECTION 6: TRANSFORMATION SAMPLES
+    '=====================================================================
+    Print #fileNum, "SECTION 6: DATA TRANSFORMATION SAMPLES"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    For Each ws In wb.Worksheets
+        If ws.ListObjects.Count > 0 Then
+            Print #fileNum, "WORKSHEET: " & ws.Name
+            For j = 1 To ws.ListObjects.Count
+                Dim tbl As ListObject
+                Set tbl = ws.ListObjects(j)
+                
+                Print #fileNum, "  TABLE: " & tbl.Name
+                Print #fileNum, "    Columns (" & tbl.ListColumns.Count & "):"
+                
+                Dim col As ListColumn
+                For Each col In tbl.ListColumns
+                    Print #fileNum, "      " & col.Index & ". " & col.Name
+                Next col
+                
+                ' Sample data (first 5 rows)
+                If tbl.ListRows.Count > 0 Then
+                    Print #fileNum, "    Sample Data (first 5 rows):"
+                    Dim maxRows As Long
+                    maxRows = Application.Min(5, tbl.ListRows.Count)
+                    
+                    For i = 1 To maxRows
+                        Dim rowData As String
+                        rowData = "      Row " & i & ": "
+                        For Each col In tbl.ListColumns
+                            On Error Resume Next
+                            rowData = rowData & col.Name & "=" & tbl.DataBodyRange(i, col.Index).Value & " | "
+                            On Error GoTo 0
+                        Next col
+                        Print #fileNum, Left(rowData, Len(rowData) - 3) ' Remove last " | "
+                    Next i
+                End If
+                Print #fileNum, ""
+            Next j
+        End If
+    Next ws
+    
+    '=====================================================================
+    ' SECTION 7: FILE DEPENDENCIES
+    '=====================================================================
+    Print #fileNum, "SECTION 7: EXTERNAL FILE DEPENDENCIES"
+    Print #fileNum, String(60, "-")
+    Print #fileNum, ""
+    
+    ' Check for external links
+    Dim links As Variant
+    links = wb.LinkSources(xlExcelLinks)
+    
+    If IsArray(links) Then
+        Print #fileNum, "External Excel Links (" & UBound(links) & "):"
+        For i = LBound(links) To UBound(links)
+            Print #fileNum, "  " & links(i)
+        Next i
+    Else
+        Print #fileNum, "No external Excel links found." End If
+    Print #fileNum, ""
+    
+    ' Check connections for file paths
+    Print #fileNum, "File Paths Found in Connections:"
+    For i = 1 To wb.Connections.Count
+        Set connection = wb.Connections(i)
+        Dim connDetails As String
+        On Error Resume Next
+        
+        If connection.Type = xlConnectionTypeOLEDB Then
+            connDetails = connection.OLEDBConnection.connection
+        ElseIf connection.Type = xlConnectionTypeODBC Then
+            connDetails = connection.ODBCConnection.connection
+        ElseIf connection.Type = xlConnectionTypeTEXT Then
+            connDetails = connection.TextConnection.TextFilePath
+        End If
+        
+        If InStr(connDetails, ":\") > 0 Or InStr(connDetails, "\\") > 0 Then
+            Print #fileNum, "  " & connection.Name & ": " & connDetails
+        End If
+        On Error GoTo 0
+    Next i
+    
+    '=====================================================================
+    ' FOOTER
+    '=====================================================================
+    Print #fileNum, ""
+    Print #fileNum, String(80, "=")
+    Print #fileNum, "EXTRACTION COMPLETE"
+    Print #fileNum, "Report saved to: " & filePath
+    Print #fileNum, "Generated: " & Now()
+    Print #fileNum, String(80, "=")
+    
+    Close #fileNum
+    
+    ' Open the file
+    CreateObject("Shell.Application").Open filePath
+    
+    MsgBox "Power Query extraction complete!" & vbCrLf & vbCrLf & _
+           "Report saved to:" & vbCrLf & filePath & vbCrLf & vbCrLf & _
+           "Total Queries: " & wb.Queries.Count & vbCrLf & _
+           "Total Connections: " & wb.Connections.Count & vbCrLf & _
+           "Total Worksheets: " & wb.Worksheets.Count, _
+           vbInformation, "Police Analytics - Query Extraction"
+
+End Sub
+
+'=====================================================================
+' HELPER FUNCTIONS
+'=====================================================================
+
+Function GetQueryType(query As WorkbookQuery) As String
+    ' Determine query type based on M code content
+    Dim formula As String
+    formula = UCase(query.formula)
+    
+    If InStr(formula, "EXCEL.WORKBOOK") > 0 Then
+        GetQueryType = "Excel Workbook"
+    ElseIf InStr(formula, "FOLDER.FILES") > 0 Then
+        GetQueryType = "Folder/Multiple Files"
+    ElseIf InStr(formula, "CSV.DOCUMENT") > 0 Then
+        GetQueryType = "CSV File"
+    ElseIf InStr(formula, "TABLE.GROUP") > 0 Then
+        GetQueryType = "Data Transformation"
+    ElseIf InStr(formula, "WEB.CONTENTS") > 0 Then
+        GetQueryType = "Web Data"
+    ElseIf InStr(formula, "ODBC.DATASOURCE") > 0 Then
+        GetQueryType = "ODBC Database"
+    ElseIf InStr(formula, "SQL.DATABASE") > 0 Then
+        GetQueryType = "SQL Database"
+    Else
+        GetQueryType = "Custom/Other"
+    End If
+End Function
+
+'=====================================================================
+' QUICK QUERY LIST FUNCTION
+'=====================================================================
+
+Sub QuickQueryList()
+    ' Quick function to just list query names and types
+    Dim wb As Workbook
+    Dim query As WorkbookQuery
+    Dim i As Long
+    
+    Set wb = ActiveWorkbook
+    
+    Debug.Print "=== QUICK QUERY LIST ==="
+    Debug.Print "Workbook: " & wb.Name
+    Debug.Print "Total Queries: " & wb.Queries.Count
+    Debug.Print ""
+    
+    For i = 1 To wb.Queries.Count
+        Set query = wb.Queries(i)
+        Debug.Print i & ". " & query.Name & " (" & GetQueryType(query) & ")"
+    Next i
+    
+    MsgBox "Query list printed to Immediate Window (Ctrl+G)", vbInformation
+End Sub

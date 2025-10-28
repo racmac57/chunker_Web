@@ -1,0 +1,49 @@
+let
+    // Update this path to match your folder
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\OVERTIME_EXPORT",
+    
+    // Get files from folder
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        (Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls"))
+    ),
+    
+    // Transform each file with error handling
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                OTActivity = ExcelFile{[Name="OTActivity"]}[Data],
+                PromotedHeaders = Table.PromoteHeaders(OTActivity, [PromoteAllScalars=true]),
+            
+            // Basic date transformation
+            ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+            
+            // Add date components
+            AddedYear = Table.AddColumn(ChangedDateType, "Year", each Date.Year([Date]), Int64.Type),
+            AddedMonth = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+            AddedMonthNum = Table.AddColumn(AddedMonth, "Month Number", each Date.Month([Date]), Int64.Type),
+            
+            // Clean comments if column exists
+            CleanedData = if Table.HasColumns(AddedMonthNum, "Comments") 
+                then Table.TransformColumns(AddedMonthNum,{{"Comments", Text.Trim, type text}})
+                else AddedMonthNum
+        in
+            CleanedData
+        otherwise null
+    ),
+    
+    // Remove failed files
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Get column names dynamically from first successful file
+    FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+    
+    // Expand with actual column names
+    ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+    
+    // Remove file metadata columns
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore)
+in
+    CleanedColumns

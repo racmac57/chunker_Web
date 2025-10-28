@@ -1,0 +1,33 @@
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\OVERTIME_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    // Only process .xlsx files (skip .xls)
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")  // Only .xlsx files
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        let
+            ExcelFile = Excel.Workbook([Content], null, true),
+            OTActivity = ExcelFile{[Name="OTActivity"]}[Data],
+            PromotedHeaders = Table.PromoteHeaders(OTActivity, [PromoteAllScalars=true]),
+            
+            ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+            AddedYear = Table.AddColumn(ChangedDateType, "Year", each Date.Year([Date]), Int64.Type),
+            AddedMonth = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+            AddedMonthNum = Table.AddColumn(AddedMonth, "Month Number", each Date.Month([Date]), Int64.Type),
+            
+            CleanedData = if Table.HasColumns(AddedMonthNum, "Comments") 
+                then Table.TransformColumns(AddedMonthNum,{{"Comments", Text.Trim, type text}})
+                else AddedMonthNum
+        in
+            CleanedData
+    ),
+    
+    FirstFileColumns = Table.ColumnNames(TransformFiles{0}[Data]),
+    ExpandedData = Table.ExpandTableColumn(TransformFiles, "Data", FirstFileColumns),
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore)
+in
+    CleanedColumns

@@ -1,0 +1,290 @@
+' ===================================================================
+' TEMPLATE CLEANUP & ORGANIZATION FUNCTIONS
+' ===================================================================
+
+Option Explicit
+
+' ===================================================================
+' ANALYZE CURRENT TEMPLATE STRUCTURE
+' ===================================================================
+Sub AnalyzeCurrentTemplate()
+    Dim ws As Worksheet
+    Dim analysisMsg As String
+    Dim monthSheets As Long, otherSheets As Long
+    Dim dataSheets As String, emptySheets As String, otherSheets_List As String
+    
+    analysisMsg = "=== TEMPLATE STRUCTURE ANALYSIS ===" & vbCrLf & vbCrLf
+    
+    For Each ws In ThisWorkbook.Worksheets
+        If IsMonthSheet(ws.Name) Then
+            monthSheets = monthSheets + 1
+            
+            ' Check if sheet has data
+            If HasDataInSheet(ws) Then
+                dataSheets = dataSheets & ws.Name & " (with data), "
+            Else
+                emptySheets = emptySheets & ws.Name & " (empty), "
+            End If
+        Else
+            otherSheets = otherSheets + 1
+            otherSheets_List = otherSheets_List & ws.Name & ", "
+        End If
+    Next ws
+    
+    analysisMsg = analysisMsg & "MONTH SHEETS: " & monthSheets & " total" & vbCrLf
+    analysisMsg = analysisMsg & "OTHER SHEETS: " & otherSheets & " total" & vbCrLf & vbCrLf
+    
+    analysisMsg = analysisMsg & "SHEETS WITH DATA:" & vbCrLf & dataSheets & vbCrLf & vbCrLf
+    analysisMsg = analysisMsg & "EMPTY SHEETS:" & vbCrLf & emptySheets & vbCrLf & vbCrLf
+    analysisMsg = analysisMsg & "NON-MONTH SHEETS:" & vbCrLf & otherSheets_List & vbCrLf & vbCrLf
+    
+    analysisMsg = analysisMsg & "RECOMMENDATION:" & vbCrLf
+    analysisMsg = analysisMsg & "• Keep last 12 months with data" & vbCrLf
+    analysisMsg = analysisMsg & "• Archive or delete empty sheets" & vbCrLf
+    analysisMsg = analysisMsg & "• Keep essential non-month sheets only"
+    
+    MsgBox analysisMsg, vbInformation, "Template Analysis"
+End Sub
+
+' ===================================================================
+' CLEANUP EXCESS TABS (SAFE VERSION)
+' ===================================================================
+Sub CleanupExcessTabs()
+    Dim ws As Worksheet
+    Dim sheetsToDelete As Collection
+    Dim currentDate As Date, cutoffDate As Date
+    Dim sheetDate As Date
+    Dim deleteConfirm As VbMsgBoxResult
+    Dim deleteList As String
+    
+    Set sheetsToDelete = New Collection
+    currentDate = Date
+    cutoffDate = DateAdd("m", -12, currentDate) ' 12 months ago
+    
+    ' Identify sheets to delete
+    For Each ws In ThisWorkbook.Worksheets
+        If IsMonthSheet(ws.Name) Then
+            sheetDate = GetDateFromSheetName(ws.Name)
+            
+            ' Mark for deletion if older than 12 months AND empty
+            If sheetDate < cutoffDate And Not HasDataInSheet(ws) Then
+                sheetsToDelete.Add ws
+                deleteList = deleteList & ws.Name & " (empty, " & Format(sheetDate, "mmm yyyy") & ")" & vbCrLf
+            ElseIf sheetDate < DateAdd("m", -24, currentDate) Then
+                ' Flag very old sheets (24+ months) for manual review
+                deleteList = deleteList & ws.Name & " (OLD - review manually)" & vbCrLf
+            End If
+        End If
+    Next ws
+    
+    If sheetsToDelete.Count = 0 Then
+        MsgBox "No sheets identified for cleanup. Template structure looks good! ", vbInformation
+        Exit Sub
+    End If
+    
+    ' Confirm deletion
+    deleteConfirm = MsgBox("The following sheets will be deleted:" & vbCrLf & vbCrLf & _
+                          deleteList & vbCrLf & _
+                          "This will permanently remove " & sheetsToDelete.Count & " sheets." & vbCrLf & vbCrLf & _
+                          "Continue? ", vbYesNo + vbExclamation, "Confirm Sheet Deletion")
+    
+    If deleteConfirm = vbYes Then
+        Application.DisplayAlerts = False
+        
+        For Each ws In sheetsToDelete
+            ws.Delete
+        Next ws
+        
+        Application.DisplayAlerts = True
+        MsgBox "✅ Deleted " & sheetsToDelete.Count & " empty sheets older than 12 months. ", vbInformation
+    Else
+        MsgBox "Cleanup canceled. No changes made. ", vbInformation
+    End If
+End Sub
+
+' ===================================================================
+' UPDATE MOM WITH ALL HISTORICAL DATA
+' ===================================================================
+Sub UpdateMoMFromAllTabs()
+    Dim ws As Worksheet, momWs As Worksheet
+    Dim tbl As ListObject, momTbl As ListObject
+    Dim summaryData As String
+    Dim monthCount As Long, dataRowCount As Long
+    
+    ' Get or create MoM sheet
+    On Error Resume Next
+    Set momWs = ThisWorkbook.Sheets("MoM")
+    On Error GoTo 0
+    
+    If momWs Is Nothing Then
+        Set momWs = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        momWs.Name = "MoM"
+        
+        ' Create header
+        momWs.Cells(1, 1).Value = "Month over Month Summary - Updated: " & Now
+        momWs.Cells(1, 1).Font.Bold = True
+        momWs.Cells(1, 1).Font.Size = 14
+    End If
+    
+    summaryData = "=== MOM UPDATE SUMMARY ===" & vbCrLf & vbCrLf
+    
+    ' Process each month sheet
+    For Each ws In ThisWorkbook.Worksheets
+        If IsMonthSheet(ws.Name) And HasDataInSheet(ws) Then
+            monthCount = monthCount + 1
+            
+            ' Count data rows in this month
+            For Each tbl In ws.ListObjects
+                If InStr(tbl.Name, "_mom_") > 0 And Not tbl.DataBodyRange Is Nothing Then
+                    dataRowCount = dataRowCount + tbl.DataBodyRange.Rows.Count
+                End If
+            Next tbl
+            
+            summaryData = summaryData & ws.Name & ": " & CountTablesInSheet(ws) & " tables, " & CountDataRowsInSheet(ws) & " data rows" & vbCrLf
+        End If
+    Next ws
+    
+    summaryData = summaryData & vbCrLf & "TOTALS:" & vbCrLf
+    summaryData = summaryData & "• Months with data: " & monthCount & vbCrLf
+    summaryData = summaryData & "• Total data rows: " & dataRowCount & vbCrLf
+    summaryData = summaryData & "• Last updated: " & Now
+    
+    ' Update MoM sheet with summary
+    momWs.Cells(3, 1).Value = "Summary of all month data:"
+    momWs.Cells(4, 1).Value = Replace(summaryData, vbCrLf, Chr(10))
+    momWs.Cells(4, 1).WrapText = True
+    
+    MsgBox summaryData, vbInformation, "MoM Update Complete"
+End Sub
+
+' ===================================================================
+' CREATE INSTRUCTIONS TAB
+' ===================================================================
+Sub CreateInstructionsTab()
+    Dim instrWs As Worksheet
+    
+    ' Delete existing instructions sheet if it exists
+    On Error Resume Next
+    ThisWorkbook.Sheets("Instructions").Delete
+    On Error GoTo 0
+    
+    ' Create new instructions sheet
+    Set instrWs = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+    instrWs.Name = "Instructions"
+    
+    ' Add content
+    With instrWs
+        .Cells(1, 1).Value = DEPARTMENT_NAME & " Monthly Reporting - Quick Start Guide"
+        .Cells(1, 1).Font.Bold = True
+        .Cells(1, 1).Font.Size = 16
+        
+        .Cells(3, 1).Value = "DAILY DATA ENTRY:"
+        .Cells(3, 1).Font.Bold = True
+        .Cells(4, 1).Value = "1. Open current month tab (25_06)"
+        .Cells(5, 1).Value = "2. Press Alt + F8 and run 'TEST_Main_Navigation'"
+        .Cells(6, 1).Value = "3. Enter your data in the new rows"
+        .Cells(7, 1).Value = "4. Save the file"
+        
+        .Cells(9, 1).Value = "MONTHLY PROCESS:"
+        .Cells(9, 1).Font.Bold = True
+        .Cells(10, 1).Value = "1. Complete all data entry for the month"
+        .Cells(11, 1).Value = "2. Run data validation (Alt + F8 -> TEST_Validation)"
+        .Cells(12, 1).Value = "3. Contact " & Environ("USERNAME") & " for month-end processing"
+        
+        .Cells(14, 1).Value = "NEED HELP?" .Cells(14, 1).Font.Bold = True
+        .Cells(15, 1).Value = "• Check this guide first"
+        .Cells(16, 1).Value = "• Contact: " & Environ("USERNAME")
+        .Cells(17, 1).Value = "• Use Alt + F8 to access all functions"
+        
+        .Cells(19, 1).Value = "TABS EXPLAINED:"
+        .Cells(19, 1).Font.Bold = True
+        .Cells(20, 1).Value = "• Instructions - This guide"
+        .Cells(21, 1).Value = "• 25_06 - Current month data entry"
+        .Cells(22, 1).Value = "• 25_05 - Previous month (reference only)"
+        .Cells(23, 1).Value = "• MoM - Summary of all historical data"
+        .Cells(24, 1).Value = "• LOG_Data_Entry - Activity tracking"
+        
+        ' Auto-fit columns
+        .Columns("A:C").AutoFit
+    End With
+    
+    MsgBox "✅ Instructions tab created! Users now have a quick reference guide. ", vbInformation
+End Sub
+
+' ===================================================================
+' UTILITY FUNCTIONS
+' ===================================================================
+Private Function HasDataInSheet(ws As Worksheet) As Boolean
+    Dim tbl As ListObject
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, "_mom_") > 0 Then
+            If Not tbl.DataBodyRange Is Nothing Then
+                If tbl.DataBodyRange.Rows.Count > 0 Then
+                    HasDataInSheet = True
+                    Exit Function
+                End If
+            End If
+        End If
+    Next tbl
+    
+    HasDataInSheet = False
+End Function
+
+Private Function CountTablesInSheet(ws As Worksheet) As Long
+    Dim tbl As ListObject, count As Long
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, "_mom_") > 0 Then
+            count = count + 1
+        End If
+    Next tbl
+    
+    CountTablesInSheet = count
+End Function
+
+Private Function CountDataRowsInSheet(ws As Worksheet) As Long
+    Dim tbl As ListObject, count As Long
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, "_mom_") > 0 And Not tbl.DataBodyRange Is Nothing Then
+            count = count + tbl.DataBodyRange.Rows.Count
+        End If
+    Next tbl
+    
+    CountDataRowsInSheet = count
+End Function
+
+Private Function GetDateFromSheetName(sheetName As String) As Date
+    If Len(sheetName) = 5 And Mid(sheetName, 3, 1) = "_" Then
+        Dim yearPart As String, monthPart As String
+        yearPart = "20" & Left(sheetName, 2)
+        monthPart = Right(sheetName, 2)
+        GetDateFromSheetName = DateSerial(CInt(yearPart), CInt(monthPart), 1)
+    Else
+        GetDateFromSheetName = DateSerial(2000, 1, 1) ' Default very old date
+    End If
+End Function
+
+' ===================================================================
+' MASTER CLEANUP FUNCTION
+' ===================================================================
+Sub RunCompleteTemplateCleanup()
+    Dim response As VbMsgBoxResult
+    
+    response = MsgBox("This will clean up your template:" & vbCrLf & vbCrLf & _
+                      "1. Analyze current structure" & vbCrLf & _
+                      "2. Remove excess empty tabs" & vbCrLf & _
+                      "3. Update MoM with all data" & vbCrLf & _
+                      "4. Create instructions tab" & vbCrLf & vbCrLf & _
+                      "Continue? ", vbYesNo + vbQuestion, "Template Cleanup")
+    
+    If response = vbYes Then
+        Call AnalyzeCurrentTemplate
+        Call CleanupExcessTabs
+        Call UpdateMoMFromAllTabs
+        Call CreateInstructionsTab
+        
+        MsgBox "✅ Template cleanup complete! Your template is now user-friendly and organized. ", vbInformation
+    End If
+End Sub

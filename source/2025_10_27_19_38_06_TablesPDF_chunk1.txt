@@ -1,0 +1,105 @@
+1 
+ let 
+ 
+  // Connect to the source folder  
+    Source = Folder.Contents(  
+    "C:\Power Query - Extract PDF by Content"  
+  ), 
+ 
+  // Filter for PDF files  
+    Find_Only_PDF_Files = Table.SelectRows(Source, each ([Extension] = ".pdf") ),  
+ 
+  // Preserve only Filename and Content binaries  
+    Discard_Unwanted_Fields = Table.SelectColumns(Find_Only_PDF_Files, {"Name", "Content"} ),  
+ 
+  // Extract zone from Filename  
+    Extract_Zone = Table.TransformColumns(  
+    Discard_Unwanted_Fields,  
+    {{"Name", each Text.BeforeDelimiter(_, " ", 1), type text} }  
+  ), 
+ 
+  // Sort by zone name  
+    Sort_by_Zone_Number = Table.Sort(Extract_Zone, {{"Name", Order.Ascending} } ),  
+ 
+  // Extract the PFD metadata (page and table info) from the PDFs  
+    Extract_PDF_Metadata = Table.AddColumn(Sort_by_Zone_Number, "Custom", each Pdf.Tables([Content]) ),  
+ 
+  // Discard the original binary files  
+    Discard_Binaries = Table.RemoveColumns(Extract_PDF_Metadata, {"Content"} ),  
+ 
+  // Extract PDF Contents  
+    Extract_PDF_Data = Table.ExpandTableColumn(  
+    Discard_Binaries,  
+    "Custom",  
+    {"Kind", "Data"},  
+    {"Kind", "Data"}  
+  ), 
+ 
+2 
+   // Filter for tables only  
+    Filter_for_Tables = Table.SelectRows(Extract_PDF_Data, each ([Kind] = "Table") ),  
+ 
+  // Discard the column that identified tables  
+    Discard_PDF_Identifiers = Table.RemoveColumns(Filter_for_Tables, {"Kind"} ),  
+ 
+  // Locate tables that have months (ex:,"January")  
+    Discover_Needed_Tables = Table.AddColumn(  
+    Discard_PDF_Identifiers,  
+    "Good-Bad",  
+    each List.Contains(List.Combine(Table.ToRows([Data])), "January")  
+  ), 
+ 
+  // Keep only tables with date information  
+    Discard_Unwanted_Tables = Table.SelectRows(Discover_Needed_Tables, each ([#"Good -Bad"] = true) ),  
+ 
+  // Discard the column that identified tables with months  
+    Discard_Table_Detection = Table.RemoveColumns(Discard_Unwanted_Tables, {"Good -Bad"} ),  
+ 
+  // Extract the content from the nested tables   
+    Extract_Table_Data = Table.ExpandTableColumn( Discard_Table_Detection, "Data",  
+      {"Column1", "Column2", "Column3", "Column4", "Column5", "Column6", "Column7"},  
+      {"Column1", "Column2", "Column3", "Column4", "Column5", "Column6", "Column7"} ),  
+ 
+  // Use the first table's row as the header row  
+    Promote_Header_Row = Table.PromoteHeaders(Extract_Table_Data, [PromoteAllScalars = true]),  
+ 
+  // Discard the AVERAGES column  
+    Remove_AVERAGES = Table.RemoveColumns(Promote_Header_Row, {"AVERAGES"}  
+  ), 
+  
+3 
+   // Rename the first column to "Zone"   
+    Rename_1st_Column = Table.RenameColumns(  
+    Remove_AVERAGES,  
+      {Table.ColumnNames(Remove_AVERAGES){0}, "Zone"} ),  
+ 
+  // Convert the cross -table to a tabular structure  
+    Unpivot_Cross_Table = Table.UnpivotOtherColumns(  
+    Rename_1st_Column,  
+    {"Zone", "Column2"},  
+    "Attribute",  
+    "Value"),  
+ 
+  // Merge two columns to construct dates  
+    Merge_to_Make_Dates = Table.CombineColumns(  
+    Unpivot_Cross_Table,  
+    {"Column2", "Attribute"},  
+    Combiner.CombineTextByDelimiter(" ", QuoteStyle.None),  
+    "Date"),  
+ 
+  // Set the data types  
+    Set_Data_Types = Table.TransformColumnTypes(  
+    Merge_to_Make_Dates,  
+    {{"Date", type date}, {"Value", Currency.Type} } ),  
+   
+  // Remove the total rows and the redundant headers  
+    Remove_Totals_and_Extra_Headers = Table.RemoveRowsWithErrors(Set_Data_Types, {"Date"} ),  
+ 
+  // Rename the columns by their positions in the table  
+    Rename_Columns = Table.RenameColumns(  
+    Remove_Totals_and_Extra_Headers,  
+      {Table.ColumnNames(Remove_Totals_and_Extra_Headers){2}, "Sales"} )  
+ 
+in 
+ 
+  Rename_Columns

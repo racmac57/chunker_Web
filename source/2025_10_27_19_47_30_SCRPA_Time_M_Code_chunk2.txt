@@ -1,0 +1,205 @@
+- **Code**: Updated 
+2025_04_14_13_12_01_Report Cycle M Code from Grok and ChatGPT
+let
+    // Load your original main table (replace '...' with actual step)
+    Source = ..., 
+    // Load mapping table from Excel (preloaded here for reference)
+    ReportMapping = Table.FromRows({
+        {#date(2024, 12, 31), #date(2025, 1, 6), "C01W01"},
+        {#date(2025, 1, 7), #date(2025, 1, 13), "C01W02"},
+        {#date(2025, 1, 14), #date(2025, 1, 20), "C01W03"},
+        {#date(2025, 1, 21), #date(2025, 1, 27), "C01W04"},
+        {#date(2025, 1, 28), #date(2025, 2, 3), "C02W05"},
+        {#date(2025, 2, 4), #date(2025, 2, 10), "C02W06"},
+        {#date(2025, 2, 11), #date(2025, 2, 17), "C02W07"},
+        {#date(2025, 2, 18), #date(2025, 2, 24), "C02W08"},
+        {#date(2025, 2, 25), #date(2025, 3, 3), "C03W09"},
+        {#date(2025, 3, 4), #date(2025, 3, 10), "C03W10"},
+        {#date(2025, 3, 11), #date(2025, 3, 17), "C03W11"},
+        {#date(2025, 3, 18), #date(2025, 3, 24), "C03W12"},
+        {#date(2025, 3, 25), #date(2025, 3, 31), "C04W13"},
+        {#date(2025, 4, 1), #date(2025, 4, 7), "C04W14"},
+        {#date(2025, 4, 8), #date(2025, 4, 14), "C04W15"},
+        {#date(2025, 4, 15), #date(2025, 4, 21), "C04W16"},
+        {#date(2025, 4, 22), #date(2025, 4, 28), "C05W17"},
+        {#date(2025, 4, 29), #date(2025, 5, 5), "C05W18"},
+        {#date(2025, 5, 6), #date(2025, 5, 12), "C05W19"},
+        {#date(2025, 5, 13), #date(2025, 5, 19), "C05W20"},
+        {#date(2025, 5, 20), #date(2025, 5, 26), "C06W21"},
+        {#date(2025, 5, 27), #date(2025, 6, 2), "C06W22"},
+        {#date(2025, 6, 3), #date(2025, 6, 9), "C06W23"},
+        {#date(2025, 6, 10), #date(2025, 6, 16), "C06W24"},
+        {#date(2025, 6, 17), #date(2025, 6, 23), "C07W25"},
+        {#date(2025, 6, 24), #date(2025, 6, 30), "C07W26"},
+        {#date(2025, 7, 1), #date(2025, 7, 7), "C07W27"},
+        {#date(2025, 7, 8), #date(2025, 7, 14), "C07W28"},
+        {#date(2025, 7, 15), #date(2025, 7, 21), "C08W29"},
+        {#date(2025, 7, 22), #date(2025, 7, 28), "C08W30"},
+        {#date(2025, 7, 29), #date(2025, 8, 4), "C08W31"},
+        {#date(2025, 8, 5), #date(2025, 8, 11), "C08W32"},
+        {#date(2025, 8, 12), #date(2025, 8, 18), "C09W33"},
+        {#date(2025, 8, 19), #date(2025, 8, 25), "C09W34"},
+        {#date(2025, 8, 26), #date(2025, 9, 1), "C09W35"},
+        {#date(2025, 9, 2), #date(2025, 9, 8), "C09W36"},
+        {#date(2025, 9, 9), #date(2025, 9, 15), "C10W37"},
+        {#date(2025, 9, 16), #date(2025, 9, 22), "C10W38"},
+        {#date(2025, 9, 23), #date(2025, 9, 29), "C10W39"},
+        {#date(2025, 9, 30), #date(2025, 10, 6), "C10W40"},
+        {#date(2025, 10, 7), #date(2025, 10, 13), "C11W41"},
+        {#date(2025, 10, 14), #date(2025, 10, 20), "C11W42"},
+        {#date(2025, 10, 21), #date(2025, 10, 27), "C11W43"},
+        {#date(2025, 10, 28), #date(2025, 11, 3), "C11W44"},
+        {#date(2025, 11, 4), #date(2025, 11, 10), "C12W45"},
+        {#date(2025, 11, 11), #date(2025, 11, 17), "C12W46"},
+        {#date(2025, 11, 18), #date(2025, 11, 24), "C12W47"},
+        {#date(2025, 11, 25), #date(2025, 12, 1), "C12W48"},
+        {#date(2025, 12, 2), #date(2025, 12, 8), "C13W49"},
+        {#date(2025, 12, 9), #date(2025, 12, 15), "C13W50"},
+        {#date(2025, 12, 16), #date(2025, 12, 22), "C13W51"},
+        {#date(2025, 12, 23), #date(2025, 12, 29), "C13W52"}
+    }, {"StartDate", "EndDate", "Report_Name"}),
+    // Add REPORT_CYCLE by checking date ranges
+    Add_Report_Cycle = Table.AddColumn(Source, "REPORT_CYCLE", each 
+        let
+            currentDate = [INC_DATE],
+            match = List.First(Table.SelectRows(ReportMapping, (r) => currentDate >= r[StartDate] and currentDate <= r[EndDate])[Report_Name], null)
+        in
+            match
+    ),
+    // Split REPORT_CYCLE into CYCLE and WEEK
+    Add_Cycle = Table.AddColumn(Add_Report_Cycle, "CYCLE", each Text.Start([REPORT_CYCLE], 3), type text),
+    Add_Week = Table.AddColumn(Add_Cycle, "WEEK", each Text.End([REPORT_CYCLE], 3), type text)
+in
+    Add_Week
+      ```
+      REPORT_CYCLE = Table.AddColumn(#"Removed Duplicates", "REPORT_CYCLE", each let
+          Cycle = if [INC_DATE] >= #date(2024, 12, 31) and [INC_DATE] <= #date(2025, 1, 27) then "C01"
+                  else if [INC_DATE] >= #date(2025, 1, 28) and [INC_DATE] <= #date(2025, 2, 24) then "C02"
+                  else if [INC_DATE] >= #date(2025, 2, 25) and [INC_DATE] <= #date(2025, 3, 24) then "C03"
+                  else if [INC_DATE] >= #date(2025, 3, 25) and [INC_DATE] <= #date(2025, 4, 21) then "C04"
+                  else if [INC_DATE] >= #date(2025, 4, 22) and [INC_DATE] <= #date(2025, 5, 19) then "C05"
+                  else if [INC_DATE] >= #date(2025, 5, 20) and [INC_DATE] <= #date(2025, 6, 16) then "C06"
+                  else if [INC_DATE] >= #date(2025, 6, 17) and [INC_DATE] <= #date(2025, 7, 14) then "C07"
+                  else if [INC_DATE] >= #date(2025, 7, 15) and [INC_DATE] <= #date(2025, 8, 11) then "C08"
+                  else if [INC_DATE] >= #date(2025, 8, 12) and [INC_DATE] <= #date(2025, 9, 8) then "C09"
+                  else if [INC_DATE] >= #date(2025, 9, 9) and [INC_DATE] <= #date(2025, 10, 6) then "C10"
+                  else if [INC_DATE] >= #date(2025, 10, 7) and [INC_DATE] <= #date(2025, 11, 3) then "C11"
+                  else if [INC_DATE] >= #date(2025, 11, 4) and [INC_DATE] <= #date(2025, 12, 1) then "C12"
+                  else if [INC_DATE] >= #date(2025, 12, 2) and [INC_DATE] <= #date(2025, 12, 29) then "C13"
+                  else if [INC_DATE] >= #date(2025, 12, 30) and [INC_DATE] <= #date(2026, 1, 26) then "C14" else null,
+          Week = let
+              WeekNumber = if [INC_DATE] >= #date(2024, 12, 31) and [INC_DATE] <= #date(2025, 1, 6) then 1
+                           else if [INC_DATE] >= #date(2025, 1, 7) and [INC_DATE] <= #date(2025, 1, 13) then 2
+                           else if [INC_DATE] >= #date(2025, 1, 14) and [INC_DATE] <= #date(2025, 1, 20) then 3
+                           else if [INC_DATE] >= #date(2025, 1, 21) and [INC_DATE] <= #date(2025, 1, 27) then 4
+                           else if [INC_DATE] >= #date(2025, 1, 28) and [INC_DATE] <= #date(2025, 2, 3) then 5
+                           else if [INC_DATE] >= #date(2025, 2, 4) and [INC_DATE] <= #date(2025, 2, 10) then 6
+                           else if [INC_DATE] >= #date(2025, 2, 11) and [INC_DATE] <= #date(2025, 2, 17) then 7
+                           else if [INC_DATE] >= #date(2025, 2, 18) and [INC_DATE] <= #date(2025, 2, 24) then 8
+                           else if [INC_DATE] >= #date(2025, 2, 25) and [INC_DATE] <= #date(2025, 3, 3) then 9
+                           else if [INC_DATE] >= #date(2025, 3, 4) and [INC_DATE] <= #date(2025, 3, 10) then 10
+                           else if [INC_DATE] >= #date(2025, 3, 11) and [INC_DATE] <= #date(2025, 3, 17) then 11
+                           else if [INC_DATE] >= #date(2025, 3, 18) and [INC_DATE] <= #date(2025, 3, 24) then 12
+                           else if [INC_DATE] >= #date(2025, 3, 25) and [INC_DATE] <= #date(2025, 3, 31) then 13
+                           else if [INC_DATE] >= #date(2025, 4, 1) and [INC_DATE] <= #date(2025, 4, 7) then 14
+                           else if [INC_DATE] >= #date(2025, 4, 8) and [INC_DATE] <= #date(2025, 4, 14) then 15
+                           else if [INC_DATE] >= #date(2025, 4, 15) and [INC_DATE] <= #date(2025, 4, 21) then 16
+                           else if [INC_DATE] >= #date(2025, 4, 22) and [INC_DATE] <= #date(2025, 4, 28) then 17
+                           else if [INC_DATE] >= #date(2025, 4, 29) and [INC_DATE] <= #date(2025, 5, 5) then 18
+                           else if [INC_DATE] >= #date(2025, 5, 6) and [INC_DATE] <= #date(2025, 5, 12) then 19
+                           else if [INC_DATE] >= #date(2025, 5, 13) and [INC_DATE] <= #date(2025, 5, 19) then 20
+                           else if [INC_DATE] >= #date(2025, 5, 20) and [INC_DATE] <= #date(2025, 5, 26) then 21
+                           else if [INC_DATE] >= #date(2025, 5, 27) and [INC_DATE] <= #date(2025, 6, 2) then 22
+                           else if [INC_DATE] >= #date(2025, 6, 3) and [INC_DATE] <= #date(2025, 6, 9) then 23
+                           else if [INC_DATE] >= #date(2025, 6, 10) and [INC_DATE] <= #date(2025, 6, 16) then 24
+                           else if [INC_DATE] >= #date(2025, 6, 17) and [INC_DATE] <= #date(2025, 6, 23) then 25
+                           else if [INC_DATE] >= #date(2025, 6, 24) and [INC_DATE] <= #date(2025, 6, 30) then 26
+                           else null,
+              WeekFormatted = if WeekNumber <> null then "W" & Text.PadStart(Text.From(WeekNumber), 2, "0") else null
+          in WeekFormatted,
+          Result = if Cycle <> null and Week <> null then Cycle & Week else null
+      in Result)
+      ```
+66. **Reordered Columns8**
+    - **Description**: Reorders columns to include "REPORT_CYCLE". - **Code**:
+      ```
+      #"Reordered Columns8" = Table.ReorderColumns(REPORT_CYCLE,{"Case Number", "INC_DATE", "Start of Hour", "TIME_OF_DAY", "INC_TIME", "Day Name", "Month Name", "BLOCK", "Location", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "St#", "Narrative - Copy", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "REPORT_CYCLE"})
+      ```
+67. **Added Custom11**
+    - **Description**: Adds a column categorizing "Start of Hour" into time-of-day labels. - **Code**:
+      ```
+      #"Added Custom11" = Table.AddColumn(#"Reordered Columns8", "Custom", each if [Start of Hour] >= #time(0, 0, 0) and [Start of Hour] < #time(4, 0, 0) then "00:00-03:59 Early Morning" else if [Start of Hour] >= #time(4, 0, 0) and [Start of Hour] < #time(8, 0, 0) then "04:00-07:59 Morning" else if [Start of Hour] >= #time(8, 0, 0) and [Start of Hour] < #time(12, 0, 0) then "08:00-11:59 Morning Peak" else if [Start of Hour] >= #time(12, 0, 0) and [Start of Hour] < #time(16, 0, 0) then "12:00-15:59 Afternoon" else if [Start of Hour] >= #time(16, 0, 0) and [Start of Hour] < #time(20, 0, 0) then "16:00-19:59 Evening Peak" else "20:00-23:59 Night")
+      ```
+68. **Renamed Columns5**
+    - **Description**: Renames "Custom" to "TOD". - **Code**:
+      ```
+      #"Renamed Columns5" = Table.RenameColumns(#"Added Custom11",{{"Custom", "TOD"}})
+      ```
+69. **Reordered Columns9**
+    - **Description**: Reorders columns to prioritize "TOD". - **Code**:
+      ```
+      #"Reordered Columns9" 
+= Table.ReorderColumns(#"Renamed Columns5",{"Case Number", "INC_DATE", "TOD", "Start of Hour", "INC_TIME", "Day Name", "Month Name", "BLOCK", "Location", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "St#", "Narrative - Copy", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "REPORT_CYCLE", "TIME_OF_DAY"})
+      ```
+70. **Sorted Rows**
+    - **Description**: Sorts by "INC_DATE" in descending order. - **Code**:
+      ```
+      #"Sorted Rows" = Table.Sort(#"Reordered Columns9",{{"INC_DATE", Order.Descending}})
+      ```
+71. **Renamed Columns6**
+    - **Description**: Renames "Narrative - Copy" to "Notes". - **Code**:
+      ```
+      #"Renamed Columns6" = Table.RenameColumns(#"Sorted Rows",{{"Narrative - Copy", "Notes"}})
+      ```
+72. **Sorted Rows1**
+    - **Description**: Sorts by "INC_DATE" in ascending order. - **Code**:
+      ```
+      #"Sorted Rows1" = Table.Sort(#"Renamed Columns6",{{"INC_DATE", Order.Ascending}})
+      ```
+73. **Replaced Value2**
+    - **Description**: Replaces "Friday" with "Fri" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value2" = Table.ReplaceValue(#"Sorted Rows1","Friday","Fri",Replacer.ReplaceText,{"Day Name"})
+      ```
+74. **Replaced Value3**
+    - **Description**: Replaces "Monday" with "Mon" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value3" 
+= Table.ReplaceValue(#"Replaced Value2","Monday","Mon",Replacer.ReplaceText,{"Day Name"})
+      ```
+75. **Replaced Value4**
+    - **Description**: Replaces "Tuesday" with "Tue" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value4" = Table.ReplaceValue(#"Replaced Value3","Tuesday","Tue",Replacer.ReplaceText,{"Day Name"})
+      ```
+76. **Replaced Value5**
+    - **Description**: Replaces "Wednesday" with "Wed" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value5" = Table.ReplaceValue(#"Replaced Value4","Wednesday","Wed",Replacer.ReplaceText,{"Day Name"})
+      ```
+77. **Replaced Value6**
+    - **Description**: Replaces "Thursday" with "Thur" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value6" = Table.ReplaceValue(#"Replaced Value5","Thursday","Thur",Replacer.ReplaceText,{"Day Name"})
+      ```
+78. **Replaced Value7**
+    - **Description**: Replaces "Sunday" with "Sun" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value7" 
+= Table.ReplaceValue(#"Replaced Value6","Sunday","Sun",Replacer.ReplaceText,{"Day Name"})
+      ```
+79. **Replaced Value8**
+    - **Description**: Replaces "Saturday" with "Sat" in "Day Name". - **Code**:
+      ```
+      #"Replaced Value8"
+= Table.ReplaceValue(#"Replaced Value7","Saturday","Sat",Replacer.ReplaceText,{"Day Name"})
+      ```
+80. **Reordered Columns10**
+    - **Description**: Final reordering of columns to prioritize key fields. - **Code**:
+      ```
+      #"Reordered Columns10" 
+= Table.ReorderColumns(#"Replaced Value8",{"Case Number", "BLOCK", "Location", "ALL_INCIDENTS", "Incident Type_1", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "St#", "Notes", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "INC_DATE", "TOD", "Start of Hour", "INC_TIME", "Day Name", "Month Name", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "TIME_OF_DAY", "REPORT_CYCLE"})
+      ```
+### Notes
+- The code is written in Power Query (M language) for data transformation in Excel or Power BI. - Each step is modular, focusing on data cleaning, type conversion, column derivation, and formatting. - Some steps (e.g., "Added Custom4", "Added Custom5") are redundant as their results are removed, suggesting iterative development. - The final output is a transformed table with enhanced columns for reporting, such as "REPORT_CYCLE", "TOD", and "VEHICLE". - **Formatting Instructions for Word**:
+  - When pasting into Microsoft Word, select the entire text and set the font for descriptions to a standard font like "Calibri" or "Times New Roman" (11 or 12 pt). - For the **Code** sections, highlight each code block and set the font to "Courier New" (10 or 11 pt) to maintain monospaced alignment, typical for code. - Optionally, apply a light gray background (e.g., Shading: 10% Gray) to code blocks for visual distinction. - Ensure "Keep Source Formatting" is selected when pasting to preserve line breaks and indentation. - Adjust paragraph spacing (e.g., 6 pt after) for readability between steps.

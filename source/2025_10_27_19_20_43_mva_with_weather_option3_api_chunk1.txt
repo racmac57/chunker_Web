@@ -1,0 +1,217 @@
+let
+    // === CONFIGURATION: Add your NOAA API token here ===
+    MyNOAAToken = "PUT_YOUR_ACTUAL_NOAA_TOKEN_HERE",
+    
+    // === STEP 1: Load RMS Excel File from Folder ===
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\MVA"),
+    FilteredFiles = Table.SelectRows(Source, each Text.EndsWith([Extension], ".xlsx")),
+    FirstFile = FilteredFiles{0}[Content],
+    ExcelData = Excel.Workbook(FirstFile, null, true),
+    SheetData = ExcelData{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(SheetData, [PromoteAllScalars=true]),
+
+    // === STEP 2: Clean Column Names ===
+    FixedColumns = Table.RenameColumns(PromotedHeaders, {{"Fulladdress", "FullAddress"}, {"Case Number", "CaseNumber"}}, MissingField.Ignore),
+    CurrentColumns = Table.ColumnNames(FixedColumns),
+    PascalCaseNames = List.Transform(CurrentColumns, each 
+        if Text.Contains(_, " ") then 
+            Text.Combine(
+                List.Transform(
+                    Text.SplitAny(_, " _"), 
+                    each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+                ), 
+                ""
+            ) 
+        else _
+    ),
+    RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+    RenamedTable = Table.RenameColumns(FixedColumns, RenamePairs, MissingField.Ignore),
+
+    // === STEP 3: Enrich Incident Data ===
+    ReplacedNulls = Table.TransformColumns(RenamedTable, {{"CaseNumber", each if _ = null then "Null" else Text.From(_), type text}}),
+    AddedCaseNumberLength = Table.AddColumn(ReplacedNulls, "CaseNumberLength", each Text.Length([CaseNumber])),
+    
+    AddedIncDate = Table.AddColumn(AddedCaseNumberLength, "IncDate", each 
+        if [IncidentDate] <> null then Date.From([IncidentDate]) 
+        else if [IncidentDateBetween] <> null then Date.From([IncidentDateBetween]) 
+        else if [ReportDate] <> null then Date.From([ReportDate]) 
+        else null, type nullable date
+    ),
+    
+    AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+        if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime])) 
+        else if [IncidentTimeBetween] <> null then Time.From(DateTime.Time([IncidentTimeBetween])) 
+        else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime])) 
+        else null, type nullable time
+    ),
+    
+    AddedStartOfHour = Table.AddColumn(AddedIncTime, "StartOfHour", each 
+        if [IncTime] <> null then Time.StartOfHour([IncTime]) else null, type nullable time
+    ),
+    
+    AddedTimeOfDay = Table.AddColumn(AddedStartOfHour, "TimeOfDay", each 
+        let t = try Time.From([IncTime]) otherwise null 
+        in if t = null then "Unknown"
+        else if t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+        else if t < #time(8,0,0) then "Morning (04:00–07:59)"
+        else if t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+        else if t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+        else if t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+        else "Night (20:00–23:59)", type text
+    ),
+    
+    AddedBlock = Table.AddColumn(AddedTimeOfDay, "Block", each 
+        if [FullAddress] <> null then Text.BeforeDelimiter([FullAddress], " ", 1) else null, type nullable text
+    ),
+    
+    AddedAllIncidents = Table.AddColumn(AddedBlock, "AllIncidents", each 
+        [IncidentType1] & 
+        (if [IncidentType2] <> null then " - " & [IncidentType2] else "") & 
+        (if [IncidentType3] <> null then " - " & [IncidentType3] else ""), type text
+    ),
+    
+    AddedQuarter = Table.AddColumn(AddedAllIncidents, "Quarter", each 
+        if [IncDate] <> null then "Q" & Text.From(Date.QuarterOfYear([IncDate])) else null, type nullable text
+    ),
+    
+    AddedSeason = Table.AddColumn(AddedQuarter, "Season", each 
+        if [IncDate] <> null then
+            let m = Date.Month([IncDate])
+            in if List.Contains({3,4,5}, m) then "Spring" 
+            else if List.Contains({6,7,8}, m) then "Summer" 
+            else if List.Contains({9,10,11}, m) then "Fall" 
+            else "Winter"
+        else null, type nullable text
+    ),
+    
+    AddedDayType = Table.AddColumn(AddedSeason, "DayType", each 
+        if [IncDate] <> null then
+            if Date.DayOfWeek([IncDate], Day.Monday) >= 5 then "Weekend" else "Weekday"
+        else null, type nullable text
+    ),
+
+    // === STEP 4: NOAA Weather API Integration ===
+    // Get date range for API call
+    DateFilteredRows = Table.SelectRows(AddedDayType, each [IncDate] <> null),
+    
+    MinDate = if Table.RowCount(DateFilteredRows) > 0 then 
+        Date.ToText(List.Min(DateFilteredRows[IncDate]), "yyyy-MM-dd") 
+        else Date.ToText(Date.From(DateTime.LocalNow()), "yyyy-MM-dd"),
+        
+    MaxDate = if Table.RowCount(DateFilteredRows) > 0 then 
+        Date.ToText(List.Max(DateFilteredRows[IncDate]), "yyyy-MM-dd") 
+        else Date.ToText(Date.From(DateTime.LocalNow()), "yyyy-MM-dd"),
+    
+    // Build API URL
+    ApiUrl = "https://www.ncei.noaa.gov/cdo-web/api/v2/data?datasetid=GHCND&locationid=ZIP:07601&startdate=" & MinDate & "&enddate=" & MaxDate & "&datatypeid=TMAX,TMIN,PRCP,SNOW&limit=1000",
+
+    // Make API call with token
+    ApiResponse = try Web.Contents(ApiUrl, [
+        Headers = [
+            #"token" = MyNOAAToken,
+            #"Accept" = "application/json"
+        ],
+        Timeout = #duration(0, 0, 2, 0)
+    ]) otherwise null,
+
+    // Parse JSON response
+    JsonData = if ApiResponse <> null then 
+        try Json.Document(ApiResponse) otherwise null 
+    else null,
+    
+    // Process weather data
+    WeatherTable = if JsonData <> null and JsonData[results]? <> null then 
+        try (
+            let
+                ResultsList = JsonData[results],
+                RawTable = Table.FromList(ResultsList, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+                Expanded = Table.ExpandRecordColumn(RawTable, "Column1", {"date", "datatype", "value"}, {"WeatherDate", "DataType", "Value"}),
+                WithDate = Table.TransformColumns(Expanded, {{"WeatherDate", each Date.From(Text.Start(_, 10)), type date}}),
+                Pivoted = Table.Pivot(WithDate, List.Distinct(WithDate[DataType]), "DataType", "Value", List.Sum),
+                
+                // Add calculated weather columns
+                AddedPrecip = Table.AddColumn(Pivoted, "PrecipCategory", each 
+                    let precip = Record.FieldOrDefault(_, "PRCP", null)
+                    in if precip = null or precip = 0 then "No Precipitation" 
+                    else if precip <= 2.5 then "Light" 
+                    else if precip <= 10 then "Moderate" 
+                    else "Heavy", type text
+                ),
+                
+                AddedTemp = Table.AddColumn(AddedPrecip, "TempCategory", each 
+                    let 
+                        tmax = Record.FieldOrDefault(_, "TMAX", null),
+                        tmin = Record.FieldOrDefault(_, "TMIN", null),
+                        avg = if tmax <> null and tmin <> null then (tmax + tmin) / 2 else null 
+                    in if avg = null then "Unknown" 
+                    else if avg <= 0 then "Very Cold" 
+                    else if avg <= 10 then "Cold" 
+                    else if avg <= 20 then "Cool" 
+                    else if avg <= 30 then "Warm" 
+                    else "Hot", type text
+                )
+            in
+                AddedTemp
+        ) otherwise null
+    else null,
+
+    // === STEP 5: Merge Weather with MVA Data ===
+    MergedWithWeather = if WeatherTable <> null then 
+        Table.NestedJoin(AddedDayType, {"IncDate"}, WeatherTable, {"WeatherDate"}, "Weather", JoinKind.LeftOuter)
+    else
+        Table.AddColumn(AddedDayType, "Weather", each null),
+
+    // Expand weather columns or add null columns if no weather data
+    FinalTable = if WeatherTable <> null then
+        try (
+            Table.ExpandTableColumn(
+                MergedWithWeather, 
+                "Weather", 
+                {"TMAX", "TMIN", "PRCP", "SNOW", "PrecipCategory", "TempCategory"}, 
+                {"MaxTemp", "MinTemp", "Precipitation", "Snowfall", "PrecipCategory", "TempCategory"}
+            )
+        ) otherwise (
+            // If expansion fails, add empty weather columns
+            Table.AddColumn(
+                Table.AddColumn(
+                    Table.AddColumn(
+                        Table.AddColumn(
+                            Table.AddColumn(
+                                Table.AddColumn(
+                                    Table.RemoveColumns(MergedWithWeather, {"Weather"}), 
+                                    "MaxTemp", each null, type nullable number
+                                ), 
+                                "MinTemp", each null, type nullable number
+                            ), 
+                            "Precipitation", each null, type nullable number
+                        ), 
+                        "Snowfall", each null, type nullable number
+                    ), 
+                    "PrecipCategory", each "Unknown", type text
+                ), 
+                "TempCategory", each "Unknown", type text
+            )
+        )
+    else
+        // No weather data available, add empty columns
+        Table.AddColumn(
+            Table.AddColumn(
+                Table.AddColumn(
+                    Table.AddColumn(
+                        Table.AddColumn(
+                            Table.AddColumn(
+                                Table.RemoveColumns(MergedWithWeather, {"Weather"}), 
+                                "MaxTemp", each null, type nullable number
+                            ), 
+                            "MinTemp", each null, type nullable number
+                        ), 
+                        "Precipitation", each null, type nullable number
+                    ), 
+                    "Snowfall", each null, type nullable number
+                ), 
+                "PrecipCategory", each "Unknown", type text
+            ), 
+            "TempCategory", each "Unknown", type text
+        )
+in
+    FinalTable

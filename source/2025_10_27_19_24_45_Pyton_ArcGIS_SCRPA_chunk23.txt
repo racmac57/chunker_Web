@@ -1,0 +1,557 @@
+Found: {legend_names}")
+
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "World Street Map (Night)",
+    "Any Optional Context Layers"
+]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            if "7-Day" in lyr.name:
+                lyr.transparency = 0
+            elif "28-Day" in lyr.name:
+                lyr.transparency = 30
+            else:
+                lyr.transparency = 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+project.save()
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+ChatGPT said:
+Thanks for sharing the updated script. You're almost there, but there's one important correction needed in your script: you accidentally defined project_path twice, one after the other — the first path is being overwritten immediately by the second. ✅ Here's the corrected section:
+Replace this block:
+
+project_path = r"C:\GIS_Projects\SCRPA_Weekly_Crime_Report.aprx"
+project_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx"
+project = arcpy.mp.ArcGISProject(project_path)
+With just this:
+
+project_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx"
+project = arcpy.mp.ArcGISProject(project_path)
+This ensures that the script is pointing to the correct .aprx without confusion. ✅ Optional Enhancement (Add Project Exists Check)
+To make the script more robust (especially if moved across machines):
+
+if not os.path.exists(project_path):
+    raise FileNotFoundError(f"Project file not found: {project_path}")
+project = arcpy.mp.ArcGISProject(project_path)
+Once you’ve corrected the path duplication and saved the .py file, run the tool again inside ArcGIS Pro. It should now find the .aprx and execute without the OSError. Would you like me to help you wrap this up with Task Scheduler setup steps for daily or weekly automation? You said:
+update the script including "Optional Enhancement (Add Project Exists Check"
+ChatGPT said:
+Your script now includes a project existence check to ensure the APRX path is valid before execution. This improves reliability—especially when run from Task Scheduler or multiple machines. Let me know if you'd like to add error logging or email notifications next. Provide Feedback | View Changes | Contribute. You said:
+I saved the new version in the the "weekly_crime_report.py" path:
+"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py"
+
+what do I do now to get the script to work in the templet project? ChatGPT said:
+To get the script working inside the TimeSCRPATemplet ArcGIS Pro project, follow these steps to link it to your toolbox (CrimeAutomationTools.atbx) and ensure it runs smoothly:
+
+✅ Step-by-Step Integration of weekly_crime_report.py into the Template Project
+1. Ensure Script Path Is Correct and Accessible
+You’ve saved the updated script here:
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py
+Ensure this location:
+
+Is available offline
+
+Remains unchanged after setup
+
+Is not moved or renamed after linking to the toolbox
+
+2. Update Your Toolbox to Use the Script
+Open ArcGIS Pro and load your TimeSCRPATemplet.aprx project. In the Catalog Pane, right-click on CrimeAutomationTools.atbx → click Edit. If you already created the WeeklyCrimeReport tool:
+
+Right-click the tool → Edit. Under Execution > Script File, click the folder icon and browse to the saved .py file at the path above. Click OK to save and close the script tool properties. This binds the Python script file to the toolbox tool. 3. Test the Script Tool
+In ArcGIS Pro, double-click WeeklyCrimeReport from the toolbox. If parameters are defined, fill them in. If not, just run it. Check the Geoprocessing Messages pane to confirm the tool:
+
+Executes the .aprx project
+
+Exports the crime maps
+
+Logs messages like Legend elements found: ['MainLegend']
+
+4. Optional: Automate with Task Scheduler
+If everything works:
+
+You can now schedule it to run using Task Scheduler with a .bat file that points to python.exe and your script. Let me know when you’re ready for this step. ✅ You’re Done! At this point:
+
+Your script is correctly linked to the toolbox. The template project (.aprx) loads as expected. You can now run the full automation from ArcGIS Pro or schedule it. Would you like me to walk you through setting up Task Scheduler next? You said:
+Uploaded image
+Step 2, #2: I don't see Edit (see attachment 1). I have "Weekly Crime Report" as a script, when i click edit the script appears, I don't see 
+
+TimeSCRPATemplet.atbx path:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.atbx
+
+CrimeAutomationTools.atbx path:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\CrimeAutomationTools.atbx
+
+Weekly Crime Report (Script) Path: 
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\CrimeAutomationTools.atbx\WeeklyCrimeReport
+
+Script:
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx"
+# Check if project file exists
+if not os.path.exists(project_path):
+    raise FileNotFoundError(f"Project file not found: {project_path}")
+project = arcpy.mp.ArcGISProject(project_path)
+map_obj = project.listMaps()[0]  # Assumes one map in project
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+# SQL definition builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+layout = [lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"][0]
+legend_list = layout.listElements("LEGEND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "World Street Map (Night)",
+    "Any Optional Context Layers"
+]
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            if "7-Day" in lyr.name:
+                lyr.transparency = 0
+            elif "28-Day" in lyr.name:
+                lyr.transparency = 30
+            else:
+                lyr.transparency = 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+project.save()
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+
+When I click edit on the script the code comes up in the Notebook app. Can I change the default app to edit the script from note pad to NotePad++? ChatGPT said:
+Yes, you can absolutely change the default editor for .py files from Notepad to Notepad++ (or any preferred text editor). Here's how to set that up on your work computer:
+
+✅ Change Default Python Editor to Notepad++
+Option 1: From File Explorer
+Right-click any .py file (like weekly_crime_report.py). Choose “Open with” > “Choose another app”. Click More apps, then scroll and click “Look for another app on this PC”. Browse to the Notepad++ executable (usually located at:
+C:\Program Files\Notepad++\notepad++.exe)
+
+Check “Always use this app to open .py files”, then click OK.
+
+Option 2: Set File Association via Settings
+Open Settings > Apps > Default apps. Scroll down and select “Choose default apps by file type”. Scroll to .py and click the current default app (likely Notepad). Select Notepad++ from the list (or browse to it as above). 🧩 How This Helps
+Changing the default ensures that:
+
+Any time you click Edit on a script from ArcGIS Pro or File Explorer, it opens in Notepad++. Syntax highlighting, auto-indentation, and tab spacing are improved — making script maintenance much easier. Would you like help customizing Notepad++ to better support Python (e.g., enabling tabs, linting, or auto-save)? You said:
+Uploaded image
+\[media pointer="file-service://file-SSQn5ZXb94siua6mjwx2yD"]
+Step 2, #2: I don't see Edit (see attachment 1). I have "Weekly Crime Report" as a script, when i click edit the script appears, I don't see
+
+TimeSCRPATemplet.atbx path:
+C:\Users\carucci\_r\OneDrive - City of Hackensack\_25\_SCRPA\TIME\_Based\TimeSCRPATemplet\TimeSCRPATemplet.atbx
+
+CrimeAutomationTools.atbx path:
+C:\Users\carucci\_r\OneDrive - City of Hackensack\_Hackensack\_Data\_Repository\GIS\_Tools\CrimeAutomationTools.atbx
+
+Weekly Crime Report (Script) Path:
+C:\Users\carucci\_r\OneDrive - City of Hackensack\_Hackensack\_Data\_Repository\GIS\_Tools\CrimeAutomationTools.atbx\WeeklyCrimeReport
+
+Script:
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+
+csv\_path = r"C:\Users\carucci\_r\OneDrive - City of Hackensack\_Hackensack\_Data\_Repository\Refrence\TimeSCRPT\DateRelated\7Day\_28Day\_Cycle\_20250414.csv"
+export\_root = r"C:\Users\carucci\_r\OneDrive - City of Hackensack\_25\_SCRPA\TIME\_Based\Reports"
+project\_path = r"C:\Users\carucci\_r\OneDrive - City of Hackensack\_25\_SCRPA\TIME\_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx"
+
+# Check if project file exists
+
+if not os.path.exists(project\_path):
+raise FileNotFoundError(f"Project file not found: {project\_path}")
+project = arcpy.mp.ArcGISProject(project\_path)
+map\_obj = project.listMaps()\[0]  # Assumes one map in project
+
+# Load cycle control table
+
+cycle\_df = pd.read\_csv(csv\_path)
+if not any(cycle\_df\['Is\_Due'] == True):
+raise ValueError("No cycle is marked as 'Is\_Due = True' in the cycle table.") current\_cycle = cycle\_df\[cycle\_df\['Is\_Due'] == True].iloc\[0]
+
+# Extract dates and naming info
+
+seven\_day\_start = pd.to\_datetime(current\_cycle\['7\_Day\_Start']).strftime('%Y-%m-%d')
+seven\_day\_end = pd.to\_datetime(current\_cycle\['7\_Day\_End']).strftime('%Y-%m-%d')
+twenty\_eight\_day\_start = pd.to\_datetime(current\_cycle\['28\_Day\_Start']).strftime('%Y-%m-%d')
+twenty\_eight\_day\_end = pd.to\_datetime(current\_cycle\['28\_Day\_End']).strftime('%Y-%m-%d')
+ytd\_start = '2024-12-31'
+report\_name = current\_cycle\['Report\_Name']
+report\_due\_date = pd.to\_datetime(current\_cycle\['Report\_Due\_Date']).strftime('%Y\_%m\_%d')
+
+# Output folder
+
+report\_folder = os.path.join(export\_root, f"{report\_name}\_{report\_due\_date}")
+os.makedirs(report\_folder, exist\_ok=True)
+
+# Keyword filters
+
+keywords\_by\_crime = {
+"Burglary - Auto": \['auto'],
+"Burglary - Comm & Res": \['residence', 'commercial'],
+"Robbery": \['robbery'],
+"Sexual Offenses": \['sexual'],
+"MV Theft": \['motor vehicle theft']
+}
+
+# SQL definition builders
+
+def build\_sql(start\_date, end\_date, keywords):
+clause = " OR ".join(\[f"calltype LIKE '%{kw}%'" for kw in keywords])
+return f"calldate >= date '{start\_date}' AND calldate <= date '{end\_date}' AND disposition LIKE '%report%' AND ({clause})"
+def build\_sql\_ytd(keywords):
+clause = " OR ".join(\[f"calltype LIKE '%{kw}%'" for kw in keywords])
+return f"calldate >= date '{ytd\_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+
+layer\_query\_mapping = {}
+for crime, keywords in keywords\_by\_crime.items():
+layer\_query\_mapping\[f"{crime} 7-Day"] = build\_sql(seven\_day\_start, seven\_day\_end, keywords)
+layer\_query\_mapping\[f"{crime} 28-Day"] = build\_sql(twenty\_eight\_day\_start, twenty\_eight\_day\_end, keywords)
+layer\_query\_mapping\[f"{crime} YTD"] = build\_sql\_ytd(keywords)
+for lname, sql in layer\_query\_mapping.items():
+lyr = map\_obj.listLayers(lname)\[0]
+lyr.definitionQuery = sql
+layout = \[lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"]\[0]
+legend\_list = layout.listElements("LEGEND\_ELEMENT")
+legend\_names = \[l.name for l in legend\_list]
+arcpy.AddMessage(f"Legend elements found: {legend\_names}")
+legend = next((l for l in legend\_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend\_names}")
+crime\_types = list(keywords\_by\_crime.keys())
+base\_layers = \[
+"City Boundaries",
+"World Street Map (Night)",
+"Any Optional Context Layers"
+]
+for crime in crime\_types:
+visible\_layers = \[]
+for lyr in map\_obj.listLayers():
+if crime in lyr.name:
+lyr.visible = True
+visible\_layers.append(lyr)
+if "7-Day" in lyr.name:
+lyr.transparency = 0
+elif "28-Day" in lyr.name:
+lyr.transparency = 30
+else:
+lyr.transparency = 60
+elif any(base in lyr.name for base in base\_layers):
+lyr.visible = True
+else:
+lyr.visible = False
+\# Zoom using extent of all visible features
+extent = None
+for lyr in visible\_layers:
+if lyr.supports("DATASOURCE"):
+with arcpy.da.SearchCursor(lyr, \["SHAPE@"]) as cursor:
+for row in cursor:
+geom = row\[0]
+if extent:
+extent = arcpy.Extent(
+min(extent.XMin, geom.extent.XMin),
+min(extent.YMin, geom.extent.YMin),
+max(extent.XMax, geom.extent.XMax),
+max(extent.YMax, geom.extent.YMax)
+)
+else:
+extent = geom.extent
+if extent:
+map\_obj.defaultCamera.setExtent(extent)
+\# Export
+output\_pdf = os.path.join(report\_folder, f"{crime.replace(' ', '*')}*{report\_name}\_{report\_due\_date}.pdf")
+layout.exportToPDF(output\_pdf)
+project.save()
+arcpy.AddMessage(f"Reports exported to: {report\_folder}")
+
+
+When I click edit on the script the code comes up in the Notebook app. ChatGPT said:
+Thanks for sharing the full context. You’ve done an excellent job setting up your Python script, toolbox, and ArcGIS Pro project. Since your script is now saved and embedded in your .atbx toolbox and you’re not seeing an “Edit” option in the right-click menu from the Catalog pane, here's how to complete the integration and optionally change your default script editor:
+
+✅ To Connect the Script Tool to the Updated .py File
+Although you've pasted your Python directly into the embedded script dialog (which works), if you'd prefer to link the tool to the external .py file so edits don't need to be made within ArcGIS Pro:
+
+Right-click Weekly Crime Report under your CrimeAutomationTools.atbx in the Catalog pane. Click Properties. In the Execution tab:
+
+Check Script File path. If it’s not already set to your .py file, click the folder icon and browse to:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py
+
+Click OK to save changes. This links your script tool directly to your .py file and allows you to edit outside ArcGIS Pro (e.g., in Notepad++), while still running it from the toolbox. 📝 To Change the Default Script Editor to Notepad++
+If you want .py files to open in Notepad++ by default:
+
+Right-click any .py file in File Explorer. Choose Open with > Choose another app. Select Notepad++ from the list or Browse to:
+C:\Program Files\Notepad++\notepad++.exe
+
+Check Always use this app to open .py files. Click OK.
+
+Now, when you click Edit from ArcGIS Pro (which opens the script externally), it will use Notepad++ instead of Windows Notepad or the default Notebook app. Final Tips
+You can still manually paste into the embedded script as you've done—this works fine. However, linking the tool to the .py file is cleaner and avoids having to re-paste future edits. Once linked, you can edit in Notepad++ and simply rerun the tool in ArcGIS Pro to apply the changes—no refreshing needed. Would you like a screenshot walkthrough or brief checklist to print for recurring use? You said:
+Uploaded image
+Step 3: I assume you are refering to the folders in the Catalog pane. I expanded and found the Python Folder its path is: C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python
+
+The said path is different than where the update script is saved. Should I update the script in the wrong path or is there a way to update the path? ChatGPT said:
+Yes, you can and should point your script tool to the correct version of weekly_crime_report.py rather than duplicating or maintaining multiple versions in different folders. Here’s how to update the path without needing to move the script:
+
+✅ Recommended: Point Script Tool to Existing Script
+Since your script is saved in:
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py
+Follow these steps in ArcGIS Pro:
+
+🔧 How to Reassign the Script Source in the Script Tool
+Right-click Weekly Crime Report under CrimeAutomationTools.atbx in the Catalog pane. Choose Properties. In the dialog box, go to the Execution tab. Under Script File, click the folder icon to browse. Navigate to and select the correct file:
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py
+Click OK to save. Now, your script tool will always reference the updated version of the script from the central location. 🗂 Optional: Organize Python Scripts in Catalog
+To easily access this script from ArcGIS Pro:
+
+Right-click Folders in the Catalog pane. Select Add Folder Connection. Choose the folder:
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts
+Now you’ll see this script in your Catalog under the Scripts folder. Would you like me to help you create a .bat file or Windows Task Scheduler setup next? Provide Feedback | View Changes | Contribute. You said:
+i changed the path of the script. i got the following error when running it:
+Weekly Crime Report
+=====================
+Tool Path
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\CrimeAutomationTools.atbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Monday, May 5, 2025 5:02:22 PM
+Legend elements found: ['MainLegend']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\weekly_crime_report.py", line 122, in <module>
+﻿    project.save()
+﻿  File "C:\Program Files\ArcGIS\Pro\Resources\ArcPy\arcpy\_mp.py", line 1323, in save
+﻿    return convertArcObjectToPythonObject(self._arc_object.save(*gp_fixargs((), True)))
+﻿                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+﻿OSError: C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx
+
+Failed script Weekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Monday, May 5, 2025 5:02:37 PM (Elapsed Time: 14.82 seconds)
+ChatGPT said:
+The error you're seeing:
+
+OSError: C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\TimeSCRPATemplet.aprx
+…indicates that project.save() is failing, most likely because you currently have the .aprx file open in ArcGIS Pro. ✅ Resolution Options
+Option 1: Remove the project.save() Line
+Since your script:
+
+Uses arcpy.mp.ArcGISProject() to open the project
+
+Only changes the layout and layer properties temporarily for PDF export
+
+Does not require saving changes to the .aprx file…
+
+…it’s safe to remove or comment out the last line:
+
+# project.save()  # Comment this out
+This avoids file locking issues with ArcGIS Pro and still lets the export run successfully. Option 2: Run with the Project Closed
+If you do want to save changes to the project:
+
+Close the .aprx project in ArcGIS Pro before running the script. Then run the tool again. ArcGIS Pro will lock a project file while it's open, preventing external scripts from saving to it. ✅ Recommended Action
+Comment out the project.save() line like this:
+
+# project.save()
+Then re-run the tool. Your report PDFs will still export correctly without trying to write to the .aprx file. Would you like me to update the script in your canvas to reflect this change? Provide Feedback | View Changes | Contribute. You said:
+yes
+ChatGPT said:
+✅ Your script has been updated to remove the project.save() line, which was causing the OSError due to the .aprx file already being open in ArcGIS Pro. This ensures the tool will execute successfully without trying to save an already open project. Let me know if you want help with making this run through Task Scheduler or converting outputs into zipped email-ready formats. Provide Feedback | View Changes | Contribute. You said:
+Robbery_C05W18_2025_05_06.pdf
+PDF
+Sexual_Offenses_C05W18_2025_05_06.pdf
+PDF
+The script was updated and the automation was run. I received this message:
+
+Weekly Crime Report
+=====================
+Tool Path
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\CrimeAutomationTools.atbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Monday, May 5, 2025 5:28:27 PM
+Legend elements found: ['MainLegend']
+Reports exported to: C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C05W18_2025_05_06
+Succeeded at Monday, May 5, 2025 5:28:53 PM (Elapsed Time: 25.24 seconds)
+
+However the exports are missing the basemaps. is this because i removed the dark human geography base, lables and details? I decided to use World Street Map (Night - Community Maps) as it gives the street names and more details. does the script have to be updated to keep the updated base map selected during the export process? ChatGPT said:
+Yes, your suspicion is correct — the missing basemap in your PDF exports is likely due to how the World Street Map (Night) layer is handled in the script versus how it's treated in the actual map project. Currently, the script uses this section to determine which layers remain visible during export:
+
+base_layers = [
+    "City Boundaries",
+    "World Street Map (Night)",
+    "Any Optional Context Layers"
+]
+However, it's very possible that the actual layer name in your map contents is different — even a slight difference in spacing, capitalization, or parentheses will cause it to be skipped. ✅ Fix Recommendation
+We’ll adjust the script to:
+
+Log the names of all available layers (for debugging purposes). Relax the base layer matching to check for a partial match in the layer name (like "World Street" instead of requiring the exact "World Street Map (Night)"). ✅ Script Update (Patch Only)
+Update the base layer matching block with this more flexible logic:
+
+# Log all layer names to verify what's present
+layer_names = [lyr.name for lyr in map_obj.listLayers()]
+arcpy.AddMessage(f"Map contains the following layers: {layer_names}")
+
+# Update to use partial name matching for base layers
+base_layer_keywords = ["City Boundaries", "World Street", "Context"]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            if "7-Day" in lyr.name:
+                lyr.transparency = 0
+            elif "28-Day" in lyr.name:
+                lyr.transparency = 30
+            else:
+                lyr.transparency = 60
+        elif any(keyword in lyr.name for keyword in base_layer_keywords):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+✅ What This Fix Does:
+Ensures base/contextual layers like World Street Map (Night) are retained as long as the name contains "World Street". Adds a log of all available layers to the message window for troubleshooting. Avoids hard-coding full names that may vary depending on the source or updates to the basemap. Would you like me to update the full script in your project file with these changes? You said:
+yes
+ChatGPT said:
+The script has been updated to ensure your new basemap (like “World Street Map (Night - Community Maps)”) is always retained during export. It now checks for base layer keywords like “World Street” or “Context” so that your chosen basemap remains visible without relying on exact layer names. You're ready to rerun the script and verify that the basemap appears in the exported PDF. Would you like me to help validate which exact layers are being picked up based on their names? You said:
+Burglary_-_Comm_&_Res_C05W18_2025_05_06.pdf
+PDF
+MV_Theft_C05W18_2025_05_06.pdf
+PDF
+Burglary_-_Auto_C05W18_2025_05_06.pdf
+PDF
+almost there. I added a layer blend of "Luminosity" to the World Street Map (Night - Community Maps). This was done due to the streets being blue. this cause the map to look busy as the heat map for YTD was also blue. Can you account for this in the script? or is there a differnt and better way to make the steets in the layer a grey or white
+ChatGPT said:
+Great, you're almost at the finish line! 🔧 Problem Summary:
+You're using World Street Map (Night - Community Maps) as your basemap, which provides strong contextual detail (like street names), but because both the basemap and your YTD heatmap use blue tones, the resulting visuals are "busy" and lack clarity. You applied a "Luminosity" layer blend mode manually in ArcGIS Pro to fix this — which improved visibility — but now you're asking:
+
+“Can the script apply this blend automatically or is there a better way to make the streets white or gray?”
+
+✅ Solution Overview
+ArcPy (as of ArcGIS Pro 3.x) does not support setting layer blend modes like "Luminosity" through scripting. This must be done manually in the .aprx project file. 💡 Recommended Approach
+Here’s how to achieve cleaner, consistent map output with context:
+
+1. Keep your current basemap (World Street Map Night)
+Good call — it gives needed street context. However, keep the "Luminosity" blend set manually in your .aprx file.

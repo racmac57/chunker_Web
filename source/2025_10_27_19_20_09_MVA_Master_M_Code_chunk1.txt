@@ -1,0 +1,271 @@
+let
+    // === STEP 1: Load RMS Excel File from Folder ===
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\MVA"),
+    FilteredFiles = Table.SelectRows(Source, each Text.EndsWith([Extension], ".xlsx")),
+    FirstFile = FilteredFiles{0}[Content],
+    ExcelData = Excel.Workbook(FirstFile, null, true),
+    SheetData = ExcelData{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(SheetData, [PromoteAllScalars=true]),
+
+    // === STEP 2: Clean Column Names ===
+    FixedColumns = Table.RenameColumns(PromotedHeaders, {{"Case Number", "CaseNumber"}}, MissingField.Ignore),
+    
+    CurrentColumns = Table.ColumnNames(FixedColumns),
+    PascalCaseNames = List.Transform(CurrentColumns, each 
+        if Text.Contains(_, " ") then
+            Text.Combine(
+                List.Transform(Text.SplitAny(_, " _"), 
+                    each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+                ), ""
+            )
+        else _),
+    RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+    RenamedTable = Table.RenameColumns(FixedColumns, RenamePairs, MissingField.Ignore),
+
+    // === STEP 3: Add Basic Date and Time ===
+    AddedIncDate = Table.AddColumn(RenamedTable, "IncDate", each 
+        if [IncidentDate] <> null then Date.From([IncidentDate])
+        else if [ReportDate] <> null then Date.From([ReportDate])
+        else null),
+
+    AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+        if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime]))
+        else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime]))
+        else null),
+
+    // === STEP 3.5: Clean Narrative Text (Alternative Method) ===
+    CleanedNarrative = Table.AddColumn(AddedIncTime, "NarrativeClean", each 
+        if [Narrative] <> null then Text.Clean(Text.Trim(Text.From([Narrative]))) else null),
+
+    // === STEP 3.6: Simple Vehicle Data Cleaning ===
+    // Keep it simple - just add new clean columns without removing originals
+    AddedReg1Clean = Table.AddColumn(CleanedNarrative, "Reg1Clean", each 
+        if [Registration1] <> null then Text.Upper(Text.From([Registration1])) else null),
+    
+    AddedMake1Clean = Table.AddColumn(AddedReg1Clean, "Make1Clean", each 
+        if [Make1] <> null then Text.Upper(Text.From([Make1])) else null),
+    
+    AddedModel1Clean = Table.AddColumn(AddedMake1Clean, "Model1Clean", each 
+        if [Model1] <> null then Text.Upper(Text.From([Model1])) else null),
+    
+    AddedRegState1Clean = Table.AddColumn(AddedModel1Clean, "RegState1Clean", each 
+        if [RegState1] <> null then Text.Upper(Text.From([RegState1])) else null),
+
+    AddedReg2Clean = Table.AddColumn(AddedRegState1Clean, "Reg2Clean", each 
+        if [Registration2] <> null then Text.Upper(Text.From([Registration2])) else null),
+    
+    AddedMake2Clean = Table.AddColumn(AddedReg2Clean, "Make2Clean", each 
+        if [Make2] <> null then Text.Upper(Text.From([Make2])) else null),
+    
+    AddedModel2Clean = Table.AddColumn(AddedMake2Clean, "Model2Clean", each 
+        if [Model2] <> null then Text.Upper(Text.From([Model2])) else null),
+    
+    AddedRegState2Clean = Table.AddColumn(AddedModel2Clean, "RegState2Clean", each 
+        if [RegState2] <> null then Text.Upper(Text.From([RegState2])) else null),
+
+    ReorderedColumns = AddedRegState2Clean,
+
+    // === STEP 4: Squad Processing ===
+    AddedSquad = Table.AddColumn(ReorderedColumns, "SquadStandardized", each 
+        if [Squad] <> null then 
+            let squadText = Text.Upper(Text.From([Squad]))
+            in if squadText = "A1" then "A1"
+            else if squadText = "A2" then "A2" 
+            else if squadText = "A3" then "A3"
+            else if squadText = "A4" then "A4"
+            else if squadText = "B1" then "B1"
+            else if squadText = "B2" then "B2"
+            else if squadText = "B3" then "B3"
+            else if squadText = "B4" then "B4"
+            else if squadText = "TFR" then "TFR"
+            else if squadText = "CSB" then "CSB"
+            else if squadText = "DET" then "DET"
+            else if Text.Contains(squadText, "ADMIN") then "Admin"
+            else if squadText = "HACSOC" then "HACSOC"
+            else if squadText = "HOU" then "HOU"
+            else if squadText = "STA" then "STA"
+            else squadText
+        else "Unknown"),
+
+    AddedPlatoon = Table.AddColumn(AddedSquad, "Platoon", each 
+        let squad = [SquadStandardized]
+        in if squad = "A1" or squad = "A2" or squad = "A3" or squad = "A4" then "A"
+        else if squad = "B1" or squad = "B2" or squad = "B3" or squad = "B4" then "B"
+        else "N/A"),
+
+    // Remove original Squad and rename
+    RemovedSquad = Table.RemoveColumns(AddedPlatoon, {"Squad"}, MissingField.Ignore),
+    RenamedSquad = Table.RenameColumns(RemovedSquad, {{"SquadStandardized", "Squad"}}, MissingField.Ignore),
+
+    // === STEP 5: Add Enhanced Analysis Columns (Your Block Logic) ===
+    
+    // Add StreetNumber
+    AddedStreetNumber = Table.AddColumn(RenamedSquad, "StreetNumber", each 
+        try Number.From(Text.BeforeDelimiter([FullAddress] ? ? "", " ")) otherwise null),
+
+    // Add Location (Fixed for intersections)
+    AddedLocation = Table.AddColumn(AddedStreetNumber, "Location", each 
+        let
+            fullAddr = [FullAddress] ? ? "",
+            // For intersections (no house number), take everything before the first comma
+            // For regular addresses, take everything between first space and first comma
+            result = if Text.Contains(fullAddr, "&") then
+                // Intersection - take everything before first comma
+                try Text.BeforeDelimiter(fullAddr, ", ") otherwise fullAddr
+            else
+                // Regular address - take between first space and first comma
+                try Text.BetweenDelimiters(fullAddr, " ", ", ") 
+                otherwise try Text.AfterDelimiter(fullAddr, " ", 1) 
+                otherwise fullAddr
+        in result),
+
+    // Add Block (Fixed logic for full location and intersections)
+    AddedBlock = Table.AddColumn(AddedLocation, "Block", each 
+        let
+            location = [Location] ? ? "",
+            streetNumber = [StreetNumber] ? ? 0,
+            CustomColumn = 
+                if Text.Contains(location, "&") then 
+                    // Handle intersections - abbreviate both streets
+                    let
+                        // Split by & and process each street
+                        streets = Text.SplitAny(location, "&"),
+                        street1 = Text.Trim(streets{0}),
+                        street2 = if List.Count(streets) > 1 then Text.Trim(streets{1}) else "",
+                        // Abbreviate first street
+                        abbrev1 = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(street1, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way"),
+                        // Abbreviate second street  
+                        abbrev2 = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(street2, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way")
+                    in
+                        abbrev1 & " & " & abbrev2
+                else
+                    // Handle regular addresses - use full location with abbreviations
+                    let 
+                        BlockNumber = try Number.ToText(Number.IntegerDivide(streetNumber, 100) * 100) & " Block" otherwise "0 Block",
+                        AbbreviatedLocation = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(location, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way")
+                    in
+                        AbbreviatedLocation & ", " & BlockNumber
+        in CustomColumn),
+
+    // Add HourOfDay
+    AddedHourOfDay = Table.AddColumn(AddedBlock, "HourOfDay", each 
+        if [IncTime] <> null then Time.Hour([IncTime]) else null),
+
+    // Add TimeOfDay (matching your exact categories)
+    AddedTimeOfDay = Table.AddColumn(AddedHourOfDay, "TimeOfDay", each
+        let t = try Time.From([IncTime]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)"),
+
+    // === STEP 6: Add Case Analysis Columns ===
+    
+    // Add Year from Case Number
+    AddedCaseYear = Table.AddColumn(AddedTimeOfDay, "CaseYear", each 
+        if [CaseNumber] <> null then 
+            try Text.Start([CaseNumber], 2) otherwise null
+        else null),
+    
+    // Add Sequential Number from Case Number  
+    AddedCaseSequential = Table.AddColumn(AddedCaseYear, "CaseSequential", each 
+        if [CaseNumber] <> null then 
+            try Text.AfterDelimiter([CaseNumber], "-") otherwise null
+        else null),
+    
+    // Identify if case is a supplement (has letter at end)
+    AddedIsSupplement = Table.AddColumn(AddedCaseSequential, "IsSupplement", each 
+        if [CaseNumber] <> null then 
+            let
+                caseNum = [CaseNumber],
+                lastChar = Text.End(caseNum, 1),
+                isLetter = try (Number.From(lastChar) = null) otherwise true
+            in isLetter
+        else false),
+    
+    // Extract supplement letter
+    AddedSupplementLetter = Table.AddColumn(AddedIsSupplement, "SupplementLetter", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.End([CaseNumber], 1)
+        else null),
+    
+    // Get base case number (without supplement letter)
+    AddedBaseCaseNumber = Table.AddColumn(AddedSupplementLetter, "BaseCaseNumber", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.RemoveRange([CaseNumber], Text.Length([CaseNumber]) - 1, 1)
+        else [CaseNumber]),
+    
+    // Determine final case status
+    AddedFinalCaseStatus = Table.AddColumn(AddedBaseCaseNumber, "FinalCaseStatus", each 
+        let
+            status1 = [Case_Status],
+            status2 = [Case_Status_1]
+        in
+            if status1 <> null then status1
+            else if status2 <> null then status2  
+            else "Open"),
+    
+    // Identify Traffic Supplements (for case closure tracking)
+    AddedIsTrafficSupplement = Table.AddColumn(AddedFinalCaseStatus, "IsTrafficSupplement", each 
+        [IsSupplement] = true and [Squad] = "TFR"),
+
+    // === STEP 6.5: Add Temporal Analysis Columns ===
+    AddedYear = Table.AddColumn(AddedIsTrafficSupplement, "Year", each 
+        if [IncDate] <> null then Date.Year([IncDate]) else null),
+
+    AddedMonth = Table.AddColumn(AddedYear, "Month", each 
+        if [IncDate] <> null then Date.Month([IncDate]) else null),
+
+    AddedMonthName = Table.AddColumn(AddedMonth, "MonthName", each 
+        if [IncDate] <> null then Date.MonthName([IncDate]) else null),
+
+    AddedDayOfWeek = Table.AddColumn(AddedMonthName, "DayOfWeek", each 
+        if [IncDate] <> null then Date.DayOfWeekName([IncDate]) else null),
+
+    AddedDayType = Table.AddColumn(AddedDayOfWeek, "DayType", each 
+        if [IncDate] <> null then
+            if Date.DayOfWeek([IncDate], Day.Monday) >= 5 then "Weekend" else "Weekday"
+        else null),
+
+    // === NEW: Add IsRushHour Column ===
+    AddedIsRushHour = Table.AddColumn(AddedDayType, "IsRushHour", each
+        if [IncTime] <> null and [DayType] = "Weekday" then
+            let t = [IncTime]
+            in (t >= #time(6,0,0) and t < #time(9,0,0)) or 
+               (t >= #time(15,0,0) and t < #time(18,0,0))
+        else false),
+
+    // === STEP 7: Add AllIncidents ===
+    AddedAllIncidents = Table.AddColumn(AddedIsRushHour, "AllIncidents", each 
+        [IncidentType1] & 
+        (if [IncidentType2] <> null then " - " & [IncidentType2] else "") & 
+        (if [IncidentType3] <> null then " - " & [IncidentType3] else ""))
+in
+    AddedAllIncidents

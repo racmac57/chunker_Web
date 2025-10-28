@@ -1,0 +1,97 @@
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\TIME_OFF_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        (Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls"))
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                TimeOffActivity = ExcelFile{[Name="TimeOffActivity"]}[Data],
+                PromotedHeaders = Table.PromoteHeaders(TimeOffActivity, [PromoteAllScalars=true]),
+                
+                ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+                
+                SplitTimes = Table.SplitColumn(ChangedDateType, "Times", Splitter.SplitTextByDelimiter("-", QuoteStyle.Csv), {"START_TIME", "END_TIME"}),
+                ChangedTimeTypes = Table.TransformColumnTypes(SplitTimes,{
+                    {"START_TIME", type datetime}, 
+                    {"END_TIME", type datetime}
+                }),
+                
+                ChangedHoursType = Table.TransformColumnTypes(ChangedTimeTypes,{{"Hours", type number}}),
+                
+                TrimmedFields = Table.TransformColumns(ChangedHoursType,{
+                    {"Group", Text.Trim, type text}, 
+                    {"Employee", Text.Trim, type text}, 
+                    {"Reason", Text.Trim, type text}, 
+                    {"Status", Text.Trim, type text},
+                    {"Shift", Text.Trim, type text}
+                }),
+                
+                CleanedFields = Table.TransformColumns(TrimmedFields,{
+                    {"Group", Text.Clean, type text}, 
+                    {"Employee", Text.Clean, type text}, 
+                    {"Reason", Text.Clean, type text}, 
+                    {"Status", Text.Clean, type text}
+                }),
+                
+                CleanedComments = if Table.HasColumns(CleanedFields, "Comments") 
+                    then Table.TransformColumns(CleanedFields,{
+                        {"Comments", each Text.Clean(Text.Trim(_)), type text}
+                    })
+                    else CleanedFields,
+                
+                AddedMonth = Table.AddColumn(CleanedComments, "Month", each Date.Month([Date]), Int64.Type),
+                AddedYear = Table.AddColumn(AddedMonth, "Year", each Date.Year([Date]), Int64.Type),
+                AddedMonthName = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+                AddedWeek = Table.AddColumn(AddedMonthName, "Week of Year", each Date.WeekOfYear([Date]), Int64.Type),
+                AddedDay = Table.AddColumn(AddedWeek, "Day", each Date.Day([Date]), Int64.Type),
+                AddedDayOfWeek = Table.AddColumn(AddedDay, "Day of Week", each Date.DayOfWeek([Date]), Int64.Type),
+                AddedDayOfYear = Table.AddColumn(AddedDayOfWeek, "Day of Year", each Date.DayOfYear([Date]), Int64.Type),
+                AddedDayName = Table.AddColumn(AddedDayOfYear, "Day Name", each Date.DayOfWeekName([Date]), type text),
+                
+                AddedMonthYear = Table.AddColumn(AddedDayName, "MONTH_YEAR", each 
+                    Date.From(Text.Combine({Text.From([Month]), "/1/", Text.From([Year])})), 
+                    type date
+                )
+            in
+                AddedMonthYear
+        otherwise null
+    ),
+    
+    // Remove failed files (those that returned null)
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Get column names from first successful file
+    FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+    ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore),
+    
+    // FINAL DATA TYPE ENFORCEMENT
+    FinalDataTypes = Table.TransformColumnTypes(CleanedColumns,{
+        {"Group", type text},
+        {"Employee", type text}, 
+        {"Reason", type text},
+        {"Status", type text},
+        {"Date", type date},
+        {"Shift", type text},
+        {"START_TIME", type datetime},
+        {"END_TIME", type datetime},
+        {"Hours", type number},
+        {"Month", Int64.Type},
+        {"Year", Int64.Type},
+        {"Month Name", type text},
+        {"Week of Year", Int64.Type},
+        {"Day", Int64.Type},
+        {"Day of Week", Int64.Type},
+        {"Day of Year", Int64.Type},
+        {"Day Name", type text},
+        {"MONTH_YEAR", type date},
+        {"Comments", type text}
+    }, MissingField.Ignore)
+in
+    FinalDataTypes

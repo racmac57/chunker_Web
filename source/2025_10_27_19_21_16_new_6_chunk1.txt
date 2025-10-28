@@ -1,0 +1,82 @@
+## 🕒 2025-06-10-18-24-14
+# SCRPA/cycle_chart_export.py
+# Author: R. A. Carucci
+# Purpose: Generates time-of-day grouped bar charts for specified crime categories across 7-Day, 28-Day, and YTD cycles. import pandas as pd
+import matplotlib.pyplot as plt
+
+# Define colors for each cycle
+chart_colors = {
+    "7-Day": "#D9F2D0",   # Light green
+    "28-Day": "#E0404C",  # Red
+    "YTD": "#96A0F9"      # Light blue
+}
+
+# Map time bins to descriptive labels
+time_of_day_labels = {
+    "00:00-03:59": "Night\n(00:00–03:59)",
+    "04:00-07:59": "Early Morning\n(04:00–07:59)",
+    "08:00-11:59": "Morning\n(08:00–11:59)",
+    "12:00-15:59": "Afternoon\n(12:00–15:59)",
+    "16:00-19:59": "Evening\n(16:00–19:59)",
+    "20:00-23:59": "Late Evening\n(20:00–23:59)"
+}
+
+# Assign time bin based on hour
+def get_time_of_day(hour):
+    if 0 <= hour < 4:
+        return "00:00-03:59"
+    elif 4 <= hour < 8:
+        return "04:00-07:59"
+    elif 8 <= hour < 12:
+        return "08:00-11:59"
+    elif 12 <= hour < 16:
+        return "12:00-15:59"
+    elif 16 <= hour < 20:
+        return "16:00-19:59"
+    else:
+        return "20:00-23:59"
+
+# Check if a row matches a crime category
+def match_crime_category(incident, keywords):
+    return any(keyword.lower() in incident.lower() for keyword in keywords)
+
+# Generate and save cycle chart for a given crime category
+def generate_cycle_chart(category_name, keywords, df, output_dir):
+    df = df[df["Incident"].apply(lambda x: match_crime_category(str(x), keywords))]
+    if df.empty:
+        return None
+
+    grouped = (
+        df.groupby(["TimeOfDay", "Period"])
+        .size()
+        .unstack(fill_value=0)
+        .reindex([
+            "00:00-03:59", "04:00-07:59", "08:00-11:59",
+            "12:00-15:59", "16:00-19:59", "20:00-23:59"
+        ])
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    grouped.plot(kind="bar", ax=ax, color=[chart_colors.get(c, "#333") for c in grouped.columns])
+
+    for container in ax.containers:
+        for bar in container:
+            height = bar.get_height()
+            if height > 0:
+                ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height),
+                            xytext=(0, 3), textcoords="offset points", ha='center', va='bottom')
+
+    ax.set_title(f"{category_name} - Calls by Time of Day", fontsize=16, fontweight="bold")
+    ax.set_xlabel("Time of Day", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Incident Count", fontsize=12, fontweight="bold")
+    ax.set_xticklabels([time_of_day_labels.get(label, label) for label in grouped.index], rotation=0)
+    ax.yaxis.set_ticks([])
+    ax.grid(False, axis='y')
+    legend = ax.legend(title="Cycle")
+    legend.set_title("Cycle", prop={'weight': 'bold'})
+    plt.setp(legend.get_texts(), fontweight='bold')
+
+    file_name = f"{category_name.replace(' ', '_')}_Cycle_Chart.png"
+    fig.savefig(output_dir / file_name, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return file_name

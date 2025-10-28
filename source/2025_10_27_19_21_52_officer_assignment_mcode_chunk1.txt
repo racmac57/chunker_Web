@@ -1,0 +1,60 @@
+let
+    Source = Excel.CurrentWorkbook(){[Name="Table1"]}[Content],
+    #"Changed Type" = Table.TransformColumnTypes(Source,{{"Officer", type text}, {"Squad", type text}}),
+    #"Filtered Rows" = Table.SelectRows(#"Changed Type", each ([Officer] <> null and [Officer] <> "")),
+    
+    // Split officer names into components
+    #"Split Column by Delimiter" = Table.SplitColumn(#"Filtered Rows", "Officer", 
+        Splitter.SplitTextByDelimiter(" ", QuoteStyle.Csv), 
+        {"Officer.1", "Officer.2", "Officer.3", "Officer.4"}),
+    
+    // Rename columns to standard format
+    #"Renamed Columns" = Table.RenameColumns(#"Split Column by Delimiter",{
+        {"Officer.1", "RANK"}, 
+        {"Officer.2", "FIRST_NAME"}, 
+        {"Officer.3", "LAST_NAME"}, 
+        {"Officer.4", "BADGE_NUMBER"}
+    }),
+    
+    // Clean and trim all text fields
+    #"Additional Clean and Trim" = Table.TransformColumns(#"Renamed Columns",{
+        {"RANK", each Text.Clean(Text.Trim(_)), type text}, 
+        {"FIRST_NAME", each Text.Clean(Text.Trim(_)), type text}, 
+        {"LAST_NAME", each Text.Clean(Text.Trim(_)), type text},
+        {"BADGE_NUMBER", each Text.Clean(Text.Trim(_)), type text},
+        {"Squad", each Text.Clean(Text.Trim(_)), type text}
+    }),
+    
+    // Handle special name cases
+    #"Replaced Value" = Table.ReplaceValue(#"Additional Clean and Trim","Del","DelCarpio",Replacer.ReplaceText,{"LAST_NAME"}),
+    #"Replaced Value1" = Table.ReplaceValue(#"Replaced Value","Carpio","156",Replacer.ReplaceText,{"BADGE_NUMBER"}),
+    
+    // Convert badge number to whole number
+    #"Convert Badge to Number" = Table.TransformColumnTypes(#"Replaced Value1",{{"BADGE_NUMBER", Int64.Type}}),
+    
+    // Update lieutenant squad assignments
+    #"Squad Updates" = Table.ReplaceValue(#"Convert Badge to Number", each [Squad], each 
+        if [FIRST_NAME] = "Luis" and [LAST_NAME] = "Dominguez" then "TC - B3 | B4"
+        else if [FIRST_NAME] = "Jason" and [LAST_NAME] = "Klosk" then "TC - B1 | B2"
+        else if [FIRST_NAME] = "John" and [LAST_NAME] = "Dalton" then "CSB"
+        else if [FIRST_NAME] = "Richard" and [LAST_NAME] = "Levis" then "TC - A1 | A2"
+        else if [FIRST_NAME] = "Allan" and [LAST_NAME] = "DeLeon" then "TC - A3 | A4"
+        else [Squad], 
+        Replacer.ReplaceValue, {"Squad"}),
+    
+    // Add assignment categories based on squad
+    #"Add Assignment Column" = Table.AddColumn(#"Squad Updates", "ASSIGNMENT", each 
+        if List.Contains({"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"}, [Squad]) then "Patrol"
+        else if Text.Contains([Squad], "TC - A") or Text.Contains([Squad], "TC - B") then "Patrol"
+        else if [Squad] = "TRF" then "Traffic"
+        else if [Squad] = "ADMIN" then "Administrator"
+        else if [Squad] = "DET" then "Detectives"
+        else if [Squad] = "CSB" then "Crime Suppression Bureau"
+        else if [Squad] = "STA" then "School Threat Assessment & Crime Prevention"
+        else if [Squad] = "SSOCC" then "Safe Streets Operations Control Center"
+        else if [Squad] = "REMU" then "Records and Evidence Management Unit"
+        else if [Squad] = "TRN" then "Policy and Training Unit"
+        else if [Squad] = "HACSOC" then "Special Operations"
+        else "Unknown", type text)
+in
+    #"Add Assignment Column"

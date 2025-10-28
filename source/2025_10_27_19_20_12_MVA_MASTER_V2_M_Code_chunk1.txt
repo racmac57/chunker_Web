@@ -1,0 +1,374 @@
+MVA_MASTER_V2 M Code:
+// 🕒 2025-06-07-15-30-45
+// Enhanced_MVA_MASTER/MVA_MASTER_Enhanced
+// Author: R. A. Carucci
+// Purpose: Enhanced MVA data processing with supplement handling and call type categorization
+
+let
+    // === STEP 1: Load RMS Excel File with Supplements ===
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\MVA"),
+    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+
+    // === STEP 2: Load Call Type Categories from External File ===
+    CallTypeSource = Excel.Workbook(
+        File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\CallType_Categories.xlsx"), 
+        null, true){[Item="CallType_Categories",Kind="Sheet"]}[Data],
+    CallTypeHeaders = Table.PromoteHeaders(CallTypeSource, [PromoteAllScalars=true]),
+    CallTypeLookup = Table.RenameColumns(CallTypeHeaders, {
+        {"Call Type", "CallType"}, 
+        {"Category", "CallCategory"}, 
+        {"Response Type", "ResponseType"}
+    }),
+
+    // === STEP 3: Clean Column Names ===
+    FixedColumns = Table.RenameColumns(PromotedHeaders, {
+        {"Case Number", "CaseNumber"},
+        {"Incident Date", "IncidentDate"},
+        {"Incident Time", "IncidentTime"},
+        {"Incident Date_Between", "IncidentDateBetween"},
+        {"Incident Time_Between", "IncidentTimeBetween"},
+        {"Report Date", "ReportDate"},
+        {"Report Time", "ReportTime"},
+        {"Incident Type_1", "IncidentType1"},
+        {"Incident Type_2", "IncidentType2"},
+        {"Incident Type_3", "IncidentType3"},
+        {"Total Value Stolen", "TotalValueStolen"},
+        {"Total Value Recover", "TotalValueRecover"},
+        {"Registration 1", "Registration1"},
+        {"Reg State 1", "RegState1"},
+        {"Registration 2", "Registration2"},
+        {"Reg State 2", "RegState2"},
+        {"Officer of Record", "OfficerOfRecord"},
+        {"Det_Assigned", "DetAssigned"},
+        {"Case_Status", "CaseStatus"},
+        {"NIBRS Classification", "NIBRSClassification"}
+    }, MissingField.Ignore),
+    
+    CurrentColumns = Table.ColumnNames(FixedColumns),
+    PascalCaseNames = List.Transform(CurrentColumns, each 
+        if Text.Contains(_, " ") then
+            Text.Combine(
+                List.Transform(Text.SplitAny(_, " _"), 
+                    each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+                ), ""
+            )
+        else _),
+    RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+    RenamedTable = Table.RenameColumns(FixedColumns, RenamePairs, MissingField.Ignore),
+
+    // === STEP 4: Add Basic Date and Time ===
+    AddedIncDate = Table.AddColumn(RenamedTable, "IncDate", each 
+        if [IncidentDate] <> null then Date.From([IncidentDate])
+        else if [ReportDate] <> null then Date.From([ReportDate])
+        else null),
+
+    AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+        if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime]))
+        else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime]))
+        else null),
+
+    // === STEP 5: Clean Narrative and Vehicle Data ===
+    CleanedNarrative = Table.AddColumn(AddedIncTime, "NarrativeClean", each 
+        if [Narrative] <> null then Text.Clean(Text.Trim(Text.From([Narrative]))) else null),
+
+    // Vehicle data cleaning
+    AddedReg1Clean = Table.AddColumn(CleanedNarrative, "Reg1Clean", each 
+        if [Registration1] <> null then Text.Upper(Text.From([Registration1])) else null),
+    AddedMake1Clean = Table.AddColumn(AddedReg1Clean, "Make1Clean", each 
+        if [Make1] <> null then Text.Upper(Text.From([Make1])) else null),
+    AddedModel1Clean = Table.AddColumn(AddedMake1Clean, "Model1Clean", each 
+        if [Model1] <> null then Text.Upper(Text.From([Model1])) else null),
+    AddedRegState1Clean = Table.AddColumn(AddedModel1Clean, "RegState1Clean", each 
+        if [RegState1] <> null then Text.Upper(Text.From([RegState1])) else null),
+
+    AddedReg2Clean = Table.AddColumn(AddedRegState1Clean, "Reg2Clean", each 
+        if [Registration2] <> null then Text.Upper(Text.From([Registration2])) else null),
+    AddedMake2Clean = Table.AddColumn(AddedReg2Clean, "Make2Clean", each 
+        if [Make2] <> null then Text.Upper(Text.From([Make2])) else null),
+    AddedModel2Clean = Table.AddColumn(AddedMake2Clean, "Model2Clean", each 
+        if [Model2] <> null then Text.Upper(Text.From([Model2])) else null),
+    AddedRegState2Clean = Table.AddColumn(AddedModel2Clean, "RegState2Clean", each 
+        if [RegState2] <> null then Text.Upper(Text.From([RegState2])) else null),
+
+    // === STEP 6: Enhanced Case Analysis with Supplement Detection ===
+    
+    // Extract year from case number
+    AddedCaseYear = Table.AddColumn(AddedRegState2Clean, "CaseYear", each 
+        if [CaseNumber] <> null then 
+            try "20" & Text.Start([CaseNumber], 2) otherwise null
+        else null),
+    
+    // Extract sequential number (before any letter suffix)
+    AddedCaseSequential = Table.AddColumn(AddedCaseYear, "CaseSequential", each 
+        if [CaseNumber] <> null then 
+            try 
+                let
+                    afterDash = Text.AfterDelimiter([CaseNumber], "-"),
+                    // Remove any trailing letters
+                    numbersOnly = Text.Select(afterDash, {"0".."9"})
+                in numbersOnly
+            otherwise null
+        else null),
+    
+    // Enhanced supplement detection (letter at end)
+    AddedIsSupplement = Table.AddColumn(AddedCaseSequential, "IsSupplement", each 
+        if [CaseNumber] <> null then 
+            let
+                caseNum = [CaseNumber],
+                lastChar = Text.End(caseNum, 1),
+                isLetter = try (Number.From(lastChar) = null and lastChar <> "") otherwise false
+            in isLetter
+        else false),
+    
+    // Extract supplement letter
+    AddedSupplementLetter = Table.AddColumn(AddedIsSupplement, "SupplementLetter", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.Upper(Text.End([CaseNumber], 1))
+        else null),
+    
+    // Get base case number (without supplement letter)
+    AddedBaseCaseNumber = Table.AddColumn(AddedSupplementLetter, "BaseCaseNumber", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.RemoveRange([CaseNumber], Text.Length([CaseNumber]) - 1, 1)
+        else [CaseNumber]),
+    
+    // Determine final case status (handle multiple status columns)
+    AddedFinalCaseStatus = Table.AddColumn(AddedBaseCaseNumber, "FinalCaseStatus", each 
+        let
+            status = [CaseStatus]
+        in
+            if status <> null and status <> "Case_Status" then status
+            else "Open"),
+
+    // === STEP 7: Squad Processing ===
+    AddedSquad = Table.AddColumn(AddedFinalCaseStatus, "SquadStandardized", each 
+        if [Squad] <> null then 
+            let squadText = Text.Upper(Text.From([Squad]))
+            in if squadText = "A1" then "A1"
+            else if squadText = "A2" then "A2" 
+            else if squadText = "A3" then "A3"
+            else if squadText = "A4" then "A4"
+            else if squadText = "B1" then "B1"
+            else if squadText = "B2" then "B2"
+            else if squadText = "B3" then "B3"
+            else if squadText = "B4" then "B4"
+            else if squadText = "TFR" then "TFR"
+            else if squadText = "CSB" then "CSB"
+            else if squadText = "DET" then "DET"
+            else if Text.Contains(squadText, "ADMIN") then "Admin"
+            else if squadText = "HACSOC" then "HACSOC"
+            else if squadText = "HOU" then "HOU"
+            else if squadText = "STA" then "STA"
+            else squadText
+        else "Unknown"),
+
+    AddedPlatoon = Table.AddColumn(AddedSquad, "Platoon", each 
+        let squad = [SquadStandardized]
+        in if squad = "A1" or squad = "A2" or squad = "A3" or squad = "A4" then "A"
+        else if squad = "B1" or squad = "B2" or squad = "B3" or squad = "B4" then "B"
+        else "N/A"),
+
+    // Remove original Squad and rename
+    RemovedSquad = Table.RemoveColumns(AddedPlatoon, {"Squad"}, MissingField.Ignore),
+    RenamedSquad = Table.RenameColumns(RemovedSquad, {{"SquadStandardized", "Squad"}}, MissingField.Ignore),
+
+    // === STEP 8: Enhanced Location Analysis ===
+    
+    // Add StreetNumber
+    AddedStreetNumber = Table.AddColumn(RenamedSquad, "StreetNumber", each 
+        try Number.From(Text.BeforeDelimiter([FullAddress] ? ? "", " ")) otherwise null),
+
+    // Add Location (Fixed for intersections)
+    AddedLocation = Table.AddColumn(AddedStreetNumber, "Location", each 
+        let
+            fullAddr = [FullAddress] ? ? "",
+            result = if Text.Contains(fullAddr, "&") then
+                try Text.BeforeDelimiter(fullAddr, ", ") otherwise fullAddr
+            else
+                try Text.BetweenDelimiters(fullAddr, " ", ", ") 
+                otherwise try Text.AfterDelimiter(fullAddr, " ", 1) 
+                otherwise fullAddr
+        in result),
+
+    // Add Block with enhanced logic
+    AddedBlock = Table.AddColumn(AddedLocation, "Block", each 
+        let
+            location = [Location] ? ? "",
+            streetNumber = [StreetNumber] ? ? 0,
+            CustomColumn = 
+                if Text.Contains(location, "&") then 
+                    let
+                        streets = Text.SplitAny(location, "&"),
+                        street1 = Text.Trim(streets{0}),
+                        street2 = if List.Count(streets) > 1 then Text.Trim(streets{1}) else "",
+                        abbrev1 = Text.Replace(Text.Replace(Text.Replace(Text.Replace(Text.Replace(street1, "Street", "St"), "Avenue", "Ave"), "Place", "Pl"), "Terrace", "Terr"), "Way", "Way"),
+                        abbrev2 = Text.Replace(Text.Replace(Text.Replace(Text.Replace(Text.Replace(street2, "Street", "St"), "Avenue", "Ave"), "Place", "Pl"), "Terrace", "Terr"), "Way", "Way")
+                    in
+                        abbrev1 & " & " & abbrev2
+                else
+                    let 
+                        BlockNumber = try Number.ToText(Number.IntegerDivide(streetNumber, 100) * 100) & " Block" otherwise "0 Block",
+                        AbbreviatedLocation = Text.Replace(Text.Replace(Text.Replace(Text.Replace(Text.Replace(location, "Street", "St"), "Avenue", "Ave"), "Place", "Pl"), "Terrace", "Terr"), "Way", "Way")
+                    in
+                        AbbreviatedLocation & ", " & BlockNumber
+        in CustomColumn),
+
+    // === STEP 9: Time Analysis ===
+    AddedHourOfDay = Table.AddColumn(AddedBlock, "HourOfDay", each 
+        if [IncTime] <> null then Time.Hour([IncTime]) else null),
+
+    AddedTimeOfDay = Table.AddColumn(AddedHourOfDay, "TimeOfDay", each
+        let t = try Time.From([IncTime]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)"),
+
+    // === STEP 10: Temporal Analysis Columns ===
+    AddedYear = Table.AddColumn(AddedTimeOfDay, "Year", each 
+        if [IncDate] <> null then Date.Year([IncDate]) else null),
+
+    AddedMonth = Table.AddColumn(AddedYear, "Month", each 
+        if [IncDate] <> null then Date.Month([IncDate]) else null),
+
+    AddedMonthName = Table.AddColumn(AddedMonth, "MonthName", each 
+        if [IncDate] <> null then Date.MonthName([IncDate]) else null),
+
+    AddedDayOfWeek = Table.AddColumn(AddedMonthName, "DayOfWeek", each 
+        if [IncDate] <> null then Date.DayOfWeekName([IncDate]) else null),
+
+    AddedDayType = Table.AddColumn(AddedDayOfWeek, "DayType", each 
+        if [IncDate] <> null then
+            if Date.DayOfWeek([IncDate], Day.Monday) >= 5 then "Weekend" else "Weekday"
+        else null),
+
+    // Add IsRushHour Column
+    AddedIsRushHour = Table.AddColumn(AddedDayType, "IsRushHour", each
+        if [IncTime] <> null and [DayType] = "Weekday" then
+            let t = [IncTime]
+            in (t >= #time(6,0,0) and t < #time(9,0,0)) or 
+               (t >= #time(15,0,0) and t < #time(18,0,0))
+        else false),
+
+    // === STEP 11: Enhanced Incident Type Analysis with Call Type Mapping ===
+    
+    // Combine all incident types
+    AddedAllIncidents = Table.AddColumn(AddedIsRushHour, "AllIncidents", each 
+        let
+            type1 = if [IncidentType1] <> null then [IncidentType1] else "",
+            type2 = if [IncidentType2] <> null then " - " & [IncidentType2] else "",
+            type3 = if [IncidentType3] <> null then " - " & [IncidentType3] else ""
+        in
+            Text.Trim(type1 & type2 & type3)),
+
+    // Map Incident Type 1 to Call Categories
+    MappedIncidentType1 = Table.NestedJoin(AddedAllIncidents, {"IncidentType1"}, CallTypeLookup, {"CallType"}, "CallTypeInfo1", JoinKind.LeftOuter),
+    ExpandedCallType1 = Table.ExpandTableColumn(MappedIncidentType1, "CallTypeInfo1", {"CallCategory", "ResponseType"}, {"CallCategory1", "ResponseType1"}),
+
+    // Map Incident Type 2 to Call Categories
+    MappedIncidentType2 = Table.NestedJoin(ExpandedCallType1, {"IncidentType2"}, CallTypeLookup, {"CallType"}, "CallTypeInfo2", JoinKind.LeftOuter),
+    ExpandedCallType2 = Table.ExpandTableColumn(MappedIncidentType2, "CallTypeInfo2", {"CallCategory", "ResponseType"}, {"CallCategory2", "ResponseType2"}),
+
+    // Map Incident Type 3 to Call Categories
+    MappedIncidentType3 = Table.NestedJoin(ExpandedCallType2, {"IncidentType3"}, CallTypeLookup, {"CallType"}, "CallTypeInfo3", JoinKind.LeftOuter),
+    ExpandedCallType3 = Table.ExpandTableColumn(MappedIncidentType3, "CallTypeInfo3", {"CallCategory", "ResponseType"}, {"CallCategory3", "ResponseType3"}),
+
+    // Add Primary Call Category (from first incident type)
+    AddedPrimaryCallCategory = Table.AddColumn(ExpandedCallType3, "PrimaryCallCategory", each 
+        if [CallCategory1] <> null then [CallCategory1]
+        else "Uncategorized"),
+
+    // Add Primary Response Type (from first incident type)
+    AddedPrimaryResponseType = Table.AddColumn(AddedPrimaryCallCategory, "PrimaryResponseType", each 
+        if [ResponseType1] <> null then [ResponseType1]
+        else "Unknown"),
+
+    // === STEP 12: Enhanced Crash Type Classification ===
+    
+    // Identify specific crash types
+    AddedCrashType = Table.AddColumn(AddedPrimaryResponseType, "CrashType", each 
+        let
+            allIncidents = Text.Lower([AllIncidents] ? ? "") in
+            if Text.Contains(allIncidents, "fatal") or Text.Contains(allIncidents, "death") then "Fatal"
+            else if Text.Contains(allIncidents, "injury") or Text.Contains(allIncidents, "w/injury") then "Injury"
+            else if Text.Contains(allIncidents, "hit and run") or Text.Contains(allIncidents, "hit-and-run") then "Hit-and-Run"
+            else if Text.Contains(allIncidents, "pedestrian") then "Pedestrian"
+            else if Text.Contains(allIncidents, "bicyclist") or Text.Contains(allIncidents, "bicycle") then "Bicycle"
+            else if Text.Contains(allIncidents, "police vehicle") then "Police Vehicle"
+            else if Text.Contains(allIncidents, "motor vehicle crash") then "Property Damage Only"
+            else "Other"),
+
+    // Add DUI flag
+    AddedDUIInvolved = Table.AddColumn(AddedCrashType, "DUIInvolved", each 
+        let
+            allIncidents = Text.Lower([AllIncidents] ? ? "") in
+            Text.Contains(allIncidents, "driving while intoxicated") or 
+            Text.Contains(allIncidents, "dui") or 
+            Text.Contains(allIncidents, "dwi") or
+            Text.Contains(allIncidents, "impaired")),
+
+    // === STEP 13: Supplement-Specific Analysis ===
+    
+    // Identify if this is a Traffic supplement (for case closure tracking)
+    AddedIsTrafficSupplement = Table.AddColumn(AddedDUIInvolved, "IsTrafficSupplement", each 
+        [IsSupplement] = true and [Squad] = "TFR"),
+
+    // Count supplements per base case
+    GroupedSupplements = Table.Group(AddedIsTrafficSupplement, {"BaseCaseNumber"}, {
+        {"SupplementCount", each Table.RowCount(_), Int64.Type},
+        {"HasSupplements", each Table.RowCount(_) > 1, type logical}
+    }),
+    
+    // Join supplement counts back to main table
+    WithSupplementCounts = Table.NestedJoin(AddedIsTrafficSupplement, {"BaseCaseNumber"}, GroupedSupplements, {"BaseCaseNumber"}, "SupplementInfo", JoinKind.LeftOuter),
+    ExpandedSupplementInfo = Table.ExpandTableColumn(WithSupplementCounts, "SupplementInfo", {"SupplementCount", "HasSupplements"}),
+    
+    // Add supplement sequence number (for tracking order)
+    AddedSupplementSequence = Table.AddColumn(ExpandedSupplementInfo, "SupplementSequence", each 
+        if [IsSupplement] = true and [SupplementLetter] <> null then
+            let
+                letter = [SupplementLetter],
+                sequence = if letter = "A" then 1
+                          else if letter = "B" then 2
+                          else if letter = "C" then 3
+                          else if letter = "D" then 4
+                          else if letter = "E" then 5
+                          else if letter = "F" then 6
+                          else 99
+            in sequence
+        else 0),
+
+    // === STEP 14: Final Data Quality and Completeness Metrics ===
+    
+    // Add data completeness flags
+    AddedDataCompleteness = Table.AddColumn(AddedSupplementSequence, "DataCompleteness", each 
+        let
+            hasTime = [IncTime] <> null,
+            hasLocation = [Block] <> null and [Block] <> "",
+            hasIncidentType = [IncidentType1] <> null and [IncidentType1] <> "",
+            hasSquad = [Squad] <> null and [Squad] <> "Unknown",
+            completenessScore = (if hasTime then 1 else 0) + 
+                               (if hasLocation then 1 else 0) + 
+                               (if hasIncidentType then 1 else 0) + 
+                               (if hasSquad then 1 else 0)
+        in
+            if completenessScore = 4 then "Complete"
+            else if completenessScore >= 3 then "Good"
+            else if completenessScore >= 2 then "Fair"
+            else "Poor"),
+
+    // Add record type classification
+    AddedRecordType = Table.AddColumn(AddedDataCompleteness, "RecordType", each 
+        if [IsSupplement] = true then 
+            if [Squad] = "TFR" then "Traffic Supplement"
+            else "Investigation Supplement"
+        else "Original Report"),
+
+    // === FINAL RESULT ===
+    FinalTable = AddedRecordType
+
+in
+    FinalTable

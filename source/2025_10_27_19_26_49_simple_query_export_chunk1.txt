@@ -1,0 +1,161 @@
+Sub ExportQueriesToFiles()
+    '=====================================================================
+    ' SIMPLE QUERY EXPORT - NO FOLDER CREATION ISSUES
+    ' Saves each query as individual file in same location as workbook
+    '=====================================================================
+    
+    Dim wb As Workbook
+    Dim query As WorkbookQuery
+    Dim i As Long
+    Dim queryFile As String
+    Dim fileNum As Integer
+    Dim timestamp As String
+    
+    Set wb = ActiveWorkbook
+    timestamp = Format(Now, "yyyy-mm-dd_hh-mm")
+    
+    ' Check if workbook is saved (has a path)
+    If wb.Path = "" Then
+        MsgBox "Please save the workbook first, then run this macro. ", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Export each query as individual file
+    For i = 1 To wb.Queries.Count
+        Set query = wb.Queries(i)
+        
+        ' Create file name in same folder as workbook
+        queryFile = wb.Path & "\Query_" & Format(i, "00") & "_" & CleanName(query.Name) & "_" & timestamp & ".txt"
+        
+        ' Export query
+        fileNum = FreeFile
+        Open queryFile For Output As #fileNum
+        
+        Print #fileNum, "====================================================================="
+        Print #fileNum, "QUERY: " & query.Name
+        Print #fileNum, "NUMBER: " & i & " of " & wb.Queries.Count
+        Print #fileNum, "EXPORTED: " & Now()
+        Print #fileNum, "====================================================================="
+        Print #fileNum, ""
+        Print #fileNum, query.Formula
+        Print #fileNum, ""
+        Print #fileNum, "====================================================================="
+        
+        Close #fileNum
+    Next i
+    
+    ' Create summary file
+    queryFile = wb.Path & "\Query_INDEX_" & timestamp & ".txt"
+    fileNum = FreeFile
+    Open queryFile For Output As #fileNum
+    
+    Print #fileNum, "ATS COURT MASTER QUERIES - INDEX"
+    Print #fileNum, "Generated: " & Now()
+    Print #fileNum, "Workbook: " & wb.Name
+    Print #fileNum, "Total Queries: " & wb.Queries.Count
+    Print #fileNum, ""
+    
+    For i = 1 To wb.Queries.Count
+        Set query = wb.Queries(i)
+        Print #fileNum, Format(i, "00") & ". " & query.Name
+        Print #fileNum, "    File: Query_" & Format(i, "00") & "_" & CleanName(query.Name) & "_" & timestamp & ".txt"
+        Print #fileNum, ""
+    Next i
+    
+    Close #fileNum
+    
+    ' Open the workbook folder
+    Shell "explorer.exe " & wb.Path, vbNormalFocus
+    
+    MsgBox "SUCCESS!" & vbCrLf & vbCrLf & _
+           "Exported " & wb.Queries.Count & " queries" & vbCrLf & _
+           "Location: Same folder as your workbook" & vbCrLf & _
+           "Files: Query_01_Parameter1_" & timestamp & ".txt, etc." & vbCrLf & _
+           "Index: Query_INDEX_" & timestamp & ".txt", _
+           vbInformation, "ATS Query Export Complete"
+
+End Sub
+
+Function CleanName(inputName As String) As String
+    ' Clean up query name for file naming
+    Dim cleanName As String
+    cleanName = inputName
+    
+    ' Remove/replace problematic characters
+    cleanName = Replace(cleanName, " ", "_")
+    cleanName = Replace(cleanName, "\", "_")
+    cleanName = Replace(cleanName, "/", "_")
+    cleanName = Replace(cleanName, ":", "_")
+    cleanName = Replace(cleanName, "*", "_")
+    cleanName = Replace(cleanName, "? ", "_")
+    cleanName = Replace(cleanName, """", "_")
+    cleanName = Replace(cleanName, "<", "_")
+    cleanName = Replace(cleanName, ">", "_")
+    cleanName = Replace(cleanName, "|", "_")
+    
+    ' Limit length
+    If Len(cleanName) > 30 Then
+        cleanName = Left(cleanName, 30)
+    End If
+    
+    CleanName = cleanName
+End Function
+
+'=====================================================================
+' EVEN SIMPLER VERSION - SINGLE FILE WITH ALL QUERIES
+'=====================================================================
+
+Sub ExportAllQueriesToOneFile()
+    Dim wb As Workbook
+    Dim query As WorkbookQuery
+    Dim i As Long
+    Dim outputFile As String
+    Dim fileNum As Integer
+    
+    Set wb = ActiveWorkbook
+    
+    ' Check if workbook is saved
+    If wb.Path = "" Then
+        MsgBox "Please save the workbook first. ", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Create single output file
+    outputFile = wb.Path & "\ALL_ATS_QUERIES_" & Format(Now, "yyyy-mm-dd_hh-mm") & ".txt"
+    fileNum = FreeFile
+    
+    Open outputFile For Output As #fileNum
+    
+    Print #fileNum, String(80, "=")
+    Print #fileNum, "ATS COURT MASTER - ALL POWER QUERIES"
+    Print #fileNum, String(80, "=")
+    Print #fileNum, ""
+    Print #fileNum, "Workbook: " & wb.Name
+    Print #fileNum, "Generated: " & Now()
+    Print #fileNum, "Total Queries: " & wb.Queries.Count
+    Print #fileNum, ""
+    
+    ' Export all queries in one file
+    For i = 1 To wb.Queries.Count
+        Set query = wb.Queries(i)
+        
+        Print #fileNum, String(80, "-")
+        Print #fileNum, "QUERY " & i & ": " & query.Name
+        Print #fileNum, String(80, "-")
+        Print #fileNum, ""
+        Print #fileNum, query.Formula
+        Print #fileNum, ""
+        Print #fileNum, ""
+    Next i
+    
+    Print #fileNum, String(80, "=")
+    Print #fileNum, "END OF EXPORT"
+    Print #fileNum, String(80, "=")
+    
+    Close #fileNum
+    
+    ' Open the file
+    Shell "notepad.exe " & outputFile, vbNormalFocus
+    
+    MsgBox "All " & wb.Queries.Count & " queries exported to:" & vbCrLf & outputFile, vbInformation
+End Sub

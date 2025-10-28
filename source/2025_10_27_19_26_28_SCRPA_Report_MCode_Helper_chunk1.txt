@@ -1,0 +1,410 @@
+you are a professional programmer and an expert with M Code. Review the below code and advise if the reference tables should be added separately to reduce the size of the code and possible errors:
+
+let
+CycleLength = "28Day",
+
+```
+CleanText = (text as nullable text) as text =>
+    let
+        NonNullText = if text = null then "" else text,
+        Trimmed = Text.Trim(NonNullText),
+        Words = Text.Split(Trimmed, " "),
+        FilteredWords = List.Select(Words, each _ <> ""),
+        NoExtraSpaces = Text.Combine(FilteredWords, " "),
+        Cleaned = Text.Clean(NoExtraSpaces)
+    in
+        Cleaned,
+
+TransformFile = (Parameter1 as binary) =>
+    let
+        Source = try Excel.Workbook(Parameter1, null, true) otherwise error "Failed to load Excel workbook",
+        Sheet1 = try Source{[Item="Sheet1",Kind="Sheet"]}[Data] otherwise error "Sheet1 not found",
+        PromotedHeaders = Table.PromoteHeaders(Sheet1, [PromoteAllScalars=true]),
+        PascalCaseHeaders = Table.RenameColumns(PromotedHeaders, List.Zip({Table.ColumnNames(PromotedHeaders), List.Transform(Table.ColumnNames(PromotedHeaders), each Text.Combine(List.Transform(Text.Split(Text.Replace(_, "_", " "), " "), each Text.Proper(_)), ""))})),
+        AddCaseNumberLength = Table.AddColumn(PascalCaseHeaders, "CaseNumberLength", each Text.Length([CaseNumber] ? ? ""), Int64.Type),
+        FilterCaseNumberLength = Table.SelectRows(AddCaseNumberLength, each [CaseNumberLength] = 9),
+        CleanedTypes = Table.TransformColumnTypes(FilterCaseNumberLength, {
+            {"IncidentDate", Int64.Type},
+            {"IncidentTime", type number},
+            {"IncidentDateBetween", Int64.Type},
+            {"IncidentTimeBetween", type number},
+            {"ReportDate", Int64.Type},
+            {"ReportTime", type number},
+            {"TotalValueStolen", Currency.Type},
+            {"TotalValueRecover", Currency.Type},
+            {"RegState1", type text},
+            {"Registration1", type text},
+            {"Make1", type text},
+            {"Model1", type text},
+            {"RegState2", type text},
+            {"Registration2", type text},
+            {"Make2", type text},
+            {"Model2", type text},
+            {"DetAssigned", type text}
+        }, MissingField.UseNull),
+        AddIncDate = Table.AddColumn(CleanedTypes, "IncDate", each 
+            if [IncidentDate] = null then 
+                (if [IncidentDateBetween] = null then [ReportDate] else [IncidentDateBetween]) 
+            else [IncidentDate], Int64.Type),
+        AddIncTime = Table.AddColumn(AddIncDate, "IncTime", each 
+            if [IncidentTime] = null then 
+                (if [IncidentTimeBetween] = null then [ReportTime] else [IncidentTimeBetween]) 
+            else [IncidentTime], type number),
+        AddStartOfHour = Table.AddColumn(AddIncTime, "StartOfHour", each 
+            try Time.StartOfHour(Duration.From([IncTime])) otherwise null, type time),
+        AddTimeOfDay = Table.AddColumn(AddStartOfHour, "TimeOfDay", each 
+            if [StartOfHour] = null then "Unknown"
+            else if [StartOfHour] >= #time(0, 0, 0) and [StartOfHour] < #time(4, 0, 0) then "Early Morning (00:00-03:59)"
+            else if [StartOfHour] >= #time(4, 0, 0) and [StartOfHour] < #time(8, 0, 0) then "Morning (04:00-07:59)"
+            else if [StartOfHour] >= #time(8, 0, 0) and [StartOfHour] < #time(12, 0, 0) then "Morning Peak (08:00-11:59)"
+            else if [StartOfHour] >= #time(12, 0, 0) and [StartOfHour] < #time(16, 0, 0) then "Afternoon (12:00-15:59)"
+            else if [StartOfHour] >= #time(16, 0, 0) and [StartOfHour] < #time(20, 0, 0) then "Evening Peak (16:00-19:59)"
+            else "Night (20:00-23:59)", type text),
+        AddYear = Table.AddColumn(AddTimeOfDay, "Year", each Date.Year(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), Int64.Type),
+        AddMonthName = Table.AddColumn(AddYear, "MonthName", each Date.MonthName(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), type text),
+        AddWeekOfYear = Table.AddColumn(AddMonthName, "WeekOfYear", each Date.WeekOfYear(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), Int64.Type),
+        AddWeekOfMonth = Table.AddColumn(AddWeekOfYear, "WeekOfMonth", each Date.WeekOfMonth(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), Int64.Type),
+        AddDay = Table.AddColumn(AddWeekOfMonth, "Day", each Date.Day(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), Int64.Type),
+        AddDayOfYear = Table.AddColumn(AddDay, "DayOfYear", each Date.DayOfYear(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), Int64.Type),
+        AddDayName = Table.AddColumn(AddDayOfYear, "DayName", each Date.DayOfWeekName(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow()))), type text),
+        AddIncDateAndTime = Table.AddColumn(AddDayName, "IncDateAndTime", each 
+            Text.Combine({Text.From(Date.From([IncDate] ? ? DateTime.Date(DateTime.LocalNow())), "en-US"), Text.From(Duration.From([IncTime] ? ? 0), "en-US")}, " "), type text),
+        TextClean = Table.TransformColumns(AddIncDateAndTime, {
+            {"FullAddress", each CleanText(_), type text},
+            {"Narrative", each CleanText(_), type text},
+            {"RegState1", each CleanText(_), type text},
+            {"Registration1", each CleanText(_), type text},
+            {"Make1", each CleanText(_), type text},
+            {"Model1", each CleanText(_), type text},
+            {"RegState2", each CleanText(_), type text},
+            {"Registration2", each CleanText(_), type text},
+            {"Make2", each CleanText(_), type text},
+            {"Model2", each CleanText(_), type text}
+        }),
+        AddStreetNumber = Table.AddColumn(TextClean, "StreetNumber", each 
+            try Number.From(Text.BeforeDelimiter([FullAddress] ? ? "", " ")) otherwise null, Int64.Type),
+        AddLocation = Table.AddColumn(AddStreetNumber, "Location", each 
+            try Text.BetweenDelimiters([FullAddress] ? ? "", " ", ", ") 
+            otherwise try Text.AfterDelimiter([FullAddress] ? ? "", " ", 1) 
+            otherwise [FullAddress], type text),
+        AddBlock = Table.AddColumn(AddLocation, "Block", each 
+            let
+                CustomColumn = 
+                    if Text.Contains([Location] ? ? "", "&") then 
+                        [Location]
+                    else
+                        let 
+                            StreetName = Text.AfterDelimiter([Location] ? ? "", " "),
+                            BlockNumber = try Number.ToText(Number.IntegerDivide([StreetNumber] ? ? 0, 100) * 100) & " Block" otherwise "0 Block",
+                            AbbreviatedStreetName = 
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(
+                                            Text.Replace(StreetName, "Street", "St"), 
+                                        "Avenue", "Ave"), 
+                                    "Place", "Pl"), 
+                                "Way", "Way")
+                        in
+                            AbbreviatedStreetName & ", " & BlockNumber
+            in
+                CustomColumn, type text),
+        AddAllIncidents = Table.AddColumn(AddBlock, "AllIncidents", each 
+            Text.Combine(List.Select({[IncidentType1], [IncidentType2], [IncidentType3]}, each _ <> null and _ <> ""), ", "), type text),
+        AddVehicle = Table.AddColumn(AddAllIncidents, "Vehicle", each 
+            let
+                Combined1 = if [RegState1] <> null and [Registration1] <> null and [Make1] <> null and [Model1] <> null then
+                                "Vehicle 1: " & [RegState1] & "-" & [Registration1] & ", " & [Make1] & ", " & [Model1]
+                            else if [RegState1] <> null and [Registration1] <> null then
+                                "Vehicle 1: " & [RegState1] & "-" & [Registration1]
+                            else if [Make1] <> null and [Model1] <> null then
+                                "Vehicle 1: " & [Make1] & ", " & [Model1]
+                            else null,
+                Combined2 = if [RegState2] <> null and [Registration2] <> null and [Make2] <> null and [Model2] <> null then
+                                "Vehicle 2: " & [RegState2] & "-" & [Registration2] & ", " & [Make2] & ", " & [Model2]
+                            else if [RegState2] <> null and [Registration2] <> null then
+                                "Vehicle 2: " & [RegState2] & "-" & [Registration2]
+                            else if [Make2] <> null and [Model2] <> null then
+                                "Vehicle 2: " & [Make2] & ", " & [Model2]
+                            else null,
+                Result = if Combined1 <> null and Combined2 <> null then Combined1 & " | " & Combined2
+                         else if Combined1 <> null then Combined1
+                         else Combined2
+            in CleanText(Result), type text),
+        AddSuspect = Table.AddColumn(AddVehicle, "Suspect", each 
+            let
+                text = [Narrative] ? ? "",
+                lowerText = Text.Lower(text),
+                splitBySuspect = Text.Split(lowerText, "suspect"),
+                extractList = List.Transform(List.RemoveFirstN(splitBySuspect, 1), each "suspect" & Text.BeforeDelimiter(_, ". ")),
+                combinedText = Text.Combine(extractList, " ")
+            in CleanText(combinedText), type text),
+        AddTotalStolenAmount = Table.AddColumn(AddSuspect, "TotalStolenAmount", each 
+            let
+                text = [Narrative] ? ? "",
+                splitByDollar = Text.Split(text, "$"),
+                extractList = List.Transform(List.RemoveFirstN(splitByDollar, 1), each 
+                    try "$" & Text.BeforeDelimiter(_, ". ", 2) otherwise ""),
+                combinedText = Text.Combine(List.Select(extractList, each _ <> ""), " ")
+            in CleanText(combinedText), type text),
+        AddNIBRSPlaceholders = Table.AddColumn(AddTotalStolenAmount, "MethodOfEntry", each null, type text),
+        AddLocationType = Table.AddColumn(AddNIBRSPlaceholders, "LocationType", each null, type text),
+        AddSuspectMO = Table.AddColumn(AddLocationType, "SuspectMO", each null, type text),
+        AddVehicleWasParked = Table.AddColumn(AddSuspectMO, "VehicleWasParked", each null, type text),
+        AddEntryMethod = Table.AddColumn(AddVehicleWasParked, "EntryMethod", each null, type text),
+        AddSuspectVehicleDescription = Table.AddColumn(AddEntryMethod, "SuspectVehicleDescription", each null, type text),
+        AddKeysWithVehicle = Table.AddColumn(AddSuspectVehicleDescription, "KeysWithVehicle", each null, type text),
+        AddOffenseCompleted = Table.AddColumn(AddKeysWithVehicle, "OffenseCompleted", each null, type text),
+        RemoveDuplicatesInTransform = Table.Distinct(AddOffenseCompleted, {"CaseNumber"})
+    in
+        RemoveDuplicatesInTransform,
+
+Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\EXPORT_RMS"),
+FilterExcel = Table.SelectRows(Source, each [Extension] = ".xlsx"),
+InvokeTransform = Table.AddColumn(FilterExcel, "TransformedData", each TransformFile([Content])),
+RemoveOtherColumns = Table.SelectColumns(InvokeTransform, {"TransformedData"}),
+ExpandTransformed = Table.ExpandTableColumn(RemoveOtherColumns, "TransformedData", Table.ColumnNames(TransformFile(#"Sample File"))),
+RemoveDuplicates = Table.Distinct(ExpandTransformed, {"CaseNumber"}),
+SortByIncDate = Table.Sort(RemoveDuplicates, {{"IncDate", Order.Ascending}}),
+
+DateFormatsSource = Excel.Workbook(File.Contents("C:\Path\To\Date_Formats.xlsx"), true),
+DateFormatsTable = DateFormatsSource{[Name="Sheet1"]}[Data],
+DateFormatsPascalCase = Table.RenameColumns(DateFormatsTable, List.Zip({Table.ColumnNames(DateFormatsTable), List.Transform(Table.ColumnNames(DateFormatsTable), each Text.Combine(List.Transform(Text.Split(Text.Replace(_, "_", " "), " "), each Text.Proper(_)), ""))})),
+DateFormatsTyped = Table.TransformColumnTypes(DateFormatsPascalCase, {
+    {"Date", Int64.Type},
+    {"StartOfYear", Int64.Type},
+    {"EndOfYear", Int64.Type},
+    {"Year", Int64.Type},
+    {"Month", Int64.Type},
+    {"StartOfMonth", Int64.Type},
+    {"EndOfMonth", Int64.Type},
+    {"DaysInMonth", Int64.Type},
+    {"MonthName", type text},
+    {"Quarter", Int64.Type},
+    {"StartOfQuarter", Int64.Type},
+    {"EndOfQuarter", Int64.Type},
+    {"WeekOfYear", Int64.Type},
+    {"WeekOfMonth", Int64.Type},
+    {"StartOfWeek", Int64.Type},
+    {"EndOfWeek", Int64.Type},
+    {"Day", Int64.Type},
+    {"DayOfWeek", Int64.Type},
+    {"DayOfYear", Int64.Type},
+    {"StartOfDay", Int64.Type},
+    {"EndOfDay", Int64.Type},
+    {"DayName", type text},
+    {"Season", type text}
+}),
+
+CycleSource = Excel.Workbook(File.Contents("C:\Path\To\7Day_28Day_Cycle_20250414.xlsx"), true),
+CycleTable = CycleSource{[Name="Sheet1"]}[Data],
+CyclePascalCase = Table.RenameColumns(CycleTable, {
+    {" Icons", "Icons"},
+    {"Report_Due_Date", "ReportDueDate"},
+    {"7_Day_Start", "SevenDayStart"},
+    {"7_Day_End", "SevenDayEnd"},
+    {"28_Day_Start", "TwentyEightDayStart"},
+    {"28_Day_End", "TwentyEightDayEnd"},
+    {"Report_Name", "ReportName"},
+    {"Is_Due", "IsDue"}
+}),
+CycleTyped = Table.TransformColumnTypes(CyclePascalCase, {
+    {"Icons", type text},
+    {"ReportDueDate", Int64.Type},
+    {"SevenDayStart", Int64.Type},
+    {"SevenDayEnd", Int64.Type},
+    {"TwentyEightDayStart", Int64.Type},
+    {"TwentyEightDayEnd", Int64.Type},
+    {"ReportName", type text},
+    {"IsDue", type logical}
+}),
+
+KeysWithVehicleRef = Table.FromRows({
+    {"Yes - Inside Vehicle"},
+    {"Yes - Taken by Offender"},
+    {"No"},
+    {"Unknown"}
+}, {"KeysWithVehicle"}),
+PropertyDescriptionRef = Table.FromRows({
+    {"01", "Aircraft"},
+    {"02", "Alcohol"},
+    {"03", "Automobile"},
+    {"04", "Bicycle"},
+    {"05", "Bus"},
+    {"06", "Clothes/Furs"},
+    {"07", "Computer Hardware/Software"},
+    {"08", "Consumable Goods"},
+    {"09", "Credit/Debit Cards"},
+    {"10", "Drugs/Narcotics"},
+    {"11", "Drug/Narcotic Equipment"},
+    {"12", "Farm Equipment"},
+    {"13", "Firearms"},
+    {"14", "Gambling Equipment"},
+    {"15", "Heavy Construction/Industrial Equipment"},
+    {"16", "Household Goods"},
+    {"17", "Jewelry/Precious Metals/Gems"},
+    {"18", "Livestock"},
+    {"19", "Merchandise"},
+    {"20", "Money"},
+    {"21", "Negotiable Instruments"},
+    {"22", "Non-Negotiable Instruments"},
+    {"23", "Office-Type Equipment"},
+    {"24", "Other Motor Vehicles"},
+    {"25", "Purses/Handbags/Wallets"},
+    {"26", "Radios/TVs/VCRs/DVD Players"},
+    {"27", "Recordings-Audio/Video"},
+    {"28", "Recreational Vehicles"},
+    {"29", "Structures-Single Occupancy Dwellings"},
+    {"30", "Structures-Other Dwellings"},
+    {"31", "Structures-Other Commercial/Business"},
+    {"32", "Structures-Industrial/Manufacturing"},
+    {"33", "Structures-Public/Community"},
+    {"34", "Structures-Storage"},
+    {"35", "Structures-Other"},
+    {"36", "Tools"},
+    {"37", "Trucks"},
+    {"38", "Vehicle Parts/Accessories"},
+    {"39", "Watercraft"},
+    {"41", "Aircraft Parts/Accessories"},
+    {"42", "Artistic Supplies/Accessories"},
+    {"43", "Building Materials"},
+    {"44", "Camping/Hunting/Fishing Equipment/Supplies"},
+    {"45", "Chemicals"},
+    {"46", "Collections/Collectibles"},
+    {"47", "Crops"},
+    {"48", "Documents/Personal or Business"},
+    {"49", "Explosives"},
+    {"59", "Firearm Accessories"},
+    {"60", "Fuel"},
+    {"61", "Identity Documents"},
+    {"62", "Identity-Intangible"},
+    {"64", "Law Enforcement Equipment"},
+    {"65", "Lawn/Yard/Garden Equipment"},
+    {"66", "Logging Equipment"},
+    {"67", "Medical/Medical Lab Equipment"},
+    {"68", "Metals, Non-Precious"},
+    {"69", "Musical Instruments"},
+    {"70", "Pets"},
+    {"71", "Photographic/Optical Equipment"},
+    {"72", "Portable Electronic Communications"},
+    {"73", "Recreational/Sports Equipment"},
+    {"74", "Scrap Metal"},
+    {"75", "Tobacco"},
+    {"76", "Trailers"},
+    {"77", "Watercraft Equipment/Parts/Accessories"},
+    {"78", "Weapons-Other"},
+    {"88", "Pending Inventory (Unknown)"},
+    {"99", "Other"}
+}, {"Code", "Description"}),
+OffenseCompletedRef = Table.FromRows({
+    {"A"},
+    {"C"}
+}, {"OffenseCompleted"}),
+DamageToVehicleRef = Table.FromRows({
+    {"Window - Broken"},
+    {"Door - Damaged"},
+    {"Lock - Damaged"},
+    {"Body - Scratched/Dented"},
+    {"None"},
+    {"Unknown"}
+}, {"DamageToVehicle"}),
+PointOfEntryRef = Table.FromRows({
+    {"Front Driver-Side Door"},
+    {"Front Passenger-Side Door"},
+    {"Rear Driver-Side Door"},
+    {"Rear Passenger-Side Door"},
+    {"Trunk"},
+    {"Window"},
+    {"Unknown"}
+}, {"PointOfEntry"}),
+MeansOfEntryRef = Table.FromRows({
+    {"Forced Entry - Broken Window"},
+    {"Forced Entry - Damaged Locking Mechanism"},
+    {"Unforced Entry - Unlocked Door"},
+    {"Unknown"}
+}, {"MeansOfEntry"}),
+OffenderSequenceNumberRef = Table.FromRows({
+    {"00"},
+    {"01"},
+    {"02"},
+    {"03"},
+    {"04"},
+    {"05"}
+}, {"OffenderSequenceNumber"}),
+OffenderSexRef = Table.FromRows({
+    {"M"},
+    {"F"},
+    {"U"}
+}, {"OffenderSex"}),
+OffenderAgeRef = Table.FromRows({
+    {"00"},
+    {"Under 10"},
+    {"10-12"},
+    {"13-14"},
+    {"15"},
+    {"16"},
+    {"17"},
+    {"18-24"},
+    {"25-29"},
+    {"30-34"},
+    {"35-39"},
+    {"40-44"},
+    {"45-49"},
+    {"50-54"},
+    {"55-59"},
+    {"60-64"},
+    {"65 and Over"}
+}, {"OffenderAge"}),
+LocationTypeRef = Table.FromRows({
+    {"01", "Air/Bus/Train Terminal"},
+    {"02", "Bank/Savings and Loan"},
+    {"03", "Bar/Nightclub"},
+    {"04", "Church/Synagogue/Temple/Mosque"},
+    {"05", "Commercial/Office Building"},
+    {"07", "Convenience Store"},
+    {"13", "Highway/Road/Alley/Street/Sidewalk"},
+    {"14", "Hotel/Motel/Etc. "},
+    {"18", "Parking Lot/Garage"},
+    {"20", "Residence/Home"},
+    {"21", "Restaurant"},
+    {"24", "School/College"},
+    {"25", "School-Elementary/Secondary"},
+    {"37", "Abandoned/Condemned Structure"},
+    {"44", "Daycare Facility"},
+    {"58", "Cyberspace"},
+    {"RD", "Residential Driveway"}
+}, {"Code", "LocationType"}),
+PropertyLossTypeRef = Table.FromRows({
+    {"1"},
+    {"2"},
+    {"3"},
+    {"4"},
+    {"5"},
+    {"6"},
+    {"7"},
+    {"8"}
+}, {"PropertyLossType"}),
+OffenderRaceRef = Table.FromRows({
+    {"W"},
+    {"B"},
+    {"I"},
+    {"A"},
+    {"P"},
+    {"U"}
+}, {"OffenderRace"}),
+ValueOfPropertyRef = Table.FromRows({
+    {"1", "$0.01 – $199.99"},
+    {"2", "$200.00 – $499.99"},
+    {"3", "$500.00 – $74,999.99"},
+    {"4", "$75,000.00 and above"},
+    {"5", "Unknown / Not Applicable"}
+}, {"Code", "Description"}),
+WeaponUsedRef = Table.FromRows({
+    {"Firearm (Unspecified)"},
+    {"Handgun"},
+    {"Rifle"},
+    {"Shotgun"},
+    {"Other Firearm"},
+    {"Knife/Cutting Instrument"},
+    {"Blunt Object"},
+    {"Motor Vehicle/Vessel"},
+    {"Personal Weapons (Hands, Feet, Teeth, Etc.

@@ -1,0 +1,193 @@
+🚨 Arrest Data Discrepancy for May 2025 – Issues & Recommendations
+✅ Summary:
+The arrest total for May 2025 was initially underreported (40 records) instead of the correct 57 records. This discrepancy affected official summaries and analytics. 🛑 Key Issues Encountered:
+1. Incomplete Join Logic in Power Query
+Badge Number Mismatch: Some records failed to join with the ASSIGNMENT_MASTER.xlsx due to badge numbers being improperly extracted or unmatched. Result: These unjoined rows were dropped or misclassified, leading to data loss. 2. Address Parsing Failures
+ZIP Code Inconsistencies: Addresses had trailing ZIP+4 (e.g., 07601-4151) that didn't match the uszips.csv file which only had 5-digit ZIPs. Result: Residential categorization returned Unknown, obscuring actual location stats. 3. Over-Aggressive Filtering
+Some queries removed rows with partial data (e.g., null badge or zip) before location classification or summarization. Result: Records were excluded before they could be categorized or counted. 4. Errors in Nested Joins
+Assignment_Lookup had a cyclic reference error. Duplicated_Case_Records had a column name conflict error, breaking steps that depended on clean merges. 5. Inconsistent Case Number Matching
+Some exports referenced Case Number (with space) vs. case_number (lowercase), breaking deduplication or filters in some reports. 🧭 What This Means:
+The reporting total was inaccurate due to both:
+
+Technical transformation failures (M Code issues, join problems). Data normalization gaps (ZIP parsing, case sensitivity). This led to:
+
+Underreporting official arrests. Misclassified residence types in geographic analysis. ✅ Fixes Implemented:
+✅ Badge number extraction logic was improved using a pattern-based parsing with fallback matching. ✅ ZIP code parsing now uses cleaned 5-digit matching against uszips.csv. ✅ Expanded address logic to reclassify known Hackensack ZIPs (07601-*) as Local. ✅ All known issues in the Power Query M script were resolved including:
+
+Null-safe steps
+
+Clean column naming
+
+Robust join strategy
+
+✅ Python script provided as a secondary validator to mirror logic and debug results independently. ✅ Going Forward: Best Practices
+Area	Recommendation
+Badge Data	Keep ASSIGNMENT_MASTER.xlsx up to date with consistent badge formatting. ZIP Matching	Strip ZIP+4 codes to base 5-digit form before matching. Case Number Fields	Use case_number consistently across all queries and exports. M Code Versioning	Archive monthly Power Query logic snapshots for rollback. Dual Validation	Use the Python script monthly as a comparison check for Power Query. Address Issues	Flag null or partial addresses for manual cleanup before loading into Power BI or reports. Residence Category Definitions	Maintain a shared lookup logic or rule doc (e.g., "07601 = Local") in a reference .md file. let
+    // Add Local ZIPs list
+    LocalZips = {"07601", "07601-4151", "07601-3514", "07601-1500", "07601-2109", "07601-2948", "07601-5357"},
+
+    // Create final categorization
+    AddResidenceCategory = Table.AddColumn(YourPreviousTableStepName, "residence_category", each 
+        let
+            zip = Text.Trim([zip] ? ? ""),
+            state = [state_id],
+            county = [county_name],
+            address = Text.Lower(Text.Trim([address] ? ? "")),
+            isLocalZip = List.AnyTrue(List.Transform(LocalZips, each Text.StartsWith(zip, _)))
+        in
+            if zip = "" or Text.Contains(address, "homeless") then "Local"
+            else if isLocalZip then "Local"
+            else if state = "NJ" and county = "Bergen" then "In County"
+            else if state = "NJ" then "Out of County, In State"
+            else if state = "NY" then "Out of State | NY"
+            else "Unknown",
+        type text
+    )
+in
+    AddResidenceCategory
+
+Replace YourPreviousTableStepName with the last step of your table before this transformation. // ======================
+// Residence Category Classification - Power Query
+// ======================
+
+// Description:
+// This step adds a new column 'residence_category' to classify each record's residential location. // Classification is based on ZIP code, address text, and reference data from 'uszips.csv' (which must be merged into the query beforehand). // Categories:
+// - "Local": ZIPs starting with known Hackensack codes or address containing "homeless" or blank
+// - "In County": ZIPs in Bergen County, NJ (excluding Hackensack)
+// - "Out of County, In State": ZIPs in NJ but not in Bergen County
+// - "Out of State | NY": ZIPs in New York state
+// - "Unknown": All others
+
+// Inputs Required:
+// - Merged ZIP data: Must contain columns "zip", "state_id", "county_name"
+// - Column "address" must be available and lowercase-able
+
+// Update List:
+// 'LocalZips' list can be updated as needed to match additional known local ZIP patterns. let
+    // Add Local ZIPs list
+    LocalZips = {"07601", "07601-4151", "07601-3514", "07601-1500", "07601-2109", "07601-2948", "07601-5357"},
+
+    // Create final categorization
+    AddResidenceCategory = Table.AddColumn(YourPreviousTableStepName, "residence_category", each 
+        let
+            zip = Text.Trim([zip] ? ? ""),
+            state = [state_id],
+            county = [county_name],
+            address = Text.Lower(Text.Trim([address] ? ? "")),
+            isLocalZip = List.AnyTrue(List.Transform(LocalZips, each Text.StartsWith(zip, _)))
+        in
+            if zip = "" or Text.Contains(address, "homeless") then "Local"
+            else if isLocalZip then "Local"
+            else if state = "NJ" and county = "Bergen" then "In County"
+            else if state = "NJ" then "Out of County, In State"
+            else if state = "NY" then "Out of State | NY"
+            else "Unknown",
+        type text
+    )
+in
+    AddResidenceCategory
+
+
+
+
+import pandas as pd
+
+df = pd.read_csv("your_data.csv")
+
+local_zips = [
+    "07601", "07601-4151", "07601-3514",
+    "07601-1500", "07601-2109", "07601-2948", "07601-5357"
+]
+
+df["zip"] = df["zip"].astype(str).str.strip()
+df.rename(columns={"Address": "address"}, inplace=True)
+
+def classify_residence(row):
+    zip_code = row["zip"]
+    state = row["state_id"]
+    county = row["county_name"]
+    address = str(row["address"]).lower().strip()
+
+    if pd.isna(zip_code) or zip_code == "" or "homeless" in address:
+        return "Local"
+    if any(zip_code.startswith(local_zip) for local_zip in local_zips):
+        return "Local"
+    if state == "NJ":
+        if county == "Bergen":
+            return "In County"
+        else:
+            return "Out of County, In State"
+    elif state == "NY":
+        return "Out of State | NY"
+    else:
+        return "Unknown"
+
+df["residence_category"] = df.apply(classify_residence, axis=1)
+df.to_csv("final_output.csv", index=False)
+
+"""
+Residence Category Classification - Python
+
+This script classifies residential locations into categories based on ZIP code, state, and county. Inputs:
+- A CSV containing fields: 'zip', 'state_id', 'county_name', and 'address'
+
+Logic:
+- "Local": ZIP starts with known Hackensack codes or address contains 'homeless' or is blank
+- "In County": ZIPs in Bergen County, NJ but not Hackensack
+- "Out of County, In State": NJ ZIPs outside Bergen County
+- "Out of State | NY": NY ZIPs
+- "Unknown": Anything else
+
+Assumptions:
+- ZIP column is text and cleaned of spaces
+- Address column is lowercase-able for keyword checks
+- Missing ZIPs or addresses default to 'Local' if "homeless" is mentioned
+
+To update:
+- Edit the 'local_zips' list for additional Hackensack zip variants
+
+Returns:
+- New column `residence_category` in the DataFrame
+"""
+
+import pandas as pd
+
+# Load your data
+df = pd.read_csv("your_data.csv")
+
+# Known Hackensack ZIP variants
+local_zips = [
+    "07601", "07601-4151", "07601-3514",
+    "07601-1500", "07601-2109", "07601-2948", "07601-5357"
+]
+
+# Standardize zip and address
+df["zip"] = df["zip"].astype(str).str.strip()
+df.rename(columns={"Address": "address"}, inplace=True)
+
+# Define categorization function
+def classify_residence(row):
+    zip_code = row["zip"]
+    state = row["state_id"]
+    county = row["county_name"]
+    address = str(row["address"]).lower().strip()
+
+    if pd.isna(zip_code) or zip_code == "" or "homeless" in address:
+        return "Local"
+    if any(zip_code.startswith(local_zip) for local_zip in local_zips):
+        return "Local"
+    if state == "NJ":
+        if county == "Bergen":
+            return "In County"
+        else:
+            return "Out of County, In State"
+    elif state == "NY":
+        return "Out of State | NY"
+    else:
+        return "Unknown"
+
+# Apply the classification
+df["residence_category"] = df.apply(classify_residence, axis=1)
+
+# Export result
+df.to_csv("final_output.csv", index=False)

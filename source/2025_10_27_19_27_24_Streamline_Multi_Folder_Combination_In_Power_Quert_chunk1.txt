@@ -1,0 +1,156 @@
+You're right to be concerned about the clutter when connecting to multiple folders in Power Query! The default "Combine Files" experience can create a lot of helper queries and parameters, which can be overwhelming. Here's a clearer way to manage connections to multiple folders, aiming for fewer queries and better organization:
+The Problem with "Combine & Transform Data" Directly
+When you use "Get Data" > "From Folder" and then immediately choose "Combine & Transform Data," Power Query automates a lot of steps. It essentially:
+ * Creates a query for the folder itself. * Creates a "Sample File" query (usually based on the first file it finds). * Creates a "Transform File" function based on that sample. * Applies that function to all files in the original folder query. * Organizes these into a "Transform File from [Your Folder Name]" group. This is convenient for a single, consistent folder, but when you have multiple folders, you end up with multiple sets of these helper queries, leading to the clutter you're experiencing. A Cleaner Approach: Manual Combination and Function Creation
+The key to a cleaner approach is to take more control of the process by avoiding the automated "Combine & Transform Data" step initially. Scenario 1: Combining files from different folders into one final query. If you want to combine data from multiple, distinct folders into a single combined dataset:
+ * Connect to Each Folder Individually (Transform Data):
+   * Go to "Get Data" > "From File" > "From Folder". * Browse to your first folder and click "Open". * Crucially, click "Transform Data" (NOT "Combine & Load" or "Combine & Transform Data"). This will open the Power Query Editor with a table showing all the files in that folder. * Rename this query to something descriptive (e.g., "Folder1_Files"). * Repeat this for each of your other folders (e.g., "Folder2_Files", "Folder3_Files"). * Create a "Master" File Transformation Function (Optional but Recommended):
+   * Pick one of your "FolderX_Files" queries. * In the "Content" column (which contains the binary data of each file), right-click on a Binary value for a single file and choose "Add as New Query". This will create a temporary query for just that file. * Perform all your necessary transformation steps on this single file (e.g., promoting headers, removing unnecessary columns, changing data types, filtering rows, etc.). Make sure these steps are applicable to all files across all your folders. * Once your transformations are complete for this single file, go to the "Home" tab in the Power Query Editor, click "Advanced Editor." * At the top of the M code, add (FilePath as binary) => (or (FileContent as binary) =>) right before let. Replace Source = Excel.Workbook(File.Contents("C:\Your\Path\To\Sample.xlsx")) (or similar) with Source = Excel.Workbook(FilePath). This converts your query into a reusable function. * Rename this new query/function to something like fxTransformFile. * Right-click on fxTransformFile in the Queries pane and choose "Create Group". Name it "Helper Functions" or similar to keep it organized and out of the main query list. * Apply the Function to Each Folder and Combine:
+   * Go back to your "Folder1_Files" query. * Click on the "Add Column" tab, then "Invoke Custom Function". * In the "Invoke Custom Function" dialog:
+     * New column name: "TransformedData" (or whatever you like). * Function query: Select your fxTransformFile function. * Function parameters: Select the Content column from your "Folder1_Files" table as the input for FilePath (or FileContent). * Click "OK". This will add a new column with tables of the transformed data from each file. * Expand this new "TransformedData" column to combine the tables into one. * Repeat these "Invoke Custom Function" and "Expand" steps for "Folder2_Files", "Folder3_Files", etc. * Append the Folder Queries:
+   * Create a new blank query ("New Source" > "Blank Query"). * In the Advanced Editor, use Table.Combine({Folder1_Files_Expanded, Folder2_Files_Expanded, Folder3_Files_Expanded}) where FolderX_Files_Expanded are the names of the queries you just created after invoking and expanding the function. * Rename this query to your final combined data (e.g., "AllCombinedData"). * You can then delete or "Connection Only" load the individual FolderX_Files_Expanded queries if you only need the final combined one. Scenario 2: Creating separate queries for each folder's combined data. If you want a separate, combined table for each folder, but still want to reduce clutter and reuse transformation logic:
+ * Create the "Master" File Transformation Function (as in Step 2 of Scenario 1). Place it in a "Helper Functions" group. * Connect to Each Folder and Apply the Function:
+   * Go to "Get Data" > "From File" > "From Folder". * Browse to your first folder. Click "Open". * Click "Transform Data". * In the Power Query Editor, with your folder table showing, go to "Add Column" > "Invoke Custom Function". * Select your fxTransformFile function and provide the Content column as the parameter. * Expand the resulting column. * Rename this query to something like "Folder1_CombinedData". * Repeat this for each of your other folders. Benefits of this Approach:
+ * Less Clutter: You have one central fxTransformFile function instead of a new one generated for each folder connection. The helper queries and parameters generated by Power Query's automatic "Combine" are avoided. * Reusability: If your file transformation logic changes, you only need to update the fxTransformFile function, and all your folder queries that use it will automatically update. * Better Organization: By putting your fxTransformFile in a "Helper Functions" group, you clearly separate your core data queries from the underlying transformation logic. * Control: You have more granular control over each step of the process. Summary of your idea (blank Excel, blank query, connect to folder):
+Your idea of opening a blank Excel file and then a blank query is a good starting point for a single folder connection if you're going to use the manual "Transform Data" approach. However, for multiple folders, you'd still follow the steps above to create separate folder connections and then potentially combine them or apply a shared function. The key is to always choose "Transform Data" initially when connecting to a folder if you want to avoid the automatic helper queries. Can you review the attached text on combining multiple Excel files to a single para query with less clutter see if this is the best approach or if you say there’s a better one if you could walk me through it automation for this process would be much more appreciated
+
+
+# Streamlined Multi-Folder Excel Combination in Power Query
+
+## Method 1: Single Query for All Folders (Recommended)
+
+This approach creates just ONE query that handles multiple folders automatically. ### Step 1: Create the Master Query
+1. Open Power Query Editor (Data > Get Data > Blank Query)
+2. Go to Advanced Editor and paste this M code:
+
+```m
+let
+    // Define your folder paths here
+    FolderPaths = {
+        "C:\Your\First\Folder\Path",
+        "C:\Your\Second\Folder\Path",
+        "C:\Your\Third\Folder\Path"
+    },
+    
+    // Function to get all files from a folder
+    GetFolderFiles = (folderPath as text) =>
+        let
+            Source = Folder.Files(folderPath),
+            FilterExcel = Table.SelectRows(Source, each Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls"))
+        in
+            FilterExcel,
+    
+    // Get files from all folders
+    AllFolders = List.Transform(FolderPaths, each GetFolderFiles(_)),
+    CombinedFiles = Table.Combine(AllFolders),
+    
+    // Transform each file (customize this section for your needs)
+    TransformFile = (content as binary) =>
+        let
+            Source = Excel.Workbook(content),
+            // Assume first sheet - modify as needed
+            FirstSheet = Source{0}[Data],
+            PromotedHeaders = Table.PromoteHeaders(FirstSheet, [PromoteAllScalars=true]),
+            // Add your other transformations here
+            ChangedTypes = Table.TransformColumnTypes(PromotedHeaders, {{"Column1", type text}, {"Column2", type number}}) // Customize column types
+        in
+            ChangedTypes,
+    
+    // Apply transformation to all files
+    AddTransformed = Table.AddColumn(CombinedFiles, "Data", each TransformFile([Content])),
+    ExpandedData = Table.ExpandTableColumn(AddTransformed, "Data", Table.ColumnNames(TransformFile(CombinedFiles{0}[Content])))
+in
+    ExpandedData
+```
+
+### Step 2: Customize the Code
+- **Folder Paths**: Update the `FolderPaths` list with your actual folder locations
+- **File Filter**: Modify the filter if you need different file types
+- **Transformations**: Update the `TransformFile` function with your specific data transformations
+- **Column Names**: Adjust the column types and names as needed
+
+### Step 3: Benefits
+- **Single Query**: Only one main query in your Queries pane
+- **Easy Maintenance**: Add new folders by just updating the `FolderPaths` list
+- **Consistent Logic**: All files use the same transformation logic
+- **No Clutter**: No helper queries or sample files
+
+## Method 2: Function-Based Approach (Alternative)
+
+If you prefer more modularity:
+
+### Step 1: Create Helper Function
+Create a new blank query named `fxProcessFolder`:
+
+```m
+(FolderPath as text) =>
+let
+    Source = Folder.Files(FolderPath),
+    FilterExcel = Table.SelectRows(Source, each Text.EndsWith([Name], ".xlsx")),
+    TransformFiles = Table.AddColumn(FilterExcel, "Data", each 
+        let
+            ExcelFile = Excel.Workbook([Content]),
+            FirstSheet = ExcelFile{0}[Data],
+            PromotedHeaders = Table.PromoteHeaders(FirstSheet)
+        in
+            PromotedHeaders
+    ),
+    ExpandedData = Table.ExpandTableColumn(TransformFiles, "Data", {"Column1", "Column2", "Column3"}) // Update with your columns
+in
+    ExpandedData
+```
+
+### Step 2: Create Main Query
+Create another blank query for your final data:
+
+```m
+let
+    Folder1 = fxProcessFolder("C:\Your\First\Folder"),
+    Folder2 = fxProcessFolder("C:\Your\Second\Folder"),
+    Folder3 = fxProcessFolder("C:\Your\Third\Folder"),
+    CombinedData = Table.Combine({Folder1, Folder2, Folder3})
+in
+    CombinedData
+```
+
+## Method 3: Dynamic Folder Discovery
+
+For ultimate automation, you can even discover folders dynamically:
+
+```m
+let
+    // Parent directory containing all your folders
+    ParentFolder = "C:\Your\Parent\Directory",
+    
+    // Get all subdirectories
+    AllFolders = Folder.Files(ParentFolder),
+    SubFolders = Table.SelectRows(AllFolders, each [Attributes][Kind] = "Folder"),
+    
+    // Process each subfolder
+    ProcessedFolders = Table.AddColumn(SubFolders, "Data", each 
+        let
+            SubfolderFiles = Folder.Files([Folder Path]),
+            ExcelFiles = Table.SelectRows(SubfolderFiles, each Text.EndsWith([Name], ".xlsx"))
+            // Add your file transformation logic here
+        in
+            ExcelFiles
+    )
+    // Continue with expansion and combination...
+in
+    ProcessedFolders
+```
+
+## Key Advantages Over Standard Approach
+
+1. **Minimal Queries**: 1-2 queries total vs. 4-6 per folder
+2. **Easy Updates**: Change folder paths in one place
+3. **Consistent Logic**: Single transformation function ensures uniformity
+4. **Better Performance**: Less overhead from multiple queries
+5. **Cleaner Workspace**: Organized and maintainable
+
+## Pro Tips
+
+- **Error Handling**: Add `try...otherwise` blocks around file operations for robustness
+- **Conditional Logic**: Use `if` statements in your transformation function for files with different structures
+- **Incremental Refresh**: Consider this for large datasets that change frequently
+- **Documentation**: Add comments in your M code to explain custom logic

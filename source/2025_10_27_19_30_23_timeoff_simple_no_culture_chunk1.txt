@@ -1,0 +1,66 @@
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\TIME_OFF_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        (Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls"))
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                TimeOffActivity = ExcelFile{[Name="TimeOffActivity"]}[Data],
+                PromotedHeaders = Table.PromoteHeaders(TimeOffActivity, [PromoteAllScalars=true]),
+                
+                // Basic transformations only
+                ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+                
+                // Split Times column  
+                SplitTimes = Table.SplitColumn(ChangedDateType, "Times", Splitter.SplitTextByDelimiter("-", QuoteStyle.Csv), {"START_TIME", "END_TIME"}),
+                
+                // Set Hours as number
+                ChangedHoursType = Table.TransformColumnTypes(SplitTimes,{{"Hours", type number}}),
+                
+                // Add basic date components
+                AddedYear = Table.AddColumn(ChangedHoursType, "Year", each Date.Year([Date]), Int64.Type),
+                AddedMonth = Table.AddColumn(AddedYear, "Month", each Date.Month([Date]), Int64.Type),
+                AddedMonthName = Table.AddColumn(AddedMonth, "Month Name", each Date.MonthName([Date]), type text),
+                
+                // Clean Comments if column exists
+                CleanedComments = if Table.HasColumns(AddedMonthName, "Comments") 
+                    then Table.TransformColumns(AddedMonthName,{
+                        {"Comments", each Text.Clean(Text.Trim(_)), type text}
+                    })
+                    else AddedMonthName
+            in
+                CleanedComments
+        otherwise null
+    ),
+    
+    // Remove failed files
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Get column names from first successful file
+    FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+    ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore),
+    
+    // FINAL DATA TYPE ENFORCEMENT - Update column names as needed
+    FinalDataTypes = Table.TransformColumnTypes(CleanedColumns,{
+        {"Date", type date},
+        {"START_TIME", type time},      // Change to "Start Time" if that's the exact name
+        {"END_TIME", type time},        // Change to "End Time" if that's the exact name  
+        {"Hours", type number},
+        {"Comments", type text},
+        {"Year", Int64.Type},
+        {"Month", Int64.Type},
+        {"Month Name", type text},
+        {"Group", type text},
+        {"Employee", type text},
+        {"Reason", type text},
+        {"Status", type text}
+    }, MissingField.Ignore)
+in
+    FinalDataTypes

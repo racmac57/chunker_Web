@@ -1,0 +1,53 @@
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\TIME_OFF_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                TimeOffActivity = ExcelFile{[Name="TimeOffActivity"]}[Data],
+                PromotedHeaders = Table.PromoteHeaders(TimeOffActivity, [PromoteAllScalars=true]),
+                
+                // Fix Date column first
+                ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+                
+                // Split Times column
+                SplitTimes = Table.SplitColumn(ChangedDateType, "Times", Splitter.SplitTextByDelimiter("-", QuoteStyle.Csv), {"START_TIME", "END_TIME"}),
+                
+                // Add proper date components using the fixed dates
+                AddedYear = Table.AddColumn(SplitTimes, "Year", each Date.Year([Date]), Int64.Type),
+                AddedMonth = Table.AddColumn(AddedYear, "Month", each Date.Month([Date]), Int64.Type),
+                AddedMonthName = Table.AddColumn(AddedMonth, "Month Name", each 
+                    if [Month] = 1 then "January"
+                    else if [Month] = 2 then "February"  
+                    else if [Month] = 3 then "March"
+                    else if [Month] = 4 then "April"
+                    else if [Month] = 5 then "May"
+                    else if [Month] = 6 then "June"
+                    else if [Month] = 7 then "July"
+                    else if [Month] = 8 then "August"
+                    else if [Month] = 9 then "September"
+                    else if [Month] = 10 then "October"
+                    else if [Month] = 11 then "November"
+                    else if [Month] = 12 then "December"
+                    else "Unknown", type text)
+            in
+                AddedMonthName
+        otherwise null
+    ),
+    
+    // Remove failed files
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Get column names from first successful file
+    FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+    ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore)
+in
+    CleanedColumns

@@ -1,0 +1,594 @@
+You said:
+I am to step where that includes the python script. 1. provide the pyton script again. 2. provide list of what the script does. 3. give instructions from copying the script to notepad (text editor), saving etc. 4. instruct how to implement the script the first time vs subsequent useages
+ChatGPT said:
+Perfect — let’s walk through this clearly and completely. You’re almost there! ✅ 1. Python Script (Updated for Your Project)
+Here’s the full script you’ll copy into Notepad. It reads your Excel file, applies dynamic Definition Queries, refreshes symbology, and exports maps for each crime type:
+
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+excel_path = r"C:\Users\YourUsername\OneDrive - hackensackpd_org\Documents\_Hackensack_Data_Repository\7Day_28Day_Cycle_20250414.xlsx"
+export_folder = r"C:\Users\YourUsername\Documents\Weekly_Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load the Excel file
+cycle_df = pd.read_excel(excel_path)
+current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+
+# Filters
+incident_keywords = ['Vehicle Theft', 'Commercial', 'Residence', 'Robbery', 'Sexual', 'Auto']
+calltype_filter = "(" + " OR ".join([f"Call_Type LIKE '%{word}%'" for word in incident_keywords]) + ")"
+disposition_filter = "Disposition LIKE '%report%'"
+
+# Queries
+query_7_day = f"Call_Date >= date '{seven_day_start}' AND Call_Date <= date '{seven_day_end}' AND {disposition_filter} AND {calltype_filter}"
+query_28_day = f"Call_Date >= date '{twenty_eight_day_start}' AND Call_Date <= date '{twenty_eight_day_end}' AND {disposition_filter} AND {calltype_filter}"
+query_ytd = f"Call_Date >= date '2024-12-31' AND {disposition_filter} AND {calltype_filter}"
+
+# Layer query mapping
+layer_query_mapping = {
+    "Burglary - Auto 7-Day": query_7_day,
+    "Burglary - Auto 28-Day": query_28_day,
+    "Burglary - Auto YTD": query_ytd,
+    "Burglary - Comm & Res 7-Day": query_7_day,
+    "Burglary - Comm & Res 28-Day": query_28_day,
+    "Burglary - Comm & Res YTD": query_ytd,
+    "Robbery 7-Day": query_7_day,
+    "Robbery 28-Day": query_28_day,
+    "Robbery YTD": query_ytd,
+    "Sexual Offenses 7-Day": query_7_day,
+    "Sexual Offenses 28-Day": query_28_day,
+    "Sexual Offenses YTD": query_ytd,
+    "MV Theft 7-Day": query_7_day,
+    "MV Theft 28-Day": query_28_day,
+    "MV Theft YTD": query_ytd,
+}
+
+# Apply queries and refresh
+for layer_name, query in layer_query_mapping.items():
+    lyr = map_obj.listLayers(layer_name)[0]
+    lyr.definitionQuery = query
+    sym = lyr.symbology
+    lyr.symbology = sym  # Refresh
+
+# Export each crime type
+crime_types = ["Burglary - Auto", "Burglary - Comm & Res", "Robbery", "Sexual Offenses", "MV Theft"]
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y%m%d')
+layout = project.listLayouts()[0]
+
+for crime in crime_types:
+    for lyr in map_obj.listLayers():
+        lyr.visible = crime in lyr.name
+    output_pdf = os.path.join(export_folder, f"{crime.replace(' ', '_')}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+print("All filters applied, symbology refreshed, and PDFs exported.") ✅ 2. What the Script Does
+Step	Action
+1	Loads your Excel file with date ranges from OneDrive
+2	Filters hosted feature layers using dynamic Definition Queries
+3	Filters by Disposition (report) and Call Type keywords
+4	Refreshes each layer’s symbology
+5	Turns layers on/off by crime category
+6	Exports one PDF map per crime type with current cycle dates
+7	All automatic — no manual clicking each week! ✅
+✅ 3. Save the Script from Notepad (Text Editor)
+🔧 Steps to Save:
+Open Notepad. Paste the full script above. Click File → Save As...
+
+Navigate to your ArcGIS Pro project folder or somewhere organized like:
+
+C:\Users\YourName\Documents\ArcGIS\CrimeMapping\Scripts
+File name:
+
+weekly_crime_report.py
+Save as type: All Files (*. *)
+
+Encoding: Leave as UTF-8
+
+✅ Done! Now you have a .py file ready to run in ArcGIS Pro. ✅ 4. How to Implement the Script
+🧪 First-Time Use:
+Open your ArcGIS Pro project from your template. Make sure layers are loaded and named properly (matching the script). Go to the View tab → click Python to open the Python window. Type this in the Python window:
+
+exec(open(r"C:\Path\To\weekly_crime_report.py").read())
+Hit Enter. ✅ It will:
+
+Read Excel
+
+Apply filters
+
+Export all 5 maps! 🔁 Future Weekly Use (Every Monday or report cycle):
+Update your Excel file (already synced on OneDrive). Open ArcGIS Pro using your template project. Open Python window. Run the same line:
+
+exec(open(r"C:\Path\To\weekly_crime_report.py").read())
+⏱️ Takes <1 minute. 📂 Output: A folder of updated PDF maps! Want to Simplify Even More? Next time, I can show you how to:
+
+Add this script to a custom ArcGIS Toolbox Tool (1-click run)
+
+Or make a button inside Pro using Tasks or Python Add-ins
+
+Would you like me to bundle this checklist into a printable PDF for your team or SOP guide? Provide Feedback | View Changes | Contribute. You said:
+update the script with the correct path and file name. I converted the excel file to a .csv
+
+Name: 7Day_28Day_Cycle_20250414
+Path: "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+ChatGPT said:
+✅ Script updated with your new file format and path:
+
+The Excel reference was replaced with the CSV path you provided. The script now loads data using pd.read_csv() instead of read_excel(). You're ready to run it in ArcGIS Pro with your synced OneDrive CSV! Would you like me to show you how to validate that the right row in the CSV is marked Is_Due = TRUE before running the export? Provide Feedback | View Changes | Contribute. You said:
+yes
+ChatGPT said:
+✅ The script now includes a validation check that ensures there is at least one row marked as Is_Due = True in your CSV before continuing. If no current cycle is marked, it will raise a clear error:
+
+ValueError: No cycle is marked as 'Is_Due = True' in the CSV file. This helps prevent accidental exports using outdated or missing data. Would you like to add another check to confirm that the necessary fields (like 7_Day_Start, Report_Due_Date) are present in the CSV as well? Provide Feedback | View Changes | Contribute. You said:
+no
+ChatGPT said:
+Perfect — no additional checks will be added then. Your script is now fully updated and ready:
+
+It uses your local OneDrive .csv file
+
+Validates that one cycle is marked Is_Due = True
+
+Dynamically updates filters
+
+Refreshes symbology
+
+Exports one PDF per crime type
+
+✅ You're fully operational! Would you like next steps on:
+
+How to make this script run from a custom button or toolbox in ArcGIS Pro for 1-click execution? Or do you want to test it out manually first? Provide Feedback | View Changes | Contribute. You said:
+give instructions how to save the project as a templet, is there a specific name I should name the templet, and if it should be saved somewhere on my OneDrive specifically
+ChatGPT said:
+Great — you're ready for the final step: saving your ArcGIS Pro setup as a project template! ✅ Step-by-Step: Saving Your Project as a Template
+🔧 What this does:
+Saves your map, layers, layout, and symbology
+
+Ensures the Python script remains usable every cycle
+
+Gives you a fresh, ready-to-use project every week
+
+🔢 1. Prep Your Project
+1.1 Open your ArcGIS Pro project (the one with all your layers and the script ready). 1.2 Ensure:
+
+All layers are connected and symbolized
+
+Layout is complete
+
+Your Python script is saved inside the project folder or subfolder
+
+🔢 2. Open the Template Tool
+2.1 In the top ribbon, go to the Share tab
+2.2 Click Project Template → Save As Project Template
+
+🔢 3. Fill Out the Template Details
+Name:
+I recommend something clear like:
+
+Weekly_Crime_Map_Template
+(Keep it short, no spaces or special characters if you're sharing it)
+
+Summary:
+
+Template for weekly crime map reporting using 7-Day, 28-Day, and YTD filters with automated exports. Tags:
+crime, weekly, report, automated, ArcGIS Pro
+
+Item Type:
+Keep as Project Template
+
+Thumbnail (optional):
+You can add a screenshot or logo if you like. 🔢 4. Choose Where to Save It
+Choose one of these options:
+
+Option	Recommendation
+✅ OneDrive Folder	Best for personal use or sharing with a team (syncs across machines)
+✅ Local Folder	Good for offline or backup use
+🌐 Portal/Organization Share	Only if you're managing it within ArcGIS Online or Enterprise
+📁 For OneDrive, a good path might be:
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Templates\
+🔢 5. Share the Template
+5.1 Click Analyze to check for issues
+5.2 If everything is valid, click Share (or Finish)
+
+✅ You now have a reusable .aptx template. 🧭 Future Use (Weekly Workflow)
+Every week:
+
+Open ArcGIS Pro → New Project → From your template
+
+Update your CSV file (cycle dates)
+
+Open the Python window → run:
+
+exec(open(r"Path\To\Your\Script.py").read())
+PDF maps will export automatically — done! Let me know if you'd like a visual diagram or printable checklist of this workflow. Or if you're interested in packaging this into a 1-click toolbox! Provide Feedback | View Changes | Contribute. You said:
+Uploaded image
+I made the following layouts:
+MV Thefts
+Burglary - Auto
+Burglary Comm & Res
+Robbery
+Sexual Offenses
+
+they all have the same elements and layout as the attached image. is this ok so far? ChatGPT said:
+Yes — you're doing great, and your setup looks right on track! Here's what you're doing correctly and a few small suggestions to finish strong:
+
+✅ What's Correct in Your Setup:
+You’ve created one layout per crime type (MV Theft, Robbery, etc.) Each layout has:
+
+A map frame showing your region
+
+Consistent elements (title, scale bar, legend, north arrow)
+
+All layouts are well-aligned and use the same template structure
+
+The layers in your contents pane are grouped and labeled clearly
+
+Each layout corresponds to the crime type in your Python export logic
+
+💯 This is exactly what your automation needs to run cleanly every week! 🔍 A Couple Optional Refinements:
+Legend Positioning:
+In your screenshot, the legend is cut off on the right. You can:
+
+Resize or reposition it inside the white margin
+
+Or consider changing it to only show visible layers
+
+Dynamic Layout Title Text (Optional):
+If you want the layout to automatically show the reporting week (like “7-Day Cycle: April 21–April 27”), we can insert dynamic text. Just ask and I’ll walk you through it. Layout Names Should Match Crime Types in Script:
+Your layout names (top tabs) should exactly match the names your Python script is exporting. For example:
+
+layout = project.listLayouts()[0]  # This line assumes only ONE layout
+If you want to export each layout separately, we can adjust the script to loop over each layout by name. 🟨 If You’re Using One Layout for All Types:
+If you are just swapping the visible layers and exporting the same layout (like you are now), your current setup is:
+
+✅ 100% valid. No changes needed. If you want each layout permanently tied to one crime type (for pre-print review or editing), I can update your script to loop over each layout name and match it to its crime type. ✅ Summary:
+Checkpoint	Status
+Layouts created for each crime type	✅ Yes
+Map frame set up consistently	✅ Yes
+Elements (scale bar, legend, north arrow) present	✅ Yes
+Layers organized in Contents pane	✅ Yes
+Python export logic matches layer names	✅ Yes (from previous script)
+You're ready to save your template now if you haven’t already! Would you like to:
+
+Adjust the script to export from each named layout, instead of toggling layers? Or keep using the one layout that toggles visibility? (Simpler)
+
+Provide Feedback | View Changes | Contribute. You said:
+Uploaded image
+I assumed the legend was blank because I am not displaying any of the data yet. I have attached one of the past layouts for more context
+ChatGPT said:
+Perfect — thanks for the image! That confirms your setup and thinking are right on target. Let’s walk through what’s happening:
+
+✅ Why the Legend Appeared Blank Before
+You're absolutely right:
+
+The legend was empty in your first layout because no layers were turned on (i.e., no data was visible at that time). In your second image:
+
+MV Burglary 7-Day is showing red squares. MV Burglary 28-Day is using a heat map (magenta-yellow). MV Burglary YTD is using a blue-cyan heat map. And all three are nicely listed in the legend with appropriate color symbology. ✅ This means:
+
+Your layer symbology is correct. Your legend is configured to only show visible layers (which is perfect for automation). Your layouts are working as designed. 🔍 Suggestions (Optional Fine-Tuning)
+Feature	Tip
+Legend Size & Wrap	Consider resizing the legend slightly wider to avoid label wrap (e.g., “MV Burglary YTD” text looks clipped). Layer Names	Keep the symbology layer names short and consistent, like 7-Day, 28-Day, YTD — it makes legends cleaner. Layer Visibility Timing	When the Python script toggles layer visibility for export, your legend will update automatically — no manual fix needed. Legend Element Lock	If you're using the same layout to toggle layers (not separate layouts), you can lock the legend element to avoid accidental moves. 🧠 Smart Setup Choice:
+Using one layout + automated layer toggling is very efficient — less maintenance and works well with your Python script. If you'd ever prefer separate layouts per crime type, we can adjust the script to loop over layouts instead of toggling layers. Would you like me to walk you through how to:
+
+Add dynamic text to show the 7-Day / 28-Day date range from your CSV? Or are you ready to export a test cycle and see the final output in PDF? Provide Feedback | View Changes | Contribute. You said:
+Ref: Smart setup choice:
+
+should delete all but one of the layouts? If Yes should I name that single layout anything special? ChatGPT said:
+✅ Yes — you can and should delete all but one layout if you're going with the smart, efficient approach where the script:
+
+Uses a single layout
+
+Dynamically toggles which layers are visible
+
+Exports 5 different PDFs (one for each crime type)
+
+💡 Why Use Just One Layout? Fewer layouts to maintain (less risk of inconsistency)
+
+Python script already toggles visibility by crime type
+
+Keeps your ArcGIS Pro project clean and simple
+
+Works perfectly with automated export logic
+
+📝 What to Name the One Layout? ArcGIS Pro doesn’t require any specific name, but for clarity and script maintenance, I recommend:
+
+Crime_Reporting_Layout
+Or something short and clear like:
+
+ReportLayout
+You don't have to change anything in the Python script if you're using:
+
+layout = project.listLayouts()[0]
+That line grabs the first (and now only) layout — it will still work. ✅
+
+📌 How to Clean Up Layouts:
+In the Catalog pane, expand the "Layouts" folder. Right-click each layout (like Burglary, MV Theft, etc.) Click Delete for each — except the one you're keeping. Rename the remaining layout (F2 or right-click → Rename). ✅ Summary:
+Action	Recommendation
+Keep how many layouts? ✅ Just one
+Layout name	Suggest: Crime_Reporting_Layout
+Do you need to update the script? ❌ Not unless you want to refer to layout by name
+Benefit	Clean, fast, low-maintenance exports
+Would you like to modify the script to reference the layout by name instead of assuming it's the first one? Example:
+
+layout = project.listLayouts()[0]  # current
+# vs.
+layout = project.listLayouts('Crime_Reporting_Layout')[0]  # safer if adding layouts later
+Let me know and I can update it for you! Provide Feedback | View Changes | Contribute. You said:
+Layout was named "Crime_Reporting_Layout"
+
+Question with the layout zoom in to the lowest elevation that shows all symbology? ChatGPT said:
+Perfect on the layout name — Crime_Reporting_Layout is clean and script-ready. ❓ Your Question:
+Can the layout automatically zoom to the lowest elevation that shows all visible symbology? ✅ Yes — but with a little help from Python. ArcGIS Pro does not automatically adjust the layout map frame extent when toggling layer visibility, but we can automate it in your script so it:
+
+Zooms to the visible features for each crime type
+
+Then exports the PDF
+
+🧠 How It Works:
+We'll use map_obj.extent = layer.getExtent() for the currently visible layer(s). Let me show you exactly how to add this into your script. 🔄 Script Add-on (inside the export loop):
+Find this part of the script:
+
+for crime in crime_types:
+    for lyr in map_obj.listLayers():
+        lyr.visible = crime in lyr.name
+    output_pdf = os.path.join(export_folder, f"{crime.replace(' ', '_')}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+🔁 Replace it with this (adds zoom logic):
+
+for crime in crime_types:
+    visible_layers = []
+
+    # Turn on only layers related to this crime type
+    for lyr in map_obj.listLayers():
+        lyr.visible = crime in lyr.name
+        if lyr.visible:
+            visible_layers.append(lyr)
+
+    # Zoom to visible layers (lowest extent containing all symbology)
+    if visible_layers:
+        extent = visible_layers[0].getExtent()
+        for lyr in visible_layers[1:]:
+            extent = extent.union(lyr.getExtent())
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export PDF
+    output_pdf = os.path.join(export_folder, f"{crime.replace(' ', '_')}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+✅ What This Does:
+Gathers all visible layers for the current crime type
+
+Calculates the combined bounding box (extent)
+
+Zooms the map frame to show everything
+
+Then exports the layout
+
+Fully automated zoom-to-fit behavior 💥
+
+Would you like me to update your entire script in the canvas for you with this zoom logic included? Provide Feedback | View Changes | Contribute. You said:
+I updated the code manually see below. Please check for errors or problems with the code. import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_folder = r"C:\Users\carucci_r\Documents\Weekly_Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load the CSV file
+cycle_df = pd.read_csv(csv_path)
+
+# Validate at least one active cycle exists
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the CSV file. Please update the file before running the script.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+
+# Filters
+incident_keywords = ['Vehicle Theft', 'Commercial', 'Residence', 'Robbery', 'Sexual', 'Auto']
+calltype_filter = "(" + " OR ".join([f"Call_Type LIKE '%{word}%" for word in incident_keywords]) + ")"
+disposition_filter = "Disposition LIKE '%report%'"
+
+# Queries
+query_7_day = f"Call_Date >= date '{seven_day_start}' AND Call_Date <= date '{seven_day_end}' AND {disposition_filter} AND {calltype_filter}"
+query_28_day = f"Call_Date >= date '{twenty_eight_day_start}' AND Call_Date <= date '{twenty_eight_day_end}' AND {disposition_filter} AND {calltype_filter}"
+query_ytd = f"Call_Date >= date '2024-12-31' AND {disposition_filter} AND {calltype_filter}"
+
+# Layer query mapping
+layer_query_mapping = {
+    "Burglary - Auto 7-Day": query_7_day,
+    "Burglary - Auto 28-Day": query_28_day,
+    "Burglary - Auto YTD": query_ytd,
+    "Burglary - Comm & Res 7-Day": query_7_day,
+    "Burglary - Comm & Res 28-Day": query_28_day,
+    "Burglary - Comm & Res YTD": query_ytd,
+    "Robbery 7-Day": query_7_day,
+    "Robbery 28-Day": query_28_day,
+    "Robbery YTD": query_ytd,
+    "Sexual Offenses 7-Day": query_7_day,
+    "Sexual Offenses 28-Day": query_28_day,
+    "Sexual Offenses YTD": query_ytd,
+    "MV Theft 7-Day": query_7_day,
+    "MV Theft 28-Day": query_28_day,
+    "MV Theft YTD": query_ytd,
+}
+
+# Apply queries and refresh
+for layer_name, query in layer_query_mapping.items():
+    lyr = map_obj.listLayers(layer_name)[0]
+    lyr.definitionQuery = query
+    sym = lyr.symbology
+    lyr.symbology = sym  # Refresh
+
+# Export each crime type
+crime_types = ["Burglary - Auto", "Burglary - Comm & Res", "Robbery", "Sexual Offenses", "MV Theft"]
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y%m%d')
+layout = project.listLayouts()[0]
+
+for crime in crime_types:
+    visible_layers = []
+
+    # Turn on only layers related to this crime type
+    for lyr in map_obj.listLayers():
+        lyr.visible = crime in lyr.name
+        if lyr.visible:
+            visible_layers.append(lyr)
+
+    # Zoom to visible layers (lowest extent containing all symbology)
+    if visible_layers:
+        extent = visible_layers[0].getExtent()
+        for lyr in visible_layers[1:]:
+            extent = extent.union(lyr.getExtent())
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export PDF
+    output_pdf = os.path.join(export_folder, f"{crime.replace(' ', '_')}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+
+print("All filters applied, symbology refreshed, and PDFs exported.") ChatGPT said:
+Your script is very well done — clear, organized, and functional! I reviewed it line by line, and here’s a quick ✅/⚠️ summary with minor suggestions:
+
+✅ Works As-Is:
+CSV loading and validation ✅
+
+Date parsing ✅
+
+Query formatting ✅
+
+Layer filtering and toggling ✅
+
+Zoom-to-visible-features logic ✅
+
+Layout export per crime type ✅
+
+Clean and readable structure ✅
+
+⚠️ Minor Fix Needed: Typo in calltype_filter
+You have:
+
+calltype_filter = "(" + " OR ".join([f"Call_Type LIKE '%{word}%" for word in incident_keywords]) + ")"
+🚫 Issue:
+
+The closing % and ' are missing after {word}. ✅ Corrected:
+
+calltype_filter = "(" + " OR ".join([f"Call_Type LIKE '%{word}%'" for word in incident_keywords]) + ")"
+Without the closing quote and wildcard, the SQL expressions would be invalid and cause the query to silently fail or exclude expected results. ✅ Optional Best Practice
+You’re currently referencing the layout like this:
+
+layout = project.listLayouts()[0]
+If you renamed it to "Crime_Reporting_Layout" earlier, you can future-proof the script with:
+
+layout = project.listLayouts("Crime_Reporting_Layout")[0]
+This avoids issues if other layouts are added in the future. ✅ Final Version (After Fix):
+Here's just the corrected line:
+
+calltype_filter = "(" + " OR ".join([f"Call_Type LIKE '%{word}%'" for word in incident_keywords]) + ")"
+Everything else looks solid! Would you like me to update this version directly in the canvas for you so it’s stored cleanly? Provide Feedback | View Changes | Contribute. You said:
+yes
+ChatGPT said:
+✅ Your script is now fully updated in the canvas with:
+
+✅ Corrected calltype_filter formatting
+
+✅ Explicit layout name reference ("Crime_Reporting_Layout")
+
+✅ Automatic zoom-to-visible-features before export
+
+It’s in great shape for automated weekly use! Would you like a one-page printable checklist or SOP to go with it for your team? Provide Feedback | View Changes | Contribute. You said:
+yes
+ChatGPT said:
+Great! Here's your one-page Standard Operating Procedure (SOP) Checklist for your weekly crime map automation workflow in ArcGIS Pro. 🗂️ Weekly Crime Map Automation – SOP Checklist
+✅ Prep Checklist
+Step	Task
+1️⃣	Update the CSV file: 7Day_28Day_Cycle_20250414.csv in OneDrive
+2️⃣	Ensure one row is marked Is_Due = TRUE
+3️⃣	Open ArcGIS Pro → New Project from Template (Weekly_Crime_Map_Template.aptx)
+4️⃣	Confirm your layout is named: Crime_Reporting_Layout
+5️⃣	Make sure the following layers are present and named correctly:
+MV Theft, Robbery, Burglary - Auto, Burglary - Comm & Res, Sexual Offenses for each time cycle (7-Day, 28-Day, YTD)
+🐍 Running the Python Script
+Step	Action
+6️⃣	Go to View tab → Open the Python window
+7️⃣	Type and run the command:
+exec(open(r"C:\Users\carucci_r\Documents\Scripts\weekly_crime_report.py").read())
+| 8️⃣ | Script will:
+
+Read dates from CSV
+
+Apply definition queries
+
+Refresh symbology
+
+Zoom to visible features
+
+Export 5 crime-specific PDF maps to C:\Users\carucci_r\Documents\Weekly_Reports |
+
+📤 Output
+5 PDFs like:
+
+MV_Theft_20250430.pdf
+Robbery_20250430.pdf
+Burglary_-_Auto_20250430.pdf
+...
+🧼 After Export
+Step	Task
+9️⃣	Review the PDFs in the export folder
+🔟	Email or upload to report destination as needed
+🔁	Repeat each week — only change is the CSV file! Would you like this in a downloadable PDF format for your SOP binder or internal training? Provide Feedback | View Changes | Contribute. You said:
+yes and thank you
+ChatGPT said:
+
+Analysis errored
+Always show details
+
+from fpdf import FPDF
+
+# Create a simple PDF SOP based on the checklist
+pdf = FPDF()
+pdf.set_auto_page_break(auto=True, margin=15)
+pdf.add_page()
+pdf.set_font("Arial", size=12)
+
+title = "Weekly Crime Map Automation – SOP Checklist"
+pdf.set_font("Arial", 'B', 14)
+pdf.cell(200, 10, title, ln=True, align='C')
+pdf.ln(10)
+
+# Sections
+sections = {
+    "Prep Checklist": [
+        "1. Update the CSV file: 7Day_28Day_Cycle_20250414.csv in OneDrive",
+        "2. Ensure one row is marked Is_Due = TRUE",
+        "3. Open ArcGIS Pro → New Project from Template (Weekly_Crime_Map_Template.aptx)",
+        "4. Confirm your layout is named: Crime_Reporting_Layout",
+        "5. Make sure the following layers are present and named correctly:\n   MV Theft, Robbery, Burglary - Auto, Burglary - Comm & Res, Sexual Offenses for each time cycle (7-Day, 28-Day, YTD)"
+    ],
+    "Running the Python Script": [
+        "6. Go to View tab → Open the Python window",
+        r"7. Type and run: exec(open(r'C:\Users\carucci_r\Documents\Scripts\weekly_crime_report.py').read())",
+        "8. Script will:\n   - Read dates from CSV\n   - Apply definition queries\n   - Refresh symbology\n   - Zoom to visible features\n   - Export 5 crime-specific PDF maps to C:\\Users\\carucci_r\\Documents\\Weekly_Reports"
+    ],
+    "Output": [
+        "PDFs such as:\n  MV_Theft_20250430.pdf\n  Robbery_20250430.pdf\n  Burglary_-_Auto_20250430.pdf ..."
+    ],
+    "After Export": [
+        "9. Review the PDFs in the export folder",
+        "10. Email or upload to report destination as needed",
+        "Repeat each week — only change is the CSV file!"

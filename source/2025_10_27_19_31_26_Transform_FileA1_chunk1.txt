@@ -1,0 +1,98 @@
+? ? 2025-06-10-21-16-53 (EST)
+# Time_SCRPA_Master_2.0/Transform_FileA1
+# Author: R. A. Carucci
+# Purpose: M code export for query 'Transform_FileA1'
+================================================================================
+// Transform_FileA1 - Corrected Version
+(Content as binary) =>
+let
+    // Load the Excel workbook
+    Workbook = Excel.Workbook(Content, null, true),
+    Sheet1 = Workbook{[Item="Sheet1",Kind="Sheet"]}[Data],
+    // Promote headers
+    PromotedHeaders = Table.PromoteHeaders(Sheet1, [PromoteAllScalars=true]),
+    // Explicitly rename Fulladdress to FullAddress and Case Number to CaseNumber
+    FixedFullAddress = Table.RenameColumns(PromotedHeaders, {{"Fulladdress", "FullAddress"}, {"Case Number", "CaseNumber"}}, MissingField.Ignore),
+    // Standardize headers to PascalCase, preserving existing camelCase
+    CurrentColumns = Table.ColumnNames(FixedFullAddress),
+    PascalCaseNames = List.Transform(CurrentColumns, each 
+        if Text.Contains(_, " ") then
+            Text.Combine(
+                List.Transform(Text.SplitAny(Text.Replace(_, " ", "_"), " _"), 
+                    each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+                ), ""
+            )
+        else
+            _),
+    RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+    RenamedTable = Table.RenameColumns(FixedFullAddress, RenamePairs, MissingField.Ignore),
+    // Ensure CaseNumber exists
+    HasCaseNumber = Table.HasColumns(RenamedTable, "CaseNumber"),
+    AddedCaseNumber = if HasCaseNumber then RenamedTable else Table.AddColumn(RenamedTable, "CaseNumber", each "Missing"),
+    // Replace nulls in CaseNumber
+    ReplacedNulls = Table.TransformColumns(AddedCaseNumber, {
+        {"CaseNumber", each if _ is null then "Null" else Text.From(_), type text}
+    }),
+    // Add CaseNumberLength
+    AddedCaseNumberLength = Table.AddColumn(ReplacedNulls, "CaseNumberLength", each Text.Length([CaseNumber])),
+    
+    // ENHANCED: Add IncDate with proper date type
+    AddedIncDate = Table.AddColumn(AddedCaseNumberLength, "IncDate", each 
+        if [IncidentDate] <> null then Date.From([IncidentDate])
+        else if [IncidentDateBetween] <> null then Date.From([IncidentDateBetween]) 
+        else if [ReportDate] <> null then Date.From([ReportDate])
+        else null, type date),
+    
+    // ENHANCED: Add IncTime with proper time type
+    AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+        if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime]))
+        else if [IncidentTimeBetween] <> null then Time.From(DateTime.Time([IncidentTimeBetween]))
+        else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime]))
+        else null, type time),
+    
+    // ENHANCED: Add StartOfHour with proper time type
+    AddedStartOfHour = Table.AddColumn(AddedIncTime, "StartOfHour", each 
+        if [IncTime] <> null then Time.StartOfHour([IncTime]) else null, type time),
+    
+    // ENHANCED: Add TimeOfDay matching your MV Theft chart exactly
+    AddedTimeOfDay = Table.AddColumn(AddedStartOfHour, "TimeOfDay", each
+        let t = try Time.From([IncTime]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00�03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00�07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00�11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00�15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00�19:59)"
+           else "Night (20:00�23:59)", type text),
+    
+    // Add Block column using enhanced CAD approach
+    AddedBlock = Table.AddColumn(AddedTimeOfDay, "Block", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+    
+    // Add ALL_INCIDENTS column for filtering
+    AddedAllIncidents = Table.AddColumn(AddedBlock, "AllIncidents", each 
+        [IncidentType1] & (if [IncidentType2] <> null then " - " & [IncidentType2] else "") & 
+        (if [IncidentType3] <> null then " - " & [IncidentType3] else ""), type text),
+    
+    // Add Period column for Excel chart legend (7-Day, 28-Day, YTD)
+    AddedPeriod = Table.AddColumn(AddedAllIncidents, "Period", each
+        let
+            daysFromToday = Duration.Days(Date.From(DateTime.LocalNow()) - [IncDate])
+        in
+            if daysFromToday <= 7 then "7-Day"
+            else if daysFromToday <= 28 then "28-Day"
+            else if Date.Year([IncDate]) = Date.Year(DateTime.LocalNow()) then "YTD"
+            else "Historical", type text),
+    
+    // Clean and trim narrative text
+    TrimmedText = Table.TransformColumns(AddedPeriod,{{"Narrative", Text.Trim, type text}}),
+    CleanedText = Table.TransformColumns(TrimmedText,{{"Narrative", Text.Clean, type text}})
+in
+    CleanedText

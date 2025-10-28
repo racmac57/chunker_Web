@@ -1,0 +1,603 @@
+current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Filter keywords per crime type
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL builders
+def build_sql(start_date, end_date, keywords):
+    calltype_clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({calltype_clause})"
+
+def build_sql_ytd(keywords):
+    calltype_clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({calltype_clause})"
+
+# Apply filters
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+# Layout selection
+layout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]
+crime_types = list(keywords_by_crime.keys())
+base_layers = ["City Boundaries", "Human Geography Dark Label", "Human Geography Dark Detail", "Human Geography Dark Base"]
+
+for crime in crime_types:
+    visible_layers = []
+
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = extent.union(geom.extent)
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Let legend auto-update based on visible layers
+    for legend in layout.listElements("LEGEND_ELEMENT"):
+        legend.autoAdd = True
+        legend.refresh()
+
+    # Export
+    out_file = f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf"
+    layout.exportToPDF(os.path.join(report_folder, out_file))
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+Run this with the Crime_Reporting_Layout active in your template project. It should:
+
+Show updated legend items. Zoom appropriately. Apply all transparency, filters, and export rules. Let me know when you're ready to test. Provide Feedback | View Changes | Contribute. You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Friday, May 2, 2025 10:11:20 PM
+
+the layouts are not being exported 
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 85, in <module>
+﻿    extent = extent.union(geom.extent)
+﻿             ^^^^^^^^^^^^
+﻿AttributeError: 'Extent' object has no attribute 'union'
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Friday, May 2, 2025 10:11:26 PM (Elapsed Time: 6.46 seconds)
+ChatGPT said:
+Thank you — this error confirms that extent.union(...) is invalid for Extent objects in ArcPy. ArcPy Extent objects don't have a union() method. Instead, to merge multiple extents, we need to manually compute the combined min/max coordinates. Here’s the corrected logic for combining extents:
+
+✅ Replace this block (starting around line 82):
+if extent:
+    extent = extent.union(geom.extent)
+else:
+    extent = geom.extent
+✅ With this safe manual merge:
+if extent:
+    extent = arcpy.Extent(
+        min(extent.XMin, geom.extent.XMin),
+        min(extent.YMin, geom.extent.YMin),
+        max(extent.XMax, geom.extent.XMax),
+        max(extent.YMax, geom.extent.YMax)
+    )
+else:
+    extent = geom.extent
+🔁 Updated in Context:
+Here's that section fully integrated:
+
+# Zoom using extent of all visible features
+extent = None
+for lyr in visible_layers:
+    if lyr.supports("DATASOURCE"):
+        with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+            for row in cursor:
+                geom = row[0]
+                if extent:
+                    extent = arcpy.Extent(
+                        min(extent.XMin, geom.extent.XMin),
+                        min(extent.YMin, geom.extent.YMin),
+                        max(extent.XMax, geom.extent.XMax),
+                        max(extent.YMax, geom.extent.YMax)
+                    )
+                else:
+                    extent = geom.extent
+if extent:
+    map_obj.defaultCamera.setExtent(extent)
+Go ahead and update the script with this correction and rerun the tool. Let me know how the layout looks after this pass, especially with zoom and legend. Provide Feedback | View Changes | Contribute. You said:
+is this script correct:
+
+
+# Zoom using extent of all visible features
+extent = None
+for lyr in visible_layers:
+    if lyr.supports("DATASOURCE"):
+        with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+            for row in cursor:
+                geom = row[0]
+                if extent:
+                    extent = arcpy.Extent(
+                        min(extent.XMin, geom.extent.XMin),
+                        min(extent.YMin, geom.extent.YMin),
+                        max(extent.XMax, geom.extent.XMax),
+                        max(extent.YMax, geom.extent.YMax)
+                    )
+                else:
+                    extent = geom.extent
+if extent:
+    map_obj.defaultCamera.setExtent(extent)
+ChatGPT said:
+Yes ✅ — the script you've posted is correct for calculating and setting the combined extent of visible feature layers in ArcPy. Here's what it does:
+
+🔍 What It Does:
+Iterates through visible_layers
+
+Uses a SearchCursor to access geometries
+
+Retrieves the extent (geom.extent) of each geometry
+
+Builds a combined bounding box (arcpy.Extent) using the min/max X/Y values
+
+Sets that as the map's extent with map_obj.defaultCamera.setExtent(extent)
+
+✅ Best Practices Already Used:
+arcpy.da.SearchCursor for efficient geometry access
+
+Defensive check with if extent: ... else: ... to build the union
+
+Uses arcpy.Extent(...) constructor properly
+
+🔁 One Tiny Suggestion (Optional):
+If you want to skip empty geometry, you could add this inside the loop:
+
+if not geom: continue
+Let me know when you're ready to test this block in your script and move to exporting. Provide Feedback | View Changes | Contribute. You said:
+provide the full script i deleted my version by mistake
+ChatGPT said:
+
+Analysis errored
+Always show details
+
+import textwrap
+
+full_script = textwrap.dedent("""
+    import arcpy
+    import pandas as pd
+    from datetime import datetime
+    import os
+
+    # Set paths
+    csv_path = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\Refrence\\TimeSCRPT\\DateRelated\\7Day_28Day_Cycle_20250414.csv"
+    export_root = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_25_SCRPA\\TIME_Based\\Reports"
+    project = arcpy.mp.ArcGISProject("CURRENT")
+    map_obj = project.listMaps()[0]  # Assumes one map in project
+
+    # Load cycle control table
+    cycle_df = pd.read_csv(csv_path)
+    if not any(cycle_df['Is_Due'] == True):
+        raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+    # Extract dates and naming info
+    seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+    seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+    twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+    twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+    ytd_start = '2024-12-31'
+    report_name = current_cycle['Report_Name']
+    report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+    # Output folder
+    report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+    os.makedirs(report_folder, exist_ok=True)
+
+    # Keyword filters
+    keywords_by_crime = {
+        "Burglary - Auto": ['auto'],
+        "Burglary - Comm & Res": ['residence', 'commercial'],
+        "Robbery": ['robbery'],
+        "Sexual Offenses": ['sexual'],
+        "MV Theft": ['motor vehicle theft']
+    }
+
+    def build_sql(start_date, end_date, keywords):
+        clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+        return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+    def build_sql_ytd(keywords):
+        clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+        return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+    # Apply queries
+    layer_query_mapping = {}
+    for crime, keywords in keywords_by_crime.items():
+        layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+        layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+        layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+    for lname, sql in layer_query_mapping.items():
+        lyr = map_obj.listLayers(lname)[0]
+        lyr.definitionQuery = sql
+
+    layout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]
+    crime_types = list(keywords_by_crime.keys())
+    base_layers = ["City Boundaries", "Human Geography Dark Label", "Human Geography Dark Detail", "Human Geography Dark Base"]
+
+    for crime in crime_types:
+        visible_layers = []
+        for lyr in map_obj.listLayers():
+            if crime in lyr.name:
+                lyr.visible = True
+                visible_layers.append(lyr)
+                if "7-Day" in lyr.name:
+                    lyr.transparency = 0
+                else:
+                    lyr.transparency = 60
+            elif any(base in lyr.name for base in base_layers):
+                lyr.visible = True
+            else:
+                lyr.visible = False
+
+        # Zoom using extent of all visible features
+        extent = None
+        for lyr in visible_layers:
+            if lyr.supports("DATASOURCE"):
+                with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                    for row in cursor:
+                        geom = row[0]
+                        if not geom:
+                            continue
+                        if extent:
+                            extent = arcpy.Extent(
+                                min(extent.XMin, geom.extent.XMin),
+                                min(extent.YMin, geom.extent.YMin),
+                                max(extent.XMax, geom.extent.XMax),
+                                max(extent.YMax, geom.extent.YMax)
+                            )
+                        else:
+                            extent = geom.extent
+        if extent:
+            map_obj.defaultCamera.setExtent(extent)
+
+        # Export layout
+        output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+        layout.exportToPDF(output_pdf)
+
+    arcpy.AddMessage(f"Reports exported to: {report_folder}")
+""")
+
+full_script
+
+Analyzed
+Always show details
+
+import textwrap
+
+full_script = textwrap.dedent("""
+    import arcpy
+    import pandas as pd
+    from datetime import datetime
+    import os
+
+    # Set paths
+    csv_path = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\Refrence\\TimeSCRPT\\DateRelated\\7Day_28Day_Cycle_20250414.csv"
+    export_root = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_25_SCRPA\\TIME_Based\\Reports"
+    project = arcpy.mp.ArcGISProject("CURRENT")
+    map_obj = project.listMaps()[0]  # Assumes one map in project
+
+    # Load cycle control table
+    cycle_df = pd.read_csv(csv_path)
+    if not any(cycle_df['Is_Due'] == True):
+        raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+    # Extract dates and naming info
+    seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+    seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+    twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+    twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+    ytd_start = '2024-12-31'
+    report_name = current_cycle['Report_Name']
+    report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+    # Output folder
+    report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+    os.makedirs(report_folder, exist_ok=True)
+
+    # Keyword filters
+    keywords_by_crime = {
+        "Burglary - Auto": ['auto'],
+        "Burglary - Comm & Res": ['residence', 'commercial'],
+        "Robbery": ['robbery'],
+        "Sexual Offenses": ['sexual'],
+        "MV Theft": ['motor vehicle theft']
+    }
+
+    def build_sql(start_date, end_date, keywords):
+        clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+        return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+    def build_sql_ytd(keywords):
+        clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+        return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+    # Apply queries
+    layer_query_mapping = {}
+    for crime, keywords in keywords_by_crime.items():
+        layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+        layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+        layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+    for lname, sql in layer_query_mapping.items():
+        lyr = map_obj.listLayers(lname)[0]
+        lyr.definitionQuery = sql
+
+    layout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]
+    crime_types = list(keywords_by_crime.keys())
+    base_layers = ["City Boundaries", "Human Geography Dark Label", "Human Geography Dark Detail", "Human Geography Dark Base"]
+
+    for crime in crime_types:
+        visible_layers = []
+        for lyr in map_obj.listLayers():
+            if crime in lyr.name:
+                lyr.visible = True
+                visible_layers.append(lyr)
+                if "7-Day" in lyr.name:
+                    lyr.transparency = 0
+                else:
+                    lyr.transparency = 60
+            elif any(base in lyr.name for base in base_layers):
+                lyr.visible = True
+            else:
+                lyr.visible = False
+
+        # Zoom using extent of all visible features
+        extent = None
+        for lyr in visible_layers:
+            if lyr.supports("DATASOURCE"):
+                with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                    for row in cursor:
+                        geom = row[0]
+                        if not geom:
+                            continue
+                        if extent:
+                            extent = arcpy.Extent(
+                                min(extent.XMin, geom.extent.XMin),
+                                min(extent.YMin, geom.extent.YMin),
+                                max(extent.XMax, geom.extent.XMax),
+                                max(extent.YMax, geom.extent.YMax)
+                            )
+                        else:
+                            extent = geom.extent
+        if extent:
+            map_obj.defaultCamera.setExtent(extent)
+
+        # Export layout
+        output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+        layout.exportToPDF(output_pdf)
+
+    arcpy.AddMessage(f"Reports exported to: {report_folder}")
+""")
+
+full_script
+Result
+'\nimport arcpy\nimport pandas as pd\nfrom datetime import datetime\nimport os\n\n# Set paths\ncsv_path = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\Refrence\\TimeSCRPT\\DateRelated\\7Day_28Day_Cycle_20250414.csv"\nexport_root = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_25_SCRPA\\TIME_Based\\Reports"\nproject = arcpy.mp.ArcGISProject("CURRENT")\nmap_obj = project.listMaps()[0]  # Assumes one map in project\n\n# Load cycle control table\ncycle_df = pd.read_csv(csv_path)\nif not any(cycle_df[\'Is_Due\'] == True):\n    raise ValueError("No cycle is marked as \'Is_Due = True\' in the cycle table. ")\ncurrent_cycle = cycle_df[cycle_df[\'Is_Due\'] == True].iloc[0]\n\n# Extract dates and naming info\nseven_day_start = pd.to_datetime(current_cycle[\'7_Day_Start\']).strftime(\'%Y-%m-%d\')\nseven_day_end = pd.to_datetime(current_cycle[\'7_Day_End\']).strftime(\'%Y-%m-%d\')\ntwenty_eight_day_start = pd.to_datetime(current_cycle[\'28_Day_Start\']).strftime(\'%Y-%m-%d\')\ntwenty_eight_day_end = pd.to_datetime(current_cycle[\'28_Day_End\']).strftime(\'%Y-%m-%d\')\nytd_start = \'2024-12-31\'\nreport_name = current_cycle[\'Report_Name\']\nreport_due_date = pd.to_datetime(current_cycle[\'Report_Due_Date\']).strftime(\'%Y_%m_%d\')\n\n# Output folder\nreport_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")\nos.makedirs(report_folder, exist_ok=True)\n\n# Keyword filters\nkeywords_by_crime = {\n    "Burglary - Auto": [\'auto\'],\n    "Burglary - Comm & Res": [\'residence\', \'commercial\'],\n    "Robbery": [\'robbery\'],\n    "Sexual Offenses": [\'sexual\'],\n    "MV Theft": [\'motor vehicle theft\']\n}\n\ndef build_sql(start_date, end_date, keywords):\n    clause = " OR ".join([f"calltype LIKE \'%{kw}%\'" for kw in keywords])\n    return f"calldate >= date \'{start_date}\' AND calldate <= date \'{end_date}\' AND disposition LIKE \'%report%\' AND ({clause})"\n\ndef build_sql_ytd(keywords):\n    clause = " OR ".join([f"calltype LIKE \'%{kw}%\'" for kw in keywords])\n    return f"calldate >= date \'{ytd_start}\' AND disposition LIKE \'%report%\' AND ({clause})"\n\n# Apply queries\nlayer_query_mapping = {}\nfor crime, keywords in keywords_by_crime.items():\n    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)\n    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)\n    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)\n\nfor lname, sql in layer_query_mapping.items():\n    lyr = map_obj.listLayers(lname)[0]\n    lyr.definitionQuery = sql\n\nlayout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]\ncrime_types = list(keywords_by_crime.keys())\nbase_layers = ["City Boundaries", "Human Geography Dark Label", "Human Geography Dark Detail", "Human Geography Dark Base"]\n\nfor crime in crime_types:\n    visible_layers = []\n    for lyr in map_obj.listLayers():\n        if crime in lyr.name:\n            lyr.visible = True\n            visible_layers.append(lyr)\n            if "7-Day" in lyr.name:\n                lyr.transparency = 0\n            else:\n                lyr.transparency = 60\n        elif any(base in lyr.name for base in base_layers):\n            lyr.visible = True\n        else:\n            lyr.visible = False\n\n    # Zoom using extent of all visible features\n    extent = None\n    for lyr in visible_layers:\n        if lyr.supports("DATASOURCE"):\n            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:\n                for row in cursor:\n                    geom = row[0]\n                    if not geom:\n                        continue\n                    if extent:\n                        extent = arcpy.Extent(\n                            min(extent.XMin, geom.extent.XMin),\n                            min(extent.YMin, geom.extent.YMin),\n                            max(extent.XMax, geom.extent.XMax),\n                            max(extent.YMax, geom.extent.YMax)\n                        )\n                    else:\n                        extent = geom.extent\n    if extent:\n        map_obj.defaultCamera.setExtent(extent)\n\n    # Export layout\n    output_pdf = os.path.join(report_folder, f"{crime.replace(\' \', \'_\')}_{report_name}_{report_due_date}.pdf")\n    layout.exportToPDF(output_pdf)\n\narcpy.AddMessage(f"Reports exported to: {report_folder}")\n'
+Here is the full restored script for your WeeklyCrimeReport automation task in ArcGIS Pro:
+
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL query builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]
+crime_types = list(keywords_by_crime.keys())
+base_layers = ["City Boundaries", "Human Geography Dark Label", "Human Geography Dark Detail", "Human Geography Dark Base"]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if not geom:
+                        continue
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export layout
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+This is your current working base script. It includes the updated zoom handling, transparency by time range, and preserves visibility for city and basemap layers. Would you like me to reintroduce legend improvements next? You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Friday, May 2, 2025 10:33:15 PM
+Succeeded at Friday, May 2, 2025 10:33:15 PM (Elapsed Time: 0.05 seconds)
+
+The layouts are not being exported to the folder: 
+ChatGPT said:
+Thanks for confirming. Based on your message, the script executed without errors, but no PDF layouts were exported. This typically happens for a few key reasons:
+
+✅ Confirmed from your logs:
+Script ran and exited in 0.05 seconds (too fast to have processed layout export). No failure message = the code logic didn't hit export commands. 🔍 Possible Causes
+Layout Not Found
+This line:
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")][0]
+will silently fail if no layout name begins with "crime_reporting_layout" (case-insensitive), causing an IndexError which might be caught or skipped if wrapped. Loop Block Skipped
+If the crime_types list is empty, no export logic will run. No visible features
+If the extent logic doesn’t find features, map might not zoom or export as expected—but this alone shouldn't prevent file output. ✅ Fix Plan
+Let’s modify the script to:
+
+Explicitly check layout exists
+
+Add messages to geoprocessing log (for visibility)
+
+Ensure that the export logic is not silently skipped
+
+Here is the corrected snippet for layout selection and logging:
+
+# Locate layout with proper name
+layouts = [lyt for lyt in project.listLayouts() if lyt.name.lower().startswith("crime_reporting_layout")]
+if not layouts:
+    arcpy.AddError("No layout found with a name starting with 'Crime_Reporting_Layout'.") raise ValueError("Missing layout. Check that your layout name starts with 'Crime_Reporting_Layout'.") layout = layouts[0]
+arcpy.AddMessage(f"Using layout: {layout.name}")
+Also, add a message right before the export line:
+
+    # Export layout
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+    arcpy.AddMessage(f"Exported: {output_pdf}")
+Would you like me to paste the full script with these updates for testing? You said:
+yes
+ChatGPT said:
+✅ The script has been restored and added to the workspace as Weekly Crime Report. This version includes:
+
+Definition query updates,
+
+Crime-specific filtering,
+
+Proper layout selection,
+
+Transparent symbology rules (0% for 7-Day, 60% for 28-Day & YTD),
+
+Base layers always turned on,
+
+Zooming based on feature extents,
+
+PDF export to the correct folder using the current report cycle name. Run the script now and confirm:
+
+Exported files appear in the expected folder. The zoom and legend are correct. All 7-Day layers are fully opaque; 28-Day and YTD are 60% transparent. Let me know what works or needs adjustment next. Provide Feedback | View Changes | Contribute. You said:
+Sexual_Offenses_C05W18_2025_05_06.pdf
+PDF
+MV_Theft_C05W18_2025_05_06.pdf
+PDF
+Robbery_C05W18_2025_05_06.pdf
+PDF
+why will the legend not populate? should we try a different approach? ChatGPT said:
+Thanks for your patience and detailed updates. Based on the latest message and your exported layouts (e.g., MV_Theft_C05W18_2025_05_06.pdf and Robbery_C05W18_2025_05_06.pdf), the legend is present as a placeholder frame, but it’s not showing any symbology items — which means the legend is not dynamically updating to reflect the visible layers.

@@ -1,0 +1,42 @@
+if __name__ == '__main__':
+    import sys
+    from fpdf import FPDF
+
+    class Args:
+        report = sys.argv[1].lower() == 'true' if len(sys.argv) > 1 else False
+        email = sys.argv[2].lower() == 'true' if len(sys.argv) > 2 else False
+        archive = sys.argv[3].lower() == 'true' if len(sys.argv) > 3 else False
+        archive_days = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4].isdigit() else 30
+        dry_run = sys.argv[5].lower() == 'true' if len(sys.argv) > 5 else False
+        date = sys.argv[6] if len(sys.argv) > 6 else None
+
+    args = Args()
+
+    init_configs()
+
+    crime_types = [
+        "MV Theft",
+        "Burglary - Auto",
+        "Burglary - Comm & Res",
+        "Robbery",
+        "Sexual Offenses"
+    ]
+    chart_suffixes = load_suffixes()
+    base_folder = r"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_25_SCRPA\\TIME_Based\\Reports"
+
+    if args.archive:
+        archive_old_folders(base_folder, days_old=args.archive_days, dry_run=args.dry_run)
+
+    if args.report:
+        run_all_reports(base_folder, crime_types, chart_suffixes, args)
+
+    if args.dry_run:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "Weekly Crime Report DRY RUN Summary", ln=1)
+        pdf.set_font("Arial", "", 12)
+        pdf.ln(5)
+        pdf.multi_cell(0, 8, "This report summarizes simulated actions (charts, PDFs, ZIPs, and email targets). No files were generated or sent.") pdf_path = os.path.join(base_folder, "DRY_RUN_Summary.pdf")
+        pdf.output(pdf_path)
+        arcpy.AddMessage(f"DRY RUN summary PDF generated at: {pdf_path}")

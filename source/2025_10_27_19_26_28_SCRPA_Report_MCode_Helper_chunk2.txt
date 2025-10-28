@@ -1,0 +1,403 @@
+)"},
+    {"Poison"},
+    {"Explosives"},
+    {"Fire/Incendiary Device"},
+    {"Drugs/Narcotics/Sleeping Pills"},
+    {"Asphyxiation"},
+    {"Other"},
+    {"Unknown"},
+    {"None"}
+}, {"WeaponUsed"}),
+TypeOfInjuryRef = Table.FromRows({
+    {"None"},
+    {"Apparent Broken Bones"},
+    {"Possible Internal Injury"},
+    {"Severe Laceration"},
+    {"Apparent Minor Injury"},
+    {"Other Major Injury"},
+    {"Loss of Teeth"},
+    {"Unconsciousness"}
+}, {"TypeOfInjury"}),
+VictimAgeRef = OffenderAgeRef,
+VictimSexRef = OffenderSexRef,
+VictimRaceRef = OffenderRaceRef,
+HelperTablesTyped = Table.Combine({
+    Table.TransformColumnTypes(KeysWithVehicleRef, {{"KeysWithVehicle", type text}}),
+    Table.TransformColumnTypes(PropertyDescriptionRef, {{"Code", type text}, {"Description", type text}}),
+    Table.TransformColumnTypes(OffenseCompletedRef, {{"OffenseCompleted", type text}}),
+    Table.TransformColumnTypes(DamageToVehicleRef, {{"DamageToVehicle", type text}}),
+    Table.TransformColumnTypes(PointOfEntryRef, {{"PointOfEntry", type text}}),
+    Table.TransformColumnTypes(MeansOfEntryRef, {{"MeansOfEntry", type text}}),
+    Table.TransformColumnTypes(OffenderSequenceNumberRef, {{"OffenderSequenceNumber", type text}}),
+    Table.TransformColumnTypes(OffenderSexRef, {{"OffenderSex", type text}}),
+    Table.TransformColumnTypes(OffenderAgeRef, {{"OffenderAge", type text}}),
+    Table.TransformColumnTypes(LocationTypeRef, {{"Code", type text}, {"LocationType", type text}}),
+    Table.TransformColumnTypes(PropertyLossTypeRef, {{"PropertyLossType", type text}}),
+    Table.TransformColumnTypes(OffenderRaceRef, {{"OffenderRace", type text}}),
+    Table.TransformColumnTypes(ValueOfPropertyRef, {{"Code", type text}, {"Description", type text}}),
+    Table.TransformColumnTypes(WeaponUsedRef, {{"WeaponUsed", type text}}),
+    Table.TransformColumnTypes(TypeOfInjuryRef, {{"TypeOfInjury", type text}})
+}),
+
+CycleFilter = let
+    CurrentDate = Int64.From(DateTime.Date(DateTime.LocalNow())),
+    IsDueDate = try Table.SelectRows(CycleTyped, each [ReportDueDate] = CurrentDate and [IsDue] = true) otherwise Table.FromRows({}),
+    SevenDayStart = 
+        let
+            PreviousCycle = if not Table.IsEmpty(IsDueDate) then
+                Table.SelectRows(CycleTyped, each [SevenDayEnd] = CurrentDate - 1)
+                else Table.SelectRows(CycleTyped, each [SevenDayStart] <= CurrentDate and [SevenDayEnd] >= CurrentDate),
+            FallbackCycle = if Table.IsEmpty(PreviousCycle) then 
+                Table.FirstN(Table.Sort(CycleTyped, {{"SevenDayEnd", Order.Descending}}), 1)
+                else PreviousCycle
+        in
+            if Table.IsEmpty(FallbackCycle) or not Table.Contains(FallbackCycle, [SevenDayStart]) 
+            then CurrentDate - 7 
+            else try FallbackCycle{0}[SevenDayStart] otherwise CurrentDate - 7,
+    SevenDayEnd = 
+        let
+            PreviousCycle = if not Table.IsEmpty(IsDueDate) then
+                Table.SelectRows(CycleTyped, each [SevenDayEnd] = CurrentDate - 1)
+                else Table.SelectRows(CycleTyped, each [SevenDayStart] <= CurrentDate and [SevenDayEnd] >= CurrentDate),
+            FallbackCycle = if Table.IsEmpty(PreviousCycle) then 
+                Table.FirstN(Table.Sort(CycleTyped, {{"SevenDayEnd", Order.Descending}}), 1)
+                else PreviousCycle
+        in
+            if Table.IsEmpty(FallbackCycle) or not Table.Contains(FallbackCycle, [SevenDayEnd]) 
+            then CurrentDate - 1 
+            else try FallbackCycle{0}[SevenDayEnd] otherwise CurrentDate - 1,
+    TwentyEightDayStart = 
+        let
+            PreviousCycle = if not Table.IsEmpty(IsDueDate) then
+                Table.SelectRows(CycleTyped, each [TwentyEightDayEnd] = CurrentDate - 1)
+                else Table.SelectRows(CycleTyped, each [TwentyEightDayStart] <= CurrentDate and [TwentyEightDayEnd] >= CurrentDate),
+            FallbackCycle = if Table.IsEmpty(PreviousCycle) then 
+                Table.FirstN(Table.Sort(CycleTyped, {{"TwentyEightDayEnd", Order.Descending}}), 1)
+                else PreviousCycle
+        in
+            if Table.IsEmpty(FallbackCycle) or not Table.Contains(FallbackCycle, [TwentyEightDayStart]) 
+            then CurrentDate - 28 
+            else try FallbackCycle{0}[TwentyEightDayStart] otherwise CurrentDate - 28,
+    TwentyEightDayEnd = 
+        let
+            PreviousCycle = if not Table.IsEmpty(IsDueDate) then
+                Table.SelectRows(CycleTyped, each [TwentyEightDayEnd] = CurrentDate - 1)
+                else Table.SelectRows(CycleTyped, each [TwentyEightDayStart] <= CurrentDate and [TwentyEightDayEnd] >= CurrentDate),
+            FallbackCycle = if Table.IsEmpty(PreviousCycle) then 
+                Table.FirstN(Table.Sort(CycleTyped, {{"TwentyEightDayEnd", Order.Descending}}), 1)
+                else PreviousCycle
+        in
+            if Table.IsEmpty(FallbackCycle) or not Table.Contains(FallbackCycle, [TwentyEightDayEnd]) 
+            then CurrentDate - 1 
+            else try FallbackCycle{0}[TwentyEightDayEnd] otherwise CurrentDate - 1,
+    Result = if CycleLength = "7Day" then [SevenDayStart, SevenDayEnd] else [TwentyEightDayStart, TwentyEightDayEnd]
+in
+    [Start = Result{0}, End = Result{1}],
+
+MergedCycles = Table.NestedJoin(SortByIncDate, {"IncDate"}, CycleTyped, {"SevenDayStart"}, "CycleData", JoinKind.LeftOuter),
+ExpandedCycles = Table.ExpandTableColumn(MergedCycles, "CycleData", {"ReportDueDate", "SevenDayStart", "SevenDayEnd", "TwentyEightDayStart", "TwentyEightDayEnd", "ReportName", "IsDue"}, {"ReportDueDate", "SevenDayStart", "SevenDayEnd", "TwentyEightDayStart", "TwentyEightDayEnd", "ReportName", "IsDue"}),
+
+FilteredCycle = Table.SelectRows(ExpandedCycles, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+
+MergedDateFormats = Table.NestedJoin(FilteredCycle, {"IncDate"}, DateFormatsTyped, {"Date"}, "DateFormats", JoinKind.LeftOuter),
+ExpandedDateFormats = Table.ExpandTableColumn(MergedDateFormats, "DateFormats", {"StartOfWeek", "EndOfWeek", "WeekOfYear", "MonthName", "DayName", "Season"}, {"StartOfWeek", "EndOfWeek", "WeekOfYear", "MonthNameDateFormats", "DayNameDateFormats", "SeasonDateFormats"}),
+
+ManualDataSource = Excel.Workbook(File.Contents("C:\Path\To\ManualCrimeData.xlsx"), true),
+ManualDataTable = ManualDataSource{[Name="ManualCrimeData"]}[Data],
+ManualDataCleaned = Table.TransformColumnTypes(ManualDataTable, {
+    {"CaseNumber", type text},
+    {"CrimeSeverity", type text},
+    {"SuspectDescription", type text},
+    {"VehicleWasParked", type text},
+    {"EntryMethod", type text},
+    {"SuspectVehicleDescription", type text},
+    {"KeysWithVehicle", type text},
+    {"OffenseCompleted", type text},
+    {"Notes", type text},
+    {"SecurityMeasuresPresent", type text},
+    {"PointOfEntry", type text},
+    {"VictimOffenderRelationship", type text},
+    {"VictimDemographics", type text},
+    {"WeaponUsed", type text},
+    {"TypeOfOffense", type text},
+    {"MethodOfCoercion", type text},
+    {"MultipleOffendersVsSingleOffender", type text},
+    {"RepeatOffenderOrKnownSuspect", type text},
+    {"UseOfTechnology", type text},
+    {"LocationType", type text},
+    {"NumberOfPremisesEntered", Int64.Type},
+    {"PropertyLossType", type text},
+    {"PropertyDescription", type text},
+    {"ValueOfProperty", type text},
+    {"OffenderSequenceNumber", type text},
+    {"OffenderAge", type text},
+    {"OffenderSex", type text},
+    {"OffenderRace", type text},
+    {"VictimAge", type text},
+    {"VictimSex", type text},
+    {"VictimRace", type text},
+    {"TypeOfInjury", type text}
+}),
+
+FinalData = Table.NestedJoin(ExpandedDateFormats, {"CaseNumber"}, ManualDataCleaned, {"CaseNumber"}, "ManualData", JoinKind.LeftOuter),
+ExpandedManualData = Table.ExpandTableColumn(FinalData, "ManualData", {
+    "CrimeSeverity", "SuspectDescription", "VehicleWasParked", "EntryMethod", 
+    "SuspectVehicleDescription", "KeysWithVehicle", "OffenseCompleted", "Notes",
+    "SecurityMeasuresPresent", "PointOfEntry", "VictimOffenderRelationship",
+    "VictimDemographics", "WeaponUsed", "TypeOfOffense", "MethodOfCoercion",
+    "MultipleOffendersVsSingleOffender", "RepeatOffenderOrKnownSuspect",
+    "UseOfTechnology", "LocationType", "NumberOfPremisesEntered",
+    "PropertyLossType", "PropertyDescription", "ValueOfProperty",
+    "OffenderSequenceNumber", "OffenderAge", "OffenderSex", "OffenderRace",
+    "VictimAge", "VictimSex", "VictimRace", "TypeOfInjury"
+}, {
+    "CrimeSeverity", "SuspectDescription", "VehicleWasParked", "EntryMethod", 
+    "SuspectVehicleDescription", "KeysWithVehicle", "OffenseCompleted", "Notes",
+    "SecurityMeasuresPresent", "PointOfEntry", "VictimOffenderRelationship",
+    "VictimDemographics", "WeaponUsed", "TypeOfOffense", "MethodOfCoercion",
+    "MultipleOffendersVsSingleOffender", "RepeatOffenderOrKnownSuspect",
+    "UseOfTechnology", "LocationType", "NumberOfPremisesEntered",
+    "PropertyLossType", "PropertyDescription", "ValueOfProperty",
+    "OffenderSequenceNumber", "OffenderAge", "OffenderSex", "OffenderRace",
+    "VictimAge", "VictimSex", "VictimRace", "TypeOfInjury"
+}),
+
+BurglaryAuto = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Burglary - Auto") or [NibrsClassification] = "220"),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    Output = if CycleLength = "7Day" then
+        let
+            SelectedColumns = Table.SelectColumns(CycleFiltered, {
+                "Block", "IncDate", "DayName", "TimeOfDay", "Vehicle", "LocationType", 
+                "PointOfEntry", "EntryMethod", "NumberOfPremisesEntered", 
+                "PropertyLossType", "PropertyDescription", "ValueOfProperty", "Suspect",
+                "OffenderSequenceNumber", "OffenderAge", "OffenderSex", "OffenderRace",
+                "DamageToVehicle", "SuspectVehicleDescription", "KeysWithVehicle",
+                "OffenseCompleted", "SecurityMeasuresPresent", "Narrative",
+                "WeaponUsed", "VictimAge", "VictimSex", "VictimRace", "TypeOfInjury"
+            }),
+            RenamedColumns = Table.RenameColumns(SelectedColumns, {
+                {"Block", "Block"},
+                {"IncDate", "Incident Date"},
+                {"DayName", "Day Of Week"},
+                {"TimeOfDay", "Time Of Day Incident Occurred"},
+                {"Vehicle", "Victims Vehicle"},
+                {"Suspect", "Suspect Description"},
+                {"EntryMethod", "Means Of Entry"}
+            }, MissingField.Ignore),
+            ReorderedColumns = Table.SelectColumns(RenamedColumns, {
+                "Block", "Location Type", "Incident Date", "Day Of Week", 
+                "Time Of Day Incident Occurred", "Point Of Entry", "Means Of Entry",
+                "Number Of Premises Entered", "Keys With Vehicle", "Offense Completed",
+                "Offender Sequence Number", "Offender Age", "Offender Sex", 
+                "Offender Race", "Suspect Vehicle Description", 
+                "Property Loss Type", "Property Description", "Value Of Property",
+                "Victims Vehicle", "Damage To Vehicle", "Security Measures Present",
+                "Narrative", "Weapon Used", "Victim Age", "Victim Sex", "Victim Race",
+                "Type Of Injury"
+            }, MissingField.Ignore),
+            ValidatedColumns = Table.AddColumn(ReorderedColumns, "PropertyDescriptionValid", each 
+                if [PropertyDescription] = null or List.Contains({"01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","32","33","34","35","36","37","38","39","41","42","43","44","45","46","47","48","49","59","60","61","62","64","65","66","67","68","69","70","71","72","73","74","75","76","77","78","88","99"}, [PropertyDescription]) then [PropertyDescription] else "Invalid"),
+            ValidatedColumns2 = Table.AddColumn(ValidatedColumns, "OffenseCompletedValid", each 
+                if [OffenseCompleted] = null or List.Contains({"A", "C"}, [OffenseCompleted]) then [OffenseCompleted] else "Invalid"),
+            ValidatedColumns3 = Table.AddColumn(ValidatedColumns2, "PropertyLossTypeValid", each 
+                if [PropertyLossType] = null or List.Contains({"1","2","3","4","5","6","7","8"}, [PropertyLossType]) then [PropertyLossType] else "Invalid"),
+            ValidatedColumns4 = Table.AddColumn(ValidatedColumns3, "ValueOfPropertyValid", each 
+                if [ValueOfProperty] = null or List.Contains({"1","2","3","4","5"}, [ValueOfProperty]) then [ValueOfProperty] else "Invalid"),
+            ValidatedColumns5 = Table.AddColumn(ValidatedColumns4, "WeaponUsedValid", each 
+                if [WeaponUsed] = null or List.Contains({"Firearm (Unspecified)","Handgun","Rifle","Shotgun","Other Firearm","Knife/Cutting Instrument","Blunt Object","Motor Vehicle/Vessel","Personal Weapons (Hands, Feet, Teeth, Etc. )","Poison","Explosives","Fire/Incendiary Device","Drugs/Narcotics/Sleeping Pills","Asphyxiation","Other","Unknown","None"}, [WeaponUsed]) then [WeaponUsed] else "Invalid"),
+            ValidatedColumns6 = Table.AddColumn(ValidatedColumns5, "TypeOfInjuryValid", each 
+                if [TypeOfInjury] = null or List.Contains({"None","Apparent Broken Bones","Possible Internal Injury","Severe Laceration","Apparent Minor Injury","Other Major Injury","Loss of Teeth","Unconsciousness"}, [TypeOfInjury]) then [TypeOfInjury] else "Invalid"),
+            MergedWithLabels = Table.NestedJoin(ValidatedColumns6, {"PropertyDescription"}, PropertyDescriptionRef, {"Code"}, "PropertyLabel", JoinKind.LeftOuter),
+            ExpandedLabels = Table.ExpandTableColumn(MergedWithLabels, "PropertyLabel", {"Description"}, {"Property Description Label"}),
+            MergedWithValueLabels = Table.NestedJoin(ExpandedLabels, {"ValueOfProperty"}, ValueOfPropertyRef, {"Code"}, "ValueLabel", JoinKind.LeftOuter),
+            ExpandedValueLabels = Table.ExpandTableColumn(MergedWithValueLabels, "ValueLabel", {"Description"}, {"Value Of Property Label"}),
+            Transposed = Table.UnpivotOtherColumns(ExpandedValueLabels, {"Block"}, "Attribute", "Value"),
+            ChangedType = Table.TransformColumnTypes(Transposed, {
+                {"Block", type text},
+                {"Attribute", type text},
+                {"Value", type text}
+            })
+        in
+            ChangedType
+        else
+            CycleFiltered
+in
+    BurglaryAuto,
+
+MVTheft_7D = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Motor Vehicle Theft") or [NibrsClassification] = "240"),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    SelectedColumns = Table.SelectColumns(CycleFiltered, {
+        "Block", "IncDate", "DayName", "TimeOfDay", "Vehicle", "LocationType", 
+        "MethodOfEntry", "TotalStolenAmount", "Suspect", "SuspectMO", 
+        "VehicleWasParked", "KeysWithVehicle", "OffenseCompleted", "Narrative"
+    }),
+    RenamedColumns = Table.RenameColumns(SelectedColumns, {
+        {"Block", "Block"},
+        {"IncDate", "Incident Date"},
+        {"DayName", "Day Of Week"},
+        {"TimeOfDay", "Time Of Day"},
+        {"Vehicle", "Vehicle Involved"},
+        {"Suspect", "Suspect Description"},
+        {"TotalStolenAmount", "Value Of Property Stolen"}
+    }, MissingField.Ignore),
+    AddedPlaceholders = Table.AddColumn(RenamedColumns, "Number Of Stolen Vehicles", each "", type text),
+    ReorderedColumns = Table.SelectColumns(AddedPlaceholders, {
+        "Block", "Incident Date", "Day Of Week", "Time Of Day", "Vehicle Involved",
+        "Location Type", "Method Of Entry", "Number Of Stolen Vehicles",
+        "Value Of Property Stolen", "Suspect Description", "Suspect MO",
+        "Vehicle Was Parked", "Keys With Vehicle", "Offense Completed", "Narrative"
+    }),
+    Transposed = Table.UnpivotOtherColumns(ReorderedColumns, {"Block"}, "Attribute", "Value"),
+    ChangedType = Table.TransformColumnTypes(Transposed, {
+        {"Block", type text},
+        {"Attribute", type text},
+        {"Value", type text}
+    })
+in
+    ChangedType,
+
+BurCommercial_7D = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Commercial") or ([NibrsClassification] = "220" and [LocationType] = "Commercial/Office Building")),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    SelectedColumns = Table.SelectColumns(CycleFiltered, {
+        "Block", "IncDate", "DayName", "TimeOfDay", "LocationType", "MethodOfEntry", 
+        "PointOfEntry", "TotalStolenAmount", "Suspect", "SuspectMO", 
+        "SecurityMeasuresPresent", "Narrative"
+    }),
+    RenamedColumns = Table.RenameColumns(SelectedColumns, {
+        {"Block", "Block"},
+        {"IncDate", "Incident Date"},
+        {"DayName", "Day Of Week"},
+        {"TimeOfDay", "Time Of Day"},
+        {"Suspect", "Suspect Description"},
+        {"TotalStolenAmount", "Value Of Property Stolen"}
+    }, MissingField.Ignore),
+    AddedPlaceholders = Table.AddColumn(RenamedColumns, "Number Of Premises Entered", each "", type text),
+    ReorderedColumns = Table.SelectColumns(AddedPlaceholders, {
+        "Block", "Incident Date", "Day Of Week", "Time Of Day", "Location Type",
+        "Method Of Entry", "Point Of Entry", "Number Of Premises Entered",
+        "Value Of Property Stolen", "Suspect Description", "Suspect MO",
+        "Security Measures Present", "Narrative"
+    }),
+    Transposed = Table.UnpivotOtherColumns(ReorderedColumns, {"Block"}, "Attribute", "Value"),
+    ChangedType = Table.TransformColumnTypes(Transposed, {
+        {"Block", type text},
+        {"Attribute", type text},
+        {"Value", type text}
+    })
+in
+    ChangedType,
+
+BurResidential_7D = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Residence") or ([NibrsClassification] = "220" and [LocationType] = "Residence/Home")),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    SelectedColumns = Table.SelectColumns(CycleFiltered, {
+        "Block", "IncDate", "DayName", "TimeOfDay", "LocationType", "MethodOfEntry", 
+        "PointOfEntry", "TotalStolenAmount", "Suspect", "SuspectMO", 
+        "SecurityMeasuresPresent", "Narrative"
+    }),
+    RenamedColumns = Table.RenameColumns(SelectedColumns, {
+        {"Block", "Block"},
+        {"IncDate", "Incident Date"},
+        {"DayName", "Day Of Week"},
+        {"TimeOfDay", "Time Of Day"},
+        {"Suspect", "Suspect Description"},
+        {"TotalStolenAmount", "Value Of Property Stolen"}
+    }, MissingField.Ignore),
+    AddedPlaceholders = Table.AddColumn(RenamedColumns, "Number Of Premises Entered", each "", type text),
+    ReorderedColumns = Table.SelectColumns(AddedPlaceholders, {
+        "Block", "Incident Date", "Day Of Week", "Time Of Day", "Location Type",
+        "Method Of Entry", "Point Of Entry", "Number Of Premises Entered",
+        "Value Of Property Stolen", "Suspect Description", "Suspect MO",
+        "Security Measures Present", "Narrative"
+    }),
+    Transposed = Table.UnpivotOtherColumns(ReorderedColumns, {"Block"}, "Attribute", "Value"),
+    ChangedType = Table.TransformColumnTypes(Transposed, {
+        {"Block", type text},
+        {"Attribute", type text},
+        {"Value", type text}
+    })
+in
+    ChangedType,
+
+Robbery_7D = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Robbery") or [NibrsClassification] = "120"),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    SelectedColumns = Table.SelectColumns(CycleFiltered, {
+        "Block", "IncDate", "DayName", "TimeOfDay", "LocationType", "WeaponUsed", 
+        "TotalStolenAmount", "Suspect", "SuspectMO", "VictimOffenderRelationship", 
+        "VictimDemographics", "Narrative", "VictimAge", "VictimSex", "VictimRace",
+        "TypeOfInjury"
+    }),
+    RenamedColumns = Table.RenameColumns(SelectedColumns, {
+        {"Block", "Block"},
+        {"IncDate", "Incident Date"},
+        {"DayName", "Day Of Week"},
+        {"TimeOfDay", "Time Of Day"},
+        {"Suspect", "Suspect Description"},
+        {"TotalStolenAmount", "Value Of Property Stolen"}
+    }, MissingField.Ignore),
+    ReorderedColumns = Table.SelectColumns(RenamedColumns, {
+        "Block", "Incident Date", "Day Of Week", "Time Of Day", "Location Type",
+        "Weapon Used", "Value Of Property Stolen", "Suspect Description",
+        "Suspect MO", "Victim-Offender Relationship", "Victim Demographics",
+        "Narrative", "Victim Age", "Victim Sex", "Victim Race", "Type Of Injury"
+    }),
+    Transposed = Table.UnpivotOtherColumns(ReorderedColumns, {"Block"}, "Attribute", "Value"),
+    ChangedType = Table.TransformColumnTypes(Transposed, {
+        {"Block", type text},
+        {"Attribute", type text},
+        {"Value", type text}
+    })
+in
+    ChangedType,
+
+Sex_Off_7D = let
+    Source = ExpandedManualData,
+    FilteredData = Table.SelectRows(Source, each Text.Contains([AllIncidents], "Sexual") or [NibrsClassification] in {"11A", "11B", "11C", "11D", "36A", "36B"}),
+    CycleFiltered = Table.SelectRows(FilteredData, each [IncDate] >= CycleFilter[Start] and [IncDate] <= CycleFilter[End]),
+    SelectedColumns = Table.SelectColumns(CycleFiltered, {
+        "Block", "IncDate", "DayName", "TimeOfDay", "Suspect", "Vehicle", 
+        "TypeOfOffense", "VictimOffenderRelationship", "LocationType", 
+        "MethodOfCoercion", "MultipleOffendersVsSingleOffender", 
+        "RepeatOffenderOrKnownSuspect", "UseOfTechnology", "VictimDemographics", 
+        "Narrative", "VictimAge", "VictimSex", "VictimRace", "TypeOfInjury"
+    }),
+    RenamedColumns = Table.RenameColumns(SelectedColumns, {
+        {"Block", "Block"},
+        {"IncDate", "Incident Date"},
+        {"DayName", "Day Of Week"},
+        {"TimeOfDay", "Time Of Day"},
+        {"Suspect", "Suspect Description"},
+        {"Vehicle", "Vehicle Involved"},
+        {"TypeOfOffense", "Type Of Offense"},
+        {"VictimOffenderRelationship", "Victim-Offender Relationship"},
+        {"MultipleOffendersVsSingleOffender", "Multiple Offenders Vs. Single Offender"},
+        {"RepeatOffenderOrKnownSuspect", "Repeat Offender Or Known Suspect"}
+    }, MissingField.Ignore),
+    ReorderedColumns = Table.SelectColumns(RenamedColumns, {
+        "Block", "Incident Date", "Day Of Week", "Time Of Day", "Suspect Description",
+        "Vehicle Involved", "Type Of Offense", "Victim-Offender Relationship",
+        "Location Type", "Method Of Coercion", "Multiple Offenders Vs. Single Offender",
+        "Repeat Offender Or Known Suspect", "Use Of Technology", "Victim Demographics",
+        "Narrative", "Victim Age", "Victim Sex", "Victim Race", "Type Of Injury"
+    }),
+    Transposed = Table.UnpivotOtherColumns(ReorderedColumns, {"Block"}, "Attribute", "Value"),
+    ChangedType = Table.TransformColumnTypes(Transposed, {
+        {"Block", type text},
+        {"Attribute", type text},
+        {"Value", type text}
+    })
+in
+    ChangedType
+```
+
+in
+BurglaryAuto

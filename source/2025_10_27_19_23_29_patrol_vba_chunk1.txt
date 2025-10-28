@@ -1,0 +1,516 @@
+Sub MarkBottomRowEntryPrompt()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim lastRowCell As Range
+
+    Set ws = ThisWorkbook.Sheets("Main_Outreach_Combined")
+    Set tbl = ws.ListObjects("Main_Outreach_Combined")
+
+    ' Target: first column of the last (empty) row in the table
+    Set lastRowCell = tbl.ListColumns(1).DataBodyRange.Cells(tbl.ListRows.Count)
+
+    ' Only apply if it's empty
+    If Trim(lastRowCell.Value) = "" Then
+        With lastRowCell
+            .Value = "Click here to add new entry"
+            .Font.Color = RGB(150, 150, 150) ' light gray
+            .Font.Italic = True
+        End With
+    End If
+
+    MsgBox "Placeholder added to bottom row of the Date column. ", vbInformation
+End Sub
+
+
+
+Sub ApplyNotesByColumnName()
+
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = ActiveSheet
+
+    ' === Table: _25_main ===
+    Set tbl = Nothing
+    On Error Resume Next
+    Set tbl = ws.ListObjects("_25_main")
+    On Error GoTo 0
+
+    If Not tbl Is Nothing Then
+        ' Apply Time Format to Start Time (B) and End Time (C)
+        ApplyValidationByHeader tbl, Array("Start Time", "End Time"), _
+            "Time Format", "Note: Enter time in hh:mm format using a colon (:)." & vbCrLf & _
+            "Entries without a colon will default to 00:00." ' Apply New Entry to Date (A)
+        ApplyValidationByHeader tbl, Array("Date"), _
+            "New Entry", "Note: Add the new entry after the last item in the list." & vbCrLf & _
+            "Once the date is entered, the row will automatically be added to the table." ' Apply Multiple Members to Name of Member Assigned Main Street (F)
+        ApplyValidationByHeader tbl, Array("Name of Member Assigned Main Street"), _
+            "Multiple Members", "Note: When entering multiple members, separate each name with a comma and a space (, )." Else
+        MsgBox "Table '_25_main' not found. ", vbExclamation
+    End If
+
+    ' === Table: _25_comm_out ===
+    Set tbl = Nothing
+    On Error Resume Next
+    Set tbl = ws.ListObjects("_25_comm_out")
+    On Error GoTo 0
+
+    If Not tbl Is Nothing Then
+        ' Apply Time Format to Start Time (I) and End Time (J)
+        ApplyValidationByHeader tbl, Array("Start Time", "End Time"), _
+            "Time Format", "Note: Enter time in hh:mm format using a colon (:)." & vbCrLf & _
+            "Entries without a colon will default to 00:00." ' Apply New Entry to Date (H)
+        ApplyValidationByHeader tbl, Array("Date"), _
+            "New Entry", "Note: Add the new entry after the last item in the list." & vbCrLf & _
+            "Once the date is entered, the row will automatically be added to the table." ' Apply Multiple Members to Name of Patrol Personnel (N)
+        ApplyValidationByHeader tbl, Array("Name of Patrol Personnel"), _
+            "Multiple Members", "Note: When entering multiple members, separate each name with a comma and a space (, )." Else
+        MsgBox "Table '_25_comm_out' not found. ", vbExclamation
+    End If
+
+    MsgBox "Validation notes applied based on column headers. ", vbInformation
+
+End Sub
+
+' Helper subroutine to apply validation based on header names
+Sub ApplyValidationByHeader(tbl As ListObject, headers As Variant, vTitle As String, vMessage As String)
+
+    Dim colName As Variant
+    Dim unionRange As Range
+    Dim colRange As Range
+
+    For Each colName In headers
+        On Error Resume Next
+        Set colRange = tbl.ListColumns(colName).DataBodyRange
+        On Error GoTo 0
+
+        If Not colRange Is Nothing Then
+            If unionRange Is Nothing Then
+                Set unionRange = colRange
+            Else
+                Set unionRange = Union(unionRange, colRange)
+            End If
+        Else
+            MsgBox "Column '" & colName & "' not found in table '" & tbl.Name & "'. ", vbExclamation
+        End If
+    Next colName
+
+    If Not unionRange Is Nothing Then
+        With unionRange.Validation
+            .Delete
+            .Add Type:=xlValidateInputOnly
+            .InputTitle = vTitle
+            .InputMessage = vMessage
+        End With
+    End If
+
+End Sub
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim cell As Range
+    Dim rawVal As String, hh As String, mm As String
+    Dim timeFormatted As String
+    Dim tbl As ListObject
+    Dim ws As Worksheet: Set ws = Me
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Main_Outreach_Combined")
+    On Error GoTo 0
+
+    If tbl Is Nothing Then Exit Sub
+
+    ' Define which columns to apply the formatting to by header name
+    Dim timeHeaders As Variant
+    timeHeaders = Array("Start Time", "End Time", "Outreach Start Time", "Outreach End Time")
+
+    Dim colName As Variant, colRange As Range, matchRange As Range
+
+    For Each colName In timeHeaders
+        On Error Resume Next
+        Set colRange = tbl.ListColumns(colName).DataBodyRange
+        On Error GoTo 0
+
+        If Not colRange Is Nothing Then
+            If matchRange Is Nothing Then
+                Set matchRange = Intersect(Target, colRange)
+            Else
+                Set matchRange = Union(matchRange, Intersect(Target, colRange))
+            End If
+        End If
+    Next colName
+
+    If matchRange Is Nothing Then Exit Sub
+
+    Application.EnableEvents = False
+
+    For Each cell In matchRange
+        If IsNumeric(cell.Value) And Len(Trim(cell.Value)) = 4 Then
+            rawVal = Format(cell.Value, "0000")
+            hh = Left(rawVal, 2)
+            mm = Right(rawVal, 2)
+
+            If Val(hh) <= 23 And Val(mm) <= 59 Then
+                timeFormatted = hh & ":" & mm
+                cell.Value = TimeValue(timeFormatted)
+                cell.NumberFormat = "hh:mm"
+            Else
+                MsgBox "Invalid time: enter a value between 0000 and 2359. ", vbExclamation
+                cell.ClearContents
+            End If
+        End If
+    Next cell
+
+    Application.EnableEvents = True
+End Sub
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim tbl As ListObject
+    Dim cell As Range
+    Dim startTimeCol As ListColumn, endTimeCol As ListColumn
+    Dim eventTypeCol As ListColumn, eventNameCol As ListColumn, eventLocationCol As ListColumn
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+
+    ' Exit if multiple cells changed
+    If Target.Cells.Count > 1 Then GoTo CleanExit
+
+    ' Get the table
+    Set tbl = Me.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then
+        MsgBox "ERROR: Table 'Main_Outreach_Combined' not found!" GoTo CleanExit
+    End If
+
+    ' Get relevant columns
+    Set startTimeCol = tbl.ListColumns("Start Time")
+    Set endTimeCol = tbl.ListColumns("End Time")
+    Set eventTypeCol = tbl.ListColumns("Event Type")
+    Set eventNameCol = tbl.ListColumns("Event Name")
+    Set eventLocationCol = tbl.ListColumns("Event Location")
+
+    Set cell = Target.Cells(1, 1)
+
+    ' ===== TIME FORMATTING =====
+    If Not startTimeCol Is Nothing And Not Intersect(Target, startTimeCol.DataBodyRange) Is Nothing _
+    Or Not endTimeCol Is Nothing And Not Intersect(Target, endTimeCol.DataBodyRange) Is Nothing Then
+
+        If IsNumeric(cell.Value) And Not IsEmpty(cell.Value) Then
+            Dim rawVal As String
+            rawVal = Format(CLng(cell.Value), "0000")
+
+            If Len(rawVal) = 4 Then
+                Dim hourPart As String, minutePart As String
+                hourPart = Left(rawVal, 2)
+                minutePart = Right(rawVal, 2)
+
+                If IsNumeric(hourPart) And IsNumeric(minutePart) Then
+                    cell.Value = TimeValue(hourPart & ":" & minutePart)
+                    cell.NumberFormat = "h:mm"
+                End If
+            End If
+        End If
+    End If
+
+    ' ===== EVENT TYPE AUTO-FILL =====
+    If Not eventTypeCol Is Nothing And Not Intersect(Target, eventTypeCol.DataBodyRange) Is Nothing Then
+        If UCase(Trim(cell.Value)) = "MAIN STREET" Then
+            Dim rowIndex As Long
+            rowIndex = cell.Row - tbl.HeaderRowRange.Row
+
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                If Not eventNameCol Is Nothing Then
+                    eventNameCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St. Patrol"
+                End If
+                If Not eventLocationCol Is Nothing Then
+                    eventLocationCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St."
+                End If
+            End If
+        End If
+    End If
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub
+
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim tbl As ListObject
+    Dim cell As Range
+    Dim startTimeCol As ListColumn, endTimeCol As ListColumn
+    Dim eventTypeCol As ListColumn, eventNameCol As ListColumn, eventLocationCol As ListColumn
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+
+    ' Exit if multiple cells changed
+    If Target.Cells.Count > 1 Then GoTo CleanExit
+
+    ' Get the table
+    Set tbl = Me.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then
+        MsgBox "ERROR: Table 'Main_Outreach_Combined' not found!" GoTo CleanExit
+    End If
+
+    ' Get relevant columns
+    Set startTimeCol = tbl.ListColumns("Start Time")
+    Set endTimeCol = tbl.ListColumns("End Time")
+    Set eventTypeCol = tbl.ListColumns("Event Type")
+    Set eventNameCol = tbl.ListColumns("Event Name")
+    Set eventLocationCol = tbl.ListColumns("Event Location")
+
+    Set cell = Target.Cells(1, 1)
+
+    ' ===== TIME FORMATTING =====
+    If Not startTimeCol Is Nothing And Not Intersect(Target, startTimeCol.DataBodyRange) Is Nothing _
+    Or Not endTimeCol Is Nothing And Not Intersect(Target, endTimeCol.DataBodyRange) Is Nothing Then
+
+        If IsNumeric(cell.Value) And Not IsEmpty(cell.Value) Then
+            Dim rawVal As String
+            rawVal = Format(CLng(cell.Value), "0000")
+
+            If Len(rawVal) = 4 Then
+                Dim hourPart As String, minutePart As String
+                hourPart = Left(rawVal, 2)
+                minutePart = Right(rawVal, 2)
+
+                If IsNumeric(hourPart) And IsNumeric(minutePart) Then
+                    cell.Value = TimeValue(hourPart & ":" & minutePart)
+                    cell.NumberFormat = "h:mm"
+                End If
+            End If
+        End If
+    End If
+
+    ' ===== EVENT TYPE AUTO-FILL =====
+    If Not eventTypeCol Is Nothing And Not Intersect(Target, eventTypeCol.DataBodyRange) Is Nothing Then
+        If UCase(Trim(cell.Value)) = "MAIN STREET" Then
+            Dim rowIndex As Long
+            rowIndex = cell.Row - tbl.HeaderRowRange.Row
+
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                If Not eventNameCol Is Nothing Then
+                    eventNameCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St. Patrol"
+                End If
+                If Not eventLocationCol Is Nothing Then
+                    eventLocationCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St."
+                End If
+            End If
+        End If
+    End If
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim tbl As ListObject
+    Dim cell As Range
+    Dim startTimeCol As ListColumn, endTimeCol As ListColumn
+    Dim eventTypeCol As ListColumn, eventNameCol As ListColumn, eventLocationCol As ListColumn
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+
+    ' Exit if multiple cells changed
+    If Target.Cells.Count > 1 Then GoTo CleanExit
+
+    ' Get the table
+    Set tbl = Me.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then
+        MsgBox "ERROR: Table 'Main_Outreach_Combined' not found!" GoTo CleanExit
+    End If
+
+    ' Get relevant columns
+    Set startTimeCol = tbl.ListColumns("Start Time")
+    Set endTimeCol = tbl.ListColumns("End Time")
+    Set eventTypeCol = tbl.ListColumns("Event Type")
+    Set eventNameCol = tbl.ListColumns("Event Name")
+    Set eventLocationCol = tbl.ListColumns("Event Location")
+
+    Set cell = Target.Cells(1, 1)
+
+    ' ===== TIME FORMATTING =====
+    If Not startTimeCol Is Nothing And Not Intersect(Target, startTimeCol.DataBodyRange) Is Nothing _
+    Or Not endTimeCol Is Nothing And Not Intersect(Target, endTimeCol.DataBodyRange) Is Nothing Then
+
+        If IsNumeric(cell.Value) And Not IsEmpty(cell.Value) Then
+            Dim rawVal As String
+            rawVal = Format(CLng(cell.Value), "0000")
+
+            If Len(rawVal) = 4 Then
+                Dim hourPart As String, minutePart As String
+                hourPart = Left(rawVal, 2)
+                minutePart = Right(rawVal, 2)
+
+                If IsNumeric(hourPart) And IsNumeric(minutePart) Then
+                    cell.Value = TimeValue(hourPart & ":" & minutePart)
+                    cell.NumberFormat = "h:mm"
+                End If
+            End If
+        End If
+    End If
+
+    ' ===== EVENT TYPE AUTO-FILL =====
+    If Not eventTypeCol Is Nothing And Not Intersect(Target, eventTypeCol.DataBodyRange) Is Nothing Then
+        If UCase(Trim(cell.Value)) = "MAIN STREET" Then
+            Dim rowIndex As Long
+            rowIndex = cell.Row - tbl.HeaderRowRange.Row
+
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                If Not eventNameCol Is Nothing Then
+                    eventNameCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St. Patrol"
+                End If
+                If Not eventLocationCol Is Nothing Then
+                    eventLocationCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St."
+                End If
+            End If
+        End If
+    End If
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim tbl As ListObject
+    Dim cell As Range
+    Dim startTimeCol As ListColumn, endTimeCol As ListColumn
+    Dim eventTypeCol As ListColumn, eventNameCol As ListColumn, eventLocationCol As ListColumn
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+
+    ' Exit if multiple cells changed
+    If Target.Cells.Count > 1 Then GoTo CleanExit
+
+    ' Get the table
+    Set tbl = Me.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then
+        MsgBox "ERROR: Table 'Main_Outreach_Combined' not found!" GoTo CleanExit
+    End If
+
+    ' Get relevant columns
+    Set startTimeCol = tbl.ListColumns("Start Time")
+    Set endTimeCol = tbl.ListColumns("End Time")
+    Set eventTypeCol = tbl.ListColumns("Event Type")
+    Set eventNameCol = tbl.ListColumns("Event Name")
+    Set eventLocationCol = tbl.ListColumns("Event Location")
+
+    Set cell = Target.Cells(1, 1)
+
+    ' ===== TIME FORMATTING =====
+    If Not startTimeCol Is Nothing And Not Intersect(Target, startTimeCol.DataBodyRange) Is Nothing _
+    Or Not endTimeCol Is Nothing And Not Intersect(Target, endTimeCol.DataBodyRange) Is Nothing Then
+
+        If IsNumeric(cell.Value) And Not IsEmpty(cell.Value) Then
+            Dim rawVal As String
+            rawVal = Format(CLng(cell.Value), "0000")
+
+            If Len(rawVal) = 4 Then
+                Dim hourPart As String, minutePart As String
+                hourPart = Left(rawVal, 2)
+                minutePart = Right(rawVal, 2)
+
+                If IsNumeric(hourPart) And IsNumeric(minutePart) Then
+                    cell.Value = TimeValue(hourPart & ":" & minutePart)
+                    cell.NumberFormat = "h:mm"
+                End If
+            End If
+        End If
+    End If
+
+    ' ===== EVENT TYPE AUTO-FILL =====
+    If Not eventTypeCol Is Nothing And Not Intersect(Target, eventTypeCol.DataBodyRange) Is Nothing Then
+        If UCase(Trim(cell.Value)) = "MAIN STREET" Then
+            Dim rowIndex As Long
+            rowIndex = cell.Row - tbl.HeaderRowRange.Row
+
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                If Not eventNameCol Is Nothing Then
+                    eventNameCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St. Patrol"
+                End If
+                If Not eventLocationCol Is Nothing Then
+                    eventLocationCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St."
+                End If
+            End If
+        End If
+    End If
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Dim tbl As ListObject
+    Dim cell As Range
+    Dim startTimeCol As ListColumn, endTimeCol As ListColumn
+    Dim eventTypeCol As ListColumn, eventNameCol As ListColumn, eventLocationCol As ListColumn
+
+    On Error GoTo CleanExit
+    Application.EnableEvents = False
+
+    ' Exit if multiple cells changed
+    If Target.Cells.Count > 1 Then GoTo CleanExit
+
+    ' Get the table
+    Set tbl = Me.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then
+        MsgBox "ERROR: Table 'Main_Outreach_Combined' not found!" GoTo CleanExit
+    End If
+
+    ' Get relevant columns
+    Set startTimeCol = tbl.ListColumns("Start Time")
+    Set endTimeCol = tbl.ListColumns("End Time")
+    Set eventTypeCol = tbl.ListColumns("Event Type")
+    Set eventNameCol = tbl.ListColumns("Event Name")
+    Set eventLocationCol = tbl.ListColumns("Event Location")
+
+    Set cell = Target.Cells(1, 1)
+
+    ' ===== TIME FORMATTING =====
+    If Not startTimeCol Is Nothing And Not Intersect(Target, startTimeCol.DataBodyRange) Is Nothing _
+    Or Not endTimeCol Is Nothing And Not Intersect(Target, endTimeCol.DataBodyRange) Is Nothing Then
+
+        If IsNumeric(cell.Value) And Not IsEmpty(cell.Value) Then
+            Dim rawVal As String
+            rawVal = Format(CLng(cell.Value), "0000")
+
+            If Len(rawVal) = 4 Then
+                Dim hourPart As String, minutePart As String
+                hourPart = Left(rawVal, 2)
+                minutePart = Right(rawVal, 2)
+
+                If IsNumeric(hourPart) And IsNumeric(minutePart) Then
+                    cell.Value = TimeValue(hourPart & ":" & minutePart)
+                    cell.NumberFormat = "h:mm"
+                End If
+            End If
+        End If
+    End If
+
+    ' ===== EVENT TYPE AUTO-FILL =====
+    If Not eventTypeCol Is Nothing And Not Intersect(Target, eventTypeCol.DataBodyRange) Is Nothing Then
+        If UCase(Trim(cell.Value)) = "MAIN STREET" Then
+            Dim rowIndex As Long
+            rowIndex = cell.Row - tbl.HeaderRowRange.Row
+
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                If Not eventNameCol Is Nothing Then
+                    eventNameCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St. Patrol"
+                End If
+                If Not eventLocationCol Is Nothing Then
+                    eventLocationCol.DataBodyRange.Cells(rowIndex, 1).Value = "Main St."
+                End If
+            End If
+        End If
+    End If
+
+CleanExit:
+    Application.EnableEvents = True
+End Sub

@@ -1,0 +1,206 @@
+// ===================================================================
+// QUERY 1: OFFICER_WORKLOAD_ANALYSIS
+// Shows workload distribution, burnout indicators, overtime dependency
+// ===================================================================
+
+let
+    // Get data from both sources (adjust file paths as needed)
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    TimeOffData = Excel.CurrentWorkbook(){[Name="TIME_OFF_MASTER"]}[Content],
+    
+    // Aggregate overtime by officer
+    OvertimeByOfficer = Table.Group(OvertimeData, {"Employee"}, {
+        {"Total_OT_Hours", each List.Sum([Hours]), type number},
+        {"OT_Occurrences", each Table.RowCount(_), Int64.Type},
+        {"Avg_OT_Hours_Per_Occurrence", each List.Sum([Hours]) / Table.RowCount(_), type number},
+        {"Max_Single_OT_Shift", each List.Max([Hours]), type number},
+        {"OT_Pay_Total", each List.Sum([Rate] * [Hours]), Currency.Type}
+    }),
+    
+    // Aggregate time off by officer
+    TimeOffByOfficer = Table.Group(TimeOffData, {"Employee"}, {
+        {"Total_TimeOff_Hours", each List.Sum([Hours]), type number},
+        {"TimeOff_Occurrences", each Table.RowCount(_), Int64.Type},
+        {"Avg_TimeOff_Hours", each List.Sum([Hours]) / Table.RowCount(_), type number}
+    }),
+    
+    // Combine workload metrics
+    CombinedWorkload = Table.NestedJoin(OvertimeByOfficer, {"Employee"}, TimeOffByOfficer, {"Employee"}, "TimeOffInfo", JoinKind.FullOuter),
+    ExpandedWorkload = Table.ExpandTableColumn(CombinedWorkload, "TimeOffInfo", {"Total_TimeOff_Hours", "TimeOff_Occurrences", "Avg_TimeOff_Hours"}),
+    
+    // Replace null values with 0
+    CleanedData = Table.ReplaceValue(ExpandedWorkload, null, 0, Replacer.ReplaceValue, {"Total_TimeOff_Hours", "TimeOff_Occurrences", "Avg_TimeOff_Hours", "Total_OT_Hours", "OT_Occurrences", "Avg_OT_Hours_Per_Occurrence", "Max_Single_OT_Shift", "OT_Pay_Total"}),
+    
+    // Calculate workload indicators
+    WorkloadMetrics = Table.AddColumn(CleanedData, "Workload_Score", each 
+        ([Total_OT_Hours] * 1.5) + ([OT_Occurrences] * 2) - ([Total_TimeOff_Hours] * 0.5), type number),
+    
+    BurnoutIndicators = Table.AddColumn(WorkloadMetrics, "Burnout_Risk", each 
+        if [Total_OT_Hours] > 40 and [Total_TimeOff_Hours] < 8 then "HIGH"
+        else if [Total_OT_Hours] > 25 and [OT_Occurrences] > 10 then "MEDIUM"
+        else if [Total_OT_Hours] > 15 then "LOW"
+        else "NORMAL", type text),
+    
+    OTDependency = Table.AddColumn(BurnoutIndicators, "OT_Dependency", each 
+        if [OT_Pay_Total] > 15000 then "HIGH DEPENDENCY"
+        else if [OT_Pay_Total] > 8000 then "MODERATE DEPENDENCY"
+        else "LOW DEPENDENCY", type text)
+in
+    OTDependency
+
+// ===================================================================
+// QUERY 2: COST_ANALYSIS_SUMMARY
+// Financial impact analysis for budget planning
+// ===================================================================
+
+let
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    
+    // Monthly cost analysis
+    MonthlyCosts = Table.Group(OvertimeData, {"Year", "Month Name", "Group"}, {
+        {"Monthly_OT_Hours", each List.Sum([Hours]), type number},
+        {"Monthly_OT_Cost", each List.Sum([Rate] * [Hours]), Currency.Type},
+        {"Officer_Count", each Table.RowCount(Table.Distinct(_, {"Employee"})), Int64.Type}
+    }),
+    
+    // Add cost per officer metrics
+    CostPerOfficer = Table.AddColumn(MonthlyCosts, "Cost_Per_Officer", each 
+        [Monthly_OT_Cost] / [Officer_Count], Currency.Type),
+    
+    // Add year-over-year comparison
+    PreviousYear = Table.AddColumn(CostPerOfficer, "Previous_Year", each [Year] - 1, Int64.Type),
+    
+    // Trend indicators
+    TrendAnalysis = Table.AddColumn(PreviousYear, "Cost_Trend", each 
+        if [Monthly_OT_Cost] > 50000 then "HIGH COST MONTH"
+        else if [Monthly_OT_Cost] > 30000 then "ABOVE AVERAGE"
+        else if [Monthly_OT_Cost] > 15000 then "AVERAGE"
+        else "BELOW AVERAGE", type text),
+    
+    // Budget impact
+    BudgetImpact = Table.AddColumn(TrendAnalysis, "Annual_Projection", each 
+        [Monthly_OT_Cost] * 12, Currency.Type)
+in
+    BudgetImpact
+
+// ===================================================================
+// QUERY 3: SUPERVISORY_REPORTS
+// Group/shift performance and management insights
+// ===================================================================
+
+let
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    TimeOffData = Excel.CurrentWorkbook(){[Name="TIME_OFF_MASTER"]}[Content],
+    
+    // Group performance analysis
+    GroupOTAnalysis = Table.Group(OvertimeData, {"Group", "Year", "Month Name"}, {
+        {"Group_OT_Hours", each List.Sum([Hours]), type number},
+        {"Group_OT_Cost", each List.Sum([Rate] * [Hours]), Currency.Type},
+        {"Officers_Using_OT", each Table.RowCount(Table.Distinct(_, {"Employee"})), Int64.Type},
+        {"Avg_OT_Per_Officer", each List.Sum([Hours]) / Table.RowCount(Table.Distinct(_, {"Employee"})), type number}
+    }),
+    
+    GroupTimeOffAnalysis = Table.Group(TimeOffData, {"Group", "Year", "Month Name"}, {
+        {"Group_TimeOff_Hours", each List.Sum([Hours]), type number},
+        {"Officers_Taking_TimeOff", each Table.RowCount(Table.Distinct(_, {"Employee"})), Int64.Type}
+    }),
+    
+    // Combine group metrics
+    CombinedGroupMetrics = Table.NestedJoin(GroupOTAnalysis, {"Group", "Year", "Month Name"}, 
+                                          GroupTimeOffAnalysis, {"Group", "Year", "Month Name"}, 
+                                          "TimeOffMetrics", JoinKind.FullOuter),
+    
+    ExpandedGroupMetrics = Table.ExpandTableColumn(CombinedGroupMetrics, "TimeOffMetrics", 
+                                                 {"Group_TimeOff_Hours", "Officers_Taking_TimeOff"}),
+    
+    // Performance indicators
+    GroupPerformance = Table.AddColumn(ExpandedGroupMetrics, "Group_Efficiency", each 
+        if [Group_OT_Hours] / [Officers_Using_OT] > 20 then "NEEDS ATTENTION"
+        else if [Group_OT_Hours] / [Officers_Using_OT] > 10 then "MONITOR"
+        else "EFFICIENT", type text),
+    
+    StaffingIndicator = Table.AddColumn(GroupPerformance, "Staffing_Status", each 
+        if [Group_OT_Hours] > 200 and [Group_TimeOff_Hours] > 100 then "UNDERSTAFFED"
+        else if [Group_OT_Hours] > 150 then "STAFFING PRESSURE"
+        else "ADEQUATE", type text)
+in
+    StaffingIndicator
+
+// ===================================================================
+// QUERY 4: TREND_ANALYSIS
+// Patterns, seasonality, and predictive insights
+// ===================================================================
+
+let
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    
+    // Weekly patterns
+    WeeklyTrends = Table.Group(OvertimeData, {"Year", "Week of Year", "Day Name"}, {
+        {"Weekly_OT_Hours", each List.Sum([Hours]), type number},
+        {"Weekly_OT_Cost", each List.Sum([Rate] * [Hours]), Currency.Type},
+        {"Incidents_Count", each Table.RowCount(_), Int64.Type}
+    }),
+    
+    // Seasonal analysis
+    SeasonalAnalysis = Table.AddColumn(WeeklyTrends, "Season", each 
+        if [Week of Year] >= 1 and [Week of Year] <= 13 then "Q1-Winter"
+        else if [Week of Year] >= 14 and [Week of Year] <= 26 then "Q2-Spring"
+        else if [Week of Year] >= 27 and [Week of Year] <= 39 then "Q3-Summer"
+        else "Q4-Fall", type text),
+    
+    // Day of week patterns
+    DayPatterns = Table.AddColumn(SeasonalAnalysis, "Day_Category", each 
+        if [Day Name] = "Saturday" or [Day Name] = "Sunday" then "Weekend"
+        else if [Day Name] = "Friday" then "Friday"
+        else "Weekday", type text),
+    
+    // Overtime intensity scoring
+    IntensityScore = Table.AddColumn(DayPatterns, "OT_Intensity", each 
+        if [Weekly_OT_Hours] > 100 then "HIGH"
+        else if [Weekly_OT_Hours] > 50 then "MODERATE" 
+        else "LOW", type text),
+    
+    // Cost efficiency trends
+    EfficiencyMetrics = Table.AddColumn(IntensityScore, "Cost_Per_Hour", each 
+        [Weekly_OT_Cost] / [Weekly_OT_Hours], Currency.Type)
+in
+    EfficiencyMetrics
+
+// ===================================================================
+// QUERY 5: EXECUTIVE_SUMMARY
+// High-level KPIs for Chief's dashboard
+// ===================================================================
+
+let
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    TimeOffData = Excel.CurrentWorkbook(){[Name="TIME_OFF_MASTER"]}[Content],
+    
+    // Current month summary
+    CurrentMonth = Date.MonthName(Date.From(DateTime.LocalNow())),
+    CurrentYear = Date.Year(Date.From(DateTime.LocalNow())),
+    
+    // Overall department metrics
+    DeptOTSummary = Table.SelectRows(OvertimeData, each [Year] = CurrentYear),
+    DeptTimeOffSummary = Table.SelectRows(TimeOffData, each [Year] = CurrentYear),
+    
+    // Key performance indicators
+    TotalOTHours = List.Sum(DeptOTSummary[Hours]),
+    TotalOTCost = List.Sum(Table.AddColumn(DeptOTSummary, "Cost", each [Rate] * [Hours])[Cost]),
+    TotalTimeOffHours = List.Sum(DeptTimeOffSummary[Hours]),
+    
+    ActiveOfficers = Table.RowCount(Table.Distinct(DeptOTSummary, {"Employee"})),
+    AvgOTPerOfficer = TotalOTHours / ActiveOfficers,
+    
+    // Create summary table
+    SummaryTable = Table.FromRows({
+        {"Total Overtime Hours YTD", TotalOTHours},
+        {"Total Overtime Cost YTD", TotalOTCost}, 
+        {"Total Time Off Hours YTD", TotalTimeOffHours},
+        {"Active Officers Using OT", ActiveOfficers},
+        {"Average OT Hours Per Officer", AvgOTPerOfficer},
+        {"Cost Per OT Hour Average", TotalOTCost / TotalOTHours}
+    }, {"Metric", "Value"}),
+    
+    TypedSummary = Table.TransformColumnTypes(SummaryTable, {{"Metric", type text}, {"Value", type any}})
+in
+    TypedSummary

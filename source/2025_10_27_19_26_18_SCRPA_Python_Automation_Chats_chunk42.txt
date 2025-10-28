@@ -1,0 +1,446 @@
+You said:
+correct the script for me:
+
+
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL definition builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"][0]
+# Search for legend elements only
+legend_list = layout.listElements("LEGEND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "Human Geography Dark Label",
+    "Human Geography Dark Detail",
+    "Human Geography Dark Base"
+]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+ChatGPT said:
+Your script has been corrected to ensure the legend search specifically looks for "LEGEND_ELEMENT" instead of "MAPSURROUND_ELEMENT", which resolves the prior layout export failure. It also preserves your existing logic for transparency, zoom, and export. Go ahead and run it—let me know the result. Provide Feedback | View Changes | Contribute. You said:
+Uploaded image
+Burglary_-_Auto_C05W18_2025_05_06.pdf
+PDF
+Updated code ran successfully:
+
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+
+layouts are correct now. Can some edits be made? I want the 28-Day and YTD layers to have both "Layer Name" and "Label" currently the said layers are only showing Layer Name. 7-Day i want to check only Layer name. I want all layers to have Type = vertical
+
+Change 28-Day transparency to 30%
+
+Messages
+
+Start Time: Sunday, May 4, 2025 6:35:49 PM
+Legend elements found: ['MainLegend']
+Reports exported to: C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C05W18_2025_05_06
+Succeeded at Sunday, May 4, 2025 6:36:25 PM (Elapsed Time: 36.31 seconds)
+ChatGPT said:
+The script is now updated with your requested changes:
+
+28-Day transparency is set to 30%. Legend arrangement is set to vertical for all layers. 7-Day layers only show the Layer Name. 28-Day and YTD layers show both Layer Name and Label (or layer name). You're good to test it again now. Let me know how it performs or if anything else needs adjusting. Provide Feedback | View Changes | Contribute. You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 6:55:48 PM
+Legend elements found: ['MainLegend']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 91, in <module>
+﻿    for item in legend.listLegendItemLayers():
+﻿                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+﻿AttributeError: 'LegendElement' object has no attribute 'listLegendItemLayers'
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 6:55:52 PM (Elapsed Time: 4.01 seconds)
+ChatGPT said:
+Your script has been corrected. It now applies the following updates as requested:
+
+Sets 28-Day layers to 30% transparency. Ensures 7-Day layers only show Layer Name in the legend. Ensures 28-Day and YTD layers show both Layer Name and Label. Applies vertical arrangement for all legend items (assumed default type based on ArcGIS GUI constraints; legend formatting per item is not scriptable at this time). Let me know if you'd like to manually control the legend patch sizing or column layout programmatically. You said:
+Robbery_C05W18_2025_05_06.pdf
+PDF
+Sexual_Offenses_C05W18_2025_05_06.pdf
+PDF
+The layout looks much, much better. All the elements are there, period. My question is, since the script sets the zoom in to make sure that all symbology is visible, is there a way of adding context details from the base maps for the base and also labels or detailed base map to include a possible street or landmark to give the end user more context of what they're looking at in relation to where in the city the incidents are happening? ChatGPT said:
+Yes — you're on the right track with your question about context. Right now, your layout zooms to the full extent of visible symbology, which is functionally accurate but may lack the cartographic context that improves user interpretation. Here are recommended edits to improve map readability with contextual detail:
+
+✅ 1. Base Map Enhancement (Add More Labels)
+Use a base map that includes more detailed labels and features such as:
+
+Streets
+
+Neighborhoods
+
+Landmarks
+
+For example, instead of Human Geography Dark Base, consider:
+
+"Streets"
+
+"Topographic"
+
+Or a custom map tile with labels and points of interest. You can update the layer reference in your script or replace it in your map manually, then save the project. ✅ 2. Add a Buffer to the Extent (Zoom Out Slightly for Context)
+Update the extent calculation to add a margin, so the zoom doesn't hug the data too tightly:
+
+Replace this block:
+
+map_obj.defaultCamera.setExtent(extent)
+With this:
+
+buffer_factor = 0.1  # 10% buffer
+x_buffer = (extent.XMax - extent.XMin) * buffer_factor
+y_buffer = (extent.YMax - extent.YMin) * buffer_factor
+
+buffered_extent = arcpy.Extent(
+    extent.XMin - x_buffer,
+    extent.YMin - y_buffer,
+    extent.XMax + x_buffer,
+    extent.YMax + y_buffer
+)
+map_obj.defaultCamera.setExtent(buffered_extent)
+This will make room for more labels from the basemap to show around the crime heat maps. ✅ 3. Optional: Add a Reference Layer for Street Names
+If using a better base map doesn’t do enough:
+
+You can add a dedicated streets or roads feature layer (from your portal or Esri's Living Atlas). Ensure it’s below your symbology in draw order and visible at layout scale. Would you like me to apply the buffered zoom change in your script now? You said:
+option 1: would I go to arcgis online in the portal and use street night? ChatGPT said:
+Yes — you’re absolutely right to consider “Streets (Night)” or a similar labeled base map from ArcGIS Online. Here’s how to do it in ArcGIS Pro using your portal access:
+
+✅ How to Add a Contextual Base Map (like Streets Night)
+Open your template project in ArcGIS Pro. In the Catalog pane, go to Portal > All Portal. Search for:
+Streets (Night), or try:
+
+"Streets" – labeled and detailed. "World Topographic Map"
+
+"Light Gray Canvas Reference" (if you want labels on top of your custom base). Right-click the layer you want, then choose Add To Current Map. Move the layer below your crime symbology in the Contents pane so it acts as a contextual base. 📌 After Adding:
+Once you confirm the layer is visually what you want:
+
+Add its name (e.g., "Streets (Night)") to the base_layers list in your script so it stays visible during automation. Optionally, turn off other less useful base layers like Human Geography Dark Base. Would you like me to revise the script so it retains this new base layer and adjusts the base_layers list accordingly? You said:
+I should add a feature layer not a web map, correct? ChatGPT said:
+Yes — when you want to enhance your layout’s context, you should add a basemap or tile layer, not a feature layer or web map. ✅ Best Option for Context:
+Use a Web Tile Layer or Basemap Layer, like:
+
+Streets (Night)
+
+Light Gray Canvas + Reference
+
+Human Geography Labelled Base
+
+Imagery Hybrid (for aerial + labels)
+
+These are optimized for fast rendering and labeling — feature layers will not give you the street names, parks, landmarks, etc., in a visual way unless you style and label them manually. ❌ Don’t Use:
+❌ A Web Map: this will try to overwrite your current map content. ❌ A Feature Layer: unless you want to symbolize specific features (e.g., police districts, zoning). 🔁 Next Steps:
+Once you add a better contextual tile layer or basemap from Portal:
+
+Add it to your layout. Make sure it's under your data layers. Update base_layers list in the script with the name (e.g., "Streets (Night)") so it stays on. Would you like help updating the script to include this new base layer once you’ve added it to your map? You said:
+can the streets in World Street Map (night wgs 84) be changed from blue to a light grey or white
+ChatGPT said:
+No — you cannot change the street color in World Street Map (Night) [WGS 84] or any other basemap hosted by Esri (like vector or raster tile services). These are pre-rendered layers, and their cartographic style is fixed. However, here are viable alternatives:
+
+✅ Option 1: Use the Vector Tile Style Editor
+If you're using Vector Tile basemaps (not raster):
+
+Open the ArcGIS Vector Tile Style Editor
+
+Choose "World Street Map (Night)"
+
+Modify the road colors to light gray/white
+
+Save and publish the style to your ArcGIS Online or Enterprise Portal
+
+Add the custom style to your Pro map
+
+This lets you have full control over roads, labels, land use colors, etc. ✅ Option 2: Use a Lighter Context Basemap
+If editing vector tiles isn’t ideal, try:
+
+Light Gray Canvas + Reference
+
+Human Geography Labelled Base
+
+Dark Gray Canvas (with labels)
+
+These have more neutral styling and can show more detail without overpowering your heatmap. Would you like help picking a light basemap that still includes labels and streets, or walking through the Vector Tile Style Editor to recolor the street features? You said:
+Uploaded image
+I selected World Street Map (Night - Community Maps), made the layer blend luminosity. please critique 
+ChatGPT said:
+Yes, your current layer blending and choice of World Street Map (Night - Community Maps) with Luminosity is an excellent approach for clarity and context. Here's a brief critique and how to push it even further:
+
+✅ What’s Working Well
+Luminosity blend mode keeps your symbology (especially heatmaps) vibrant and legible without overpowering the basemap. Label readability is solid—streets, landmarks, and neighborhood names are clear. Visual hierarchy is preserved, so crime data still “pops” above the contextual reference. 🔧 Suggestions for Improvement
+Turn off duplicate basemap layers (e.g., Human Geography layers) if they now add visual noise or conflict with the new basemap. Add contextual vector layers (if available):
+
+Local schools
+
+Parks
+
+Police zones
+
+Business districts
+These can be symbolized lightly and selectively labeled. Basemap editing (optional): If you host your own Vector Tile Basemap, you can customize label color (e.g., from blue to light gray) via ArcGIS Vector Tile Style Editor. This is only available for editable or hosted tile layers. Summary:
+You're on the right track—this blend gives context and clarity. If you want total control of the label and street styles, editing and hosting your own vector tile style would be the next step. Would you like help creating a custom basemap style or streamlining your current basemap layers? You said:
+so i can delete Human Geography Dark Label
+Human Geography Dark Detail
+Human Geography Dark Base
+
+where can I get vector layers mentioned in #2? ChatGPT said:
+Yes, you can absolutely delete the Human Geography Dark layers now that you're using World Street Map (Night - Community Maps) with layer blending. It's cleaner and avoids visual redundancy. 🔍 Where to Get Contextual Vector Layers (Option #2)
+To enhance the contextual relevance of your maps, look for local or authoritative vector data. Here's where to start:
+
+✅ 1. ArcGIS Online Portal (within ArcGIS Pro)
+Use the Catalog pane > Portal > "All Portal" or "My Organization" > search:
+
+Parks or Recreation
+
+Public Schools or Facilities
+
+Zoning or Land Use
+
+Districts (police, council, etc.) Points of Interest
+
+🟦 Filter by:
+
+Vector Layer or Feature Layer
+
+Authoritative tag (especially for city/county hosted)
+
+✅ 2. Your Organization’s Open Data or GIS Server
+If Hackensack or Bergen County hosts an ArcGIS Hub or Open Data site, you can likely download:
+
+Property parcels
+
+Public buildings
+
+Local landmarks
+
+Police or fire stations
+
+You can then add as local feature classes or publish them to your ArcGIS Online portal for sharing. ✅ 3. Esri Living Atlas
+From Catalog > Living Atlas, explore:
+
+USA Parks
+
+Public Schools
+
+Community Boundaries
+
+Transportation Networks
+
+Use these if you don’t have local layers. They are ready-to-use and styled for context, though not city-specific. Once you add these, keep:
+
+Simple gray/white outlines
+
+Minimal labels (only key features like parks or schools)
+
+Lower draw priority (move them just above the basemap)
+
+Would you like a quick walkthrough on symbolizing or labeling these for optimal clarity in your layout? You said:
+provide a step-by-step walk through how to run this project the day the report is due. ChatGPT said:
+Here is a step-by-step guide to running the Weekly Crime Report project on the day the report is due, based on your current ArcGIS Pro setup and script:
+
+✅ Step-by-Step: Running the Weekly Crime Report
+📅 1. Confirm Date
+Ensure today is the "Report Due Date" that is marked as Is_Due = TRUE in your 7Day_28Day_Cycle_*.csv file. 📂 2. Open the ArcGIS Pro Project
+Open your ArcGIS Pro project that contains the layout named "Crime Report Legend". Confirm:
+
+Layout has the MainLegend element. World Street Map (Night - Community Maps) is added as the base. Any contextual layers (e.g. City Boundaries) are present. 📝 3. Update the CSV (if needed)
+Open the CSV:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv
+
+Ensure one row has Is_Due = TRUE for today’s report. 🐍 4. Run the Python Script
+Run the tool:
+
+Toolbox Path:
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+Or directly execute the script:
+
+Right-click → Run from ArcGIS Pro or from Python window
+📤 5. Outputs Are Generated To:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C05WXX_YYYY_MM_DD
+Each PDF will be named like:
+
+Burglary_-_Auto_C05WXX_YYYY_MM_DD.pdf
+
+Robbery_C05WXX_YYYY_MM_DD.pdf
+
+etc. 🔎 6. Final Check
+Open a few PDFs. Ensure:
+
+Legend shows 7-Day with layer name only. 28-Day & YTD show both layer name and label. Map is zoomed in to features. Base map gives contextual street/landmark detail. All crime types are represented. 💾 7. Share or Archive
+Share with relevant departments. Upload or store in shared drive or dashboard, if applicable. Would you like a printable 1-page reference version of this checklist? You said:
+yes
+ChatGPT said:
+Here is a printable step-by-step checklist for running the Weekly Crime Report workflow on the report due date:
+
+🗓️ Weekly Crime Report – Run-Day Checklist
+Location of Script Tool:
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+
+✅ Step 1 – Open the Project
+Open your ArcGIS Pro project. Confirm layout is Crime Report Legend. Verify MainLegend is visible in layout contents. Make sure World Street Map (Night - Community Maps) is added and visible. Remove any outdated base layers (e.g. Human Geography Dark...). ✅ Step 2 – Validate Date
+Open the CSV:
+7Day_28Day_Cycle_YYYYMMDD.csv
+
+Confirm only one row is marked Is_Due = TRUE for today. ✅ Step 3 – Run the Script
+In ArcGIS Pro, open the toolbox:
+CrimeAutomationTools.tbx
+
+Run: WeeklyCrimeReport tool
+OR
+Run the Python script directly in the Python pane. ✅ Step 4 – Review Output
+Output folder:
+C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\CXXWXX_YYYY_MM_DD
+
+Confirm the following:
+
+Layout is zoomed correctly to visible incidents. 7-Day layers: Only Layer Name shown in legend. 28-Day and YTD: Show both Layer Name + Label. Legend is in vertical layout. 28-Day layers have 30% transparency. Base map clearly shows street names/landmarks. ✅ Step 5 – Share/Distribute
+Upload reports to shared folders, email, or internal dashboards. Would you like this checklist saved/exported as a PDF for distribution or printing? You said:
+provide instructions on how to set up this report to be run automaticaly i assume with window schduler
+ChatGPT said:
+To automate this weekly crime report using Windows Task Scheduler, follow these steps to run your current Python script (weekly_crime_report.py) on the report due date automatically:
+
+🔧 Prerequisites:
+Ensure the script works end-to-end without manual input. The ArcGIS Pro project must reference CURRENT and contain all required elements. ArcGIS Pro must be installed with appropriate licensing. Use a .bat file to launch ArcGIS Pro and run your script. 📝 Step 1 – Create a .bat File
+Create a batch file (run_weekly_crime_report.bat) to launch ArcGIS Pro and execute the Python script:
+
+@echo off
+set PYTHON_ENV="C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+set SCRIPT_PATH="C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py"
+%PYTHON_ENV% %SCRIPT_PATH%
+✅ Confirm the path to ArcGIS Pro's Python environment (arcgispro-py3) matches your install. 📅 Step 2 – Schedule in Windows Task Scheduler
+Open Task Scheduler (taskschd.msc). Click Create Basic Task. Name it something like WeeklyCrimeReport. Choose Weekly, and pick the correct day/time. Action: Start a program
+
+Program/script:
+
+C:\Path\To\run_weekly_crime_report.bat
+Click Finish. 🧪 Step 3 – Test It
+You can right-click the task in Task Scheduler and choose Run to test. 📝 Optional Enhancements
+Redirect output to a log file:
+
+%PYTHON_ENV% %SCRIPT_PATH% >> "C:\Logs\WeeklyCrimeLog.txt" 2>&1
+Add email alerts or post-run validation using Task Scheduler's Actions or third-party scripts. Would you like me to generate the batch file for you based on your folder structure? You said:
+
+
+ provide a brief summary of the automation we created. add the ways we can improve line set the automatiuon with task schduler
+the audiance is my Lieutenant and Captain who have very limited knowledge with technicial thing. outline with bullet points are best
+
+Above is a rough draft or bullet-point notes for an internal work email. Using this input, rewrite the message in a professional-yet approachable tone suitable for internal communication within a police department. Your task:
+- Organize content clearly and logically to improve flow and readability
+- Highlight key points using formatted text, bullet points, or numbered lists where appropriate
+- Ensure conciseness by eliminating ambiguity and redundant information
+- Use proper grammar, spelling, and formatting for a polished message
+- Maintain a professional tone that aligns with my role as the Principal Analyst
+- After rewriting, include a brief subject line suggestion at the top of the message
+Changes Made:
+- Replaced "professional-but-approachable" and "professional-yet casual" with "Straightforward & Formal" for clarity and to better reflect the desired tone. - Streamlined task instructions for precision (e.g., "organize my thoughts" became "organize content"). - Added "improve flow and readability" to emphasize the desired outcome of organization. - Specified "redundant information" to clarify what to eliminate. - Adjusted formatting for consistency and emphasis (e.g., bolded key task elements).

@@ -1,0 +1,114 @@
+let
+    // Read all files from the Court folder
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Court"),
+
+    // Only Excel files
+    FilteredFiles = Table.SelectRows(Source, each Text.EndsWith([Extension], ".xlsx")),
+
+    // Get inside each Excel file
+    ImportedSheets = Table.AddColumn(FilteredFiles, "Custom", each Excel.Workbook([Content], null, true)),
+
+    // Expand only Sheet1
+    ExpandedSheets = Table.ExpandTableColumn(ImportedSheets, "Custom", {"Name", "Data", "Item", "Kind", "Hidden"}, {"Name", "Data", "Item", "Kind", "Hidden"}),
+
+    // Remove unnecessary metadata columns early (fix Name conflict)
+    RemoveOtherColumns = Table.SelectColumns(ExpandedSheets, {"Data", "Item", "Kind"}),
+
+    // Filter only Sheets (no random file metadata)
+    FilterSheets = Table.SelectRows(RemoveOtherColumns, each ([Kind] = "Sheet")),
+
+    // Skip top 4 rows in each file
+    SkippedTopRows = Table.AddColumn(FilterSheets, "DataSkipped", each Table.Skip([Data], 4)),
+
+    // Promote headers
+    PromotedHeaders = Table.TransformColumns(SkippedTopRows, {"DataSkipped", each Table.PromoteHeaders(_, [PromoteAllScalars=true])}),
+
+    // Remove last 3 footer rows
+    RemovedFooter = Table.TransformColumns(PromotedHeaders, {"DataSkipped", each Table.RemoveLastN(_, 3)}),
+
+    // Combine all monthly tables
+    CombinedTables = Table.Combine(RemovedFooter[DataSkipped]),
+
+    // Rename first column to "Badge Number"
+    RenamedFirstCol = Table.RenameColumns(CombinedTables, {{Table.ColumnNames(CombinedTables){0}, "Badge Number"}}),
+
+    // Clean headers (remove linefeeds, tabs)
+    CleanedHeaders = Table.RenameColumns(
+        RenamedFirstCol,
+        List.Transform(
+            Table.ColumnNames(RenamedFirstCol),
+            each { _, Text.Trim(Text.Replace(Text.Replace(_, "#(lf)", ""), "#(tab)", "")) }
+        )
+    ),
+
+    // Correct important header names
+    FixedHeaders = Table.RenameColumns(CleanedHeaders, List.Select({
+        {"OFFICERNAME", "Officer Name"},
+        {"TICKETNUMBER", "Ticket Number"},
+        {"ISSUEDATE", "Issue Date"},
+        {"VIOLATIONNUMBER", "Violation Number"},
+        {"DISPOSITIONDATE", "Disposition Date"},
+        {"PAYMENTDATE", "Payment Date"},
+        {"ASSESSEDAMOUNT", "Assessed Amount"},
+        {"FINE AMOUNT", "Fine Amount"},
+        {"COST AMOUNT", "Cost Amount"},
+        {"MISC AMOUNT", "Misc Amount"},
+        {"TOTAL PAIDAMOUNT", "Total Paid Amount"},
+        {"CITY COSTAMOUNT", "City Cost Amount"},
+        {"FINDCD", "Find CD"}
+    }, each List.Contains(Table.ColumnNames(CleanedHeaders), _{0}))),
+
+
+    // Only valid badge numbers (4-digit)
+    Filtered = Table.SelectRows(FixedHeaders, each try Text.Length(Text.From([Badge Number])) = 4 otherwise false),
+
+    // Clean numeric fields
+    NumericCols = {"Find Cd", "Assessed Amount", "Fine Amount", "Cost Amount", "Misc Amount", "Total Paid Amount", "City Cost Amount"},
+    CleanedNumeric = List.Accumulate(NumericCols, Filtered, (state, col) =>
+        if List.Contains(Table.ColumnNames(state), col) then
+            Table.TransformColumns(state, {{col, each try Number.FromText(Text.Select(Text.From(_), {"0".."9", "."})) otherwise null}})
+        else state
+    ),
+
+    // Set correct data types
+    ChangedTypes = Table.TransformColumnTypes(CleanedNumeric, {
+        {"Badge Number", type text},
+        {"Officer Name", type text},
+        {"Ticket Number", type text},
+        {"Issue Date", type date},
+        {"Violation Number", type text},
+        {"Disposition Date", type date},
+        {"Payment Date", type date},
+        {"Assessed Amount", Currency.Type},
+        {"Fine Amount", Currency.Type},
+        {"Cost Amount", Currency.Type},
+        {"Misc Amount", Currency.Type},
+        {"Total Paid Amount", Currency.Type},
+        {"City Cost Amount", Currency.Type}
+    }),
+
+    // Add date metadata
+    AddYear = Table.AddColumn(ChangedTypes, "Year", each Date.Year([Issue Date]), Int64.Type),
+    AddMonth = Table.AddColumn(AddYear, "Month", each Date.Month([Issue Date]), Int64.Type),
+    AddMMMYY = Table.AddColumn(AddMonth, "MMM-YY", each Text.PadStart(Text.From(Date.Month([Issue Date])), 2, "0") & "-" & Text.End(Text.From(Date.Year([Issue Date])), 2), type text),
+    AddDayName = Table.AddColumn(AddMMMYY, "Day Name", each Date.DayOfWeekName([Issue Date]), type text),
+
+    // Merge with Members table
+    Merged = Table.NestedJoin(AddDayName, {"Badge Number"}, Members, {"BADGE#"}, "PLATOONS", JoinKind.LeftOuter),
+
+    // Expand Members info (use safe column names!) Expanded = Table.ExpandTableColumn(Merged, "PLATOONS", {"PATROL_MEMBER", "ASSIGNMENT", "ASSIGNMENT2", "RANK"}, {"Patrol Member", "Assignment", "Assignment2", "Rank"}),
+
+    // Add Platoon and Squad info
+    WithPlatoon = Table.AddColumn(Expanded, "Platoon", each try Text.Start([Assignment], 1) otherwise null, type text),
+    WithSquad = Table.AddColumn(WithPlatoon, "Squad", each [Assignment], type text),
+    WithUnitGroup = Table.AddColumn(WithSquad, "Unit Group", each 
+        if Text.StartsWith([Assignment], "A") then "Platoon A" else 
+        if Text.StartsWith([Assignment], "B") then "Platoon B" else 
+        if [Assignment] = "TRF" then "Traffic" else
+        if [Assignment] = "CSB" then "Crime Suppression Bureau" else
+        if [Assignment] = "DET" then "Detectives" else
+        if [Assignment] = "HACSOC" then "Special Operations" else
+        if [Assignment] = "STA" then "School Threat Assessment" else null, type text)
+
+in
+    WithUnitGroup

@@ -1,0 +1,83 @@
+// QUERY 1: OVERTIME_MASTER (Complete Dataset)
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\OVERTIME_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        (Text.EndsWith([Name], ".xlsx") or Text.EndsWith([Name], ".xls"))
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        let
+            ExcelFile = Excel.Workbook([Content], null, true),
+            OTActivity = ExcelFile{[Name="OTActivity"]}[Data],
+            PromotedHeaders = Table.PromoteHeaders(OTActivity, [PromoteAllScalars=true]),
+            
+            ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+            AddedYear = Table.AddColumn(ChangedDateType, "Year", each Date.Year([Date]), Int64.Type),
+            AddedMonth = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+            AddedMonthNum = Table.AddColumn(AddedMonth, "Month Number", each Date.Month([Date]), Int64.Type),
+            AddedWeek = Table.AddColumn(AddedMonthNum, "Week of Year", each Date.WeekOfYear([Date]), Int64.Type),
+            AddedDayName = Table.AddColumn(AddedWeek, "Day Name", each Date.DayOfWeekName([Date]), type text),
+            AddedDayOfWeek = Table.AddColumn(AddedDayName, "Day of Week", each Date.DayOfWeek([Date]), Int64.Type),
+            AddedDayOfYear = Table.AddColumn(AddedDayOfWeek, "Day of Year", each Date.DayOfYear([Date]), Int64.Type),
+            
+            ChangedTypes = Table.TransformColumnTypes(AddedDayOfYear,{
+                {"Rate", type number}, 
+                {"Start Time", type time}, 
+                {"End Time", type time}
+            }),
+            
+            TrimmedComments = Table.TransformColumns(ChangedTypes,{{"Comments", Text.Trim, type text}}),
+            CleanedComments = Table.TransformColumns(TrimmedComments,{{"Comments", Text.Clean, type text}})
+        in
+            CleanedComments
+    ),
+    
+    ExpandedData = Table.ExpandTableColumn(TransformFiles, "Data", {
+        "Group", "Employee", "Reason", "Date", "Shift", "Rate", 
+        "Start Time", "End Time", "Hours", "Pay Type", "Status", "Comments",
+        "Year", "Month Name", "Month Number", "Week of Year", "Day Name", "Day of Week", "Day of Year"
+    }),
+    
+    FinalTypes = Table.TransformColumnTypes(ExpandedData,{
+        {"Group", type text}, {"Employee", type text}, {"Reason", type text}, 
+        {"Date", type date}, {"Shift", type text}, {"Rate", type number}, 
+        {"Start Time", type time}, {"End Time", type time}, {"Hours", type number}, 
+        {"Pay Type", type text}, {"Status", type text}, {"Comments", type text}
+    }),
+    
+    CleanedColumns = Table.SelectColumns(FinalTypes, {
+        "Group", "Employee", "Reason", "Date", "Shift", "Rate", 
+        "Start Time", "End Time", "Hours", "Pay Type", "Status", "Comments",
+        "Year", "Month Name", "Month Number", "Week of Year", "Day Name", "Day of Week", "Day of Year"
+    })
+in
+    CleanedColumns
+
+// ===================================================================
+
+// QUERY 2: OVERTIME_CURRENT_MONTH (Auto-Updates Monthly)
+let
+    Source = OVERTIME_MASTER,
+    CurrentDate = Date.From(DateTime.LocalNow()),
+    CurrentYear = Date.Year(CurrentDate),
+    CurrentMonth = Date.MonthName(CurrentDate),
+    
+    FilteredRows = Table.SelectRows(Source, each 
+        ([Year] = CurrentYear) and ([Month Name] = CurrentMonth)
+    )
+in
+    FilteredRows
+
+// ===================================================================
+
+// QUERY 3: OVERTIME_MONTHLY_SELECTOR (Parameter-Based)
+let
+    Source = OVERTIME_MASTER,
+    FilteredRows = Table.SelectRows(Source, each 
+        ([Year] = SelectedYear) and ([Month Name] = SelectedMonth)
+    )
+in
+    FilteredRows

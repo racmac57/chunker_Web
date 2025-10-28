@@ -1,0 +1,50 @@
+Sub AddInputMessages_Safely()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim colStart As ListColumn, colEnd As ListColumn, colEvent As ListColumn, colPatrol As ListColumn
+    Dim rng As Range
+
+    Set ws = ThisWorkbook.Sheets("Main_Outreach_Combined")
+    Set tbl = ws.ListObjects("Main_Outreach_Combined")
+    If tbl Is Nothing Then MsgBox "Table not found. ": Exit Sub
+
+    Set colStart = tbl.ListColumns("Start Time")
+    Set colEnd = tbl.ListColumns("End Time")
+    Set colEvent = tbl.ListColumns("Event Type")
+    Set colPatrol = tbl.ListColumns("Patrol Members Assigned")
+
+    ' Start + End Time: only add input message if none exists
+    For Each rng In Union(colStart.DataBodyRange, colEnd.DataBodyRange)
+        With rng.Validation
+            If .Type = xlValidateInputOnly Or .Type = 0 Then
+                .Delete
+                .Add Type:=xlValidateInputOnly
+                .InputTitle = "Time Format"
+                .InputMessage = "Enter time as hh:mm (e.g., 09:00). Typing 930 or 1100 auto-converts." End If
+        End With
+    Next rng
+
+    ' Event Type: KEEP dropdown if exists
+    For Each rng In colEvent.DataBodyRange
+        With rng.Validation
+            If .Type = xlValidateList Then
+                .InputTitle = "Select Event Type"
+                .InputMessage = "Leave blank or choose: Main Street / Community Outreach"
+                .ShowInput = True
+            End If
+        End With
+    Next rng
+
+    ' Patrol Members Assigned
+    For Each rng In colPatrol.DataBodyRange
+        With rng.Validation
+            If .Type = xlValidateInputOnly Or .Type = 0 Then
+                .Delete
+                .Add Type:=xlValidateInputOnly
+                .InputTitle = "Multiple Members"
+                .InputMessage = "Separate each name with a comma and space (, )." End If
+        End With
+    Next rng
+
+    MsgBox "Input messages updated without affecting dropdowns or macros. ", vbInformation
+End Sub

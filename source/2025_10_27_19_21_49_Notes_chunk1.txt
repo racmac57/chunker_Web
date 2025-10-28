@@ -1,0 +1,82 @@
+Sub ApplyNotesByColumnName()
+
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    Set ws = ActiveSheet
+
+    ' === Table: _25_main ===
+    Set tbl = Nothing
+    On Error Resume Next
+    Set tbl = ws.ListObjects("_25_main")
+    On Error GoTo 0
+
+    If Not tbl Is Nothing Then
+        ' Apply Time Format to Start Time (B) and End Time (C)
+        ApplyValidationByHeader tbl, Array("Start Time", "End Time"), _
+            "Time Format", "Note: Enter time in hh:mm format using a colon (:)." & vbCrLf & _
+            "Entries without a colon will default to 00:00." ' Apply New Entry to Date (A)
+        ApplyValidationByHeader tbl, Array("Date"), _
+            "New Entry", "Note: Add the new entry after the last item in the list." & vbCrLf & _
+            "Once the date is entered, the row will automatically be added to the table." ' Apply Multiple Members to Name of Member Assigned Main Street (F)
+        ApplyValidationByHeader tbl, Array("Name of Member Assigned Main Street"), _
+            "Multiple Members", "Note: When entering multiple members, separate each name with a comma and a space (, )." Else
+        MsgBox "Table '_25_main' not found. ", vbExclamation
+    End If
+
+    ' === Table: _25_comm_out ===
+    Set tbl = Nothing
+    On Error Resume Next
+    Set tbl = ws.ListObjects("_25_comm_out")
+    On Error GoTo 0
+
+    If Not tbl Is Nothing Then
+        ' Apply Time Format to Start Time (I) and End Time (J)
+        ApplyValidationByHeader tbl, Array("Start Time", "End Time"), _
+            "Time Format", "Note: Enter time in hh:mm format using a colon (:)." & vbCrLf & _
+            "Entries without a colon will default to 00:00." ' Apply New Entry to Date (H)
+        ApplyValidationByHeader tbl, Array("Date"), _
+            "New Entry", "Note: Add the new entry after the last item in the list." & vbCrLf & _
+            "Once the date is entered, the row will automatically be added to the table." ' Apply Multiple Members to Name of Patrol Personnel (N)
+        ApplyValidationByHeader tbl, Array("Name of Patrol Personnel"), _
+            "Multiple Members", "Note: When entering multiple members, separate each name with a comma and a space (, )." Else
+        MsgBox "Table '_25_comm_out' not found. ", vbExclamation
+    End If
+
+    MsgBox "Validation notes applied based on column headers. ", vbInformation
+
+End Sub
+
+' Helper subroutine to apply validation based on header names
+Sub ApplyValidationByHeader(tbl As ListObject, headers As Variant, vTitle As String, vMessage As String)
+
+    Dim colName As Variant
+    Dim unionRange As Range
+    Dim colRange As Range
+
+    For Each colName In headers
+        On Error Resume Next
+        Set colRange = tbl.ListColumns(colName).DataBodyRange
+        On Error GoTo 0
+
+        If Not colRange Is Nothing Then
+            If unionRange Is Nothing Then
+                Set unionRange = colRange
+            Else
+                Set unionRange = Union(unionRange, colRange)
+            End If
+        Else
+            MsgBox "Column '" & colName & "' not found in table '" & tbl.Name & "'. ", vbExclamation
+        End If
+    Next colName
+
+    If Not unionRange Is Nothing Then
+        With unionRange.Validation
+            .Delete
+            .Add Type:=xlValidateInputOnly
+            .InputTitle = vTitle
+            .InputMessage = vMessage
+        End With
+    End If
+
+End Sub

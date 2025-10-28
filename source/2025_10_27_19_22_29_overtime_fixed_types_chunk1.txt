@@ -1,0 +1,62 @@
+let
+    FolderPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\_POSS_EXPORT\OVERTIME_EXPORT",
+    
+    Source = Folder.Files(FolderPath),
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        let
+            ExcelFile = Excel.Workbook([Content], null, true),
+            OTActivity = ExcelFile{[Name="OTActivity"]}[Data],
+            PromotedHeaders = Table.PromoteHeaders(OTActivity, [PromoteAllScalars=true]),
+            
+            ChangedDateType = Table.TransformColumnTypes(PromotedHeaders,{{"Date", type date}}),
+            AddedYear = Table.AddColumn(ChangedDateType, "Year", each Date.Year([Date]), Int64.Type),
+            AddedMonth = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+            AddedMonthNum = Table.AddColumn(AddedMonth, "Month Number", each Date.Month([Date]), Int64.Type),
+            AddedWeek = Table.AddColumn(AddedMonthNum, "Week of Year", each Date.WeekOfYear([Date]), Int64.Type),
+            AddedDayName = Table.AddColumn(AddedWeek, "Day Name", each Date.DayOfWeekName([Date]), type text),
+            AddedDayOfWeek = Table.AddColumn(AddedDayName, "Day of Week", each Date.DayOfWeek([Date]), Int64.Type),
+            AddedDayOfYear = Table.AddColumn(AddedDayOfWeek, "Day of Year", each Date.DayOfYear([Date]), Int64.Type),
+            
+            // Clean Comments if column exists
+            CleanedComments = if Table.HasColumns(AddedDayOfYear, "Comments") 
+                then Table.TransformColumns(AddedDayOfYear,{
+                    {"Comments", each Text.Clean(Text.Trim(_)), type text}
+                })
+                else AddedDayOfYear
+        in
+            CleanedComments
+    ),
+    
+    FirstFileColumns = Table.ColumnNames(TransformFiles{0}[Data]),
+    ExpandedData = Table.ExpandTableColumn(TransformFiles, "Data", FirstFileColumns),
+    CleanedColumns = Table.RemoveColumns(ExpandedData, {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, MissingField.Ignore),
+    
+    // FINAL DATA TYPE ENFORCEMENT
+    FinalDataTypes = Table.TransformColumnTypes(CleanedColumns,{
+        {"Group", type text},
+        {"Employee", type text}, 
+        {"Reason", type text},
+        {"Date", type date},
+        {"Shift", type text},
+        {"Rate", type number},
+        {"Start Time", type time},
+        {"End Time", type time},
+        {"Hours", type number},
+        {"Pay Type", type text},
+        {"Status", type text},
+        {"Comments", type text},
+        {"Year", Int64.Type},
+        {"Month Name", type text},
+        {"Month Number", Int64.Type},
+        {"Week of Year", Int64.Type},
+        {"Day Name", type text},
+        {"Day of Week", Int64.Type},
+        {"Day of Year", Int64.Type}
+    })
+in
+    FinalDataTypes

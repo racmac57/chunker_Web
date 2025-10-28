@@ -1,0 +1,121 @@
+' ===============================
+' Community Engagement Setup Tool
+' ===============================
+
+Sub SetupCommunityEngagementTable()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim tblRange As Range
+    Dim headers As Variant, trackedItems As Variant
+    Dim sheetName As String
+
+    ' === Ask User for Target Sheet Name ===
+    sheetName = InputBox("Enter the sheet name to set up (e.g., 2025_Master):", "Setup Target Sheet")
+
+    If sheetName = "" Then
+        MsgBox "Cancelled by user. ", vbInformation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        MsgBox "? Sheet '" & sheetName & "' not found! ", vbCritical
+        Exit Sub
+    End If
+
+    ' === Setup Data ===
+    headers = Array("Date", "Tracked Item", "Count", "Notes", "Status")
+    trackedItems = Array("Community Event", "Social Media Post", "Presentation", "Public Engagement", "Outreach Patrol")
+
+    ' === Clear and Set Headers ===
+    ws.Cells.Clear
+    ws.Range("A1:E1").Value = headers
+
+    ' === Create Table ===
+    Set tblRange = ws.Range("A1:E2")
+    Set tbl = ws.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
+    tbl.Name = "_mom_Community_Engagement"
+    tbl.TableStyle = "TableStyleMedium2"
+
+    ' === Add Dropdown for "Tracked Item" Column ===
+    With ws.Range("B2:B100").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+             Formula1:="""" & Join(trackedItems, ",") & """"
+        .InCellDropdown = True
+    End With
+
+    ' === Format Count Column ===
+    tbl.ListColumns("Count").DataBodyRange.NumberFormat = "0"
+
+    ' === Add + Add Entry Button ===
+    Dim btn As Button
+    On Error Resume Next
+    ws.Buttons("btnAddRow").Delete ' Remove existing button if re-running
+    On Error GoTo 0
+
+    Set btn = ws.Buttons.Add(10, 10, 100, 30)
+    btn.OnAction = "AddCommunityEngagementRow"
+    btn.Caption = "+ Add Entry"
+    btn.Name = "btnAddRow"
+
+    MsgBox "? Table and setup complete for '" & sheetName & "'. ", vbInformation
+End Sub
+
+Sub AddCommunityEngagementRow()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    ' Assume sheet with table is active
+    Set ws = ActiveSheet
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("_mom_Community_Engagement")
+    On Error GoTo 0
+
+    If tbl Is Nothing Then
+        MsgBox "? Table '_mom_Community_Engagement' not found on this sheet. ", vbCritical
+        Exit Sub
+    End If
+
+    Dim newRow As ListRow
+    Set newRow = tbl.ListRows.Add
+
+    With newRow.Range
+        .Cells(1, 1).Value = Date
+        .Cells(1, 1).Select
+    End With
+End Sub
+
+Public Sub FlagInvalidTime(cell As Range, inputVal As String, reason As String)
+    ' Highlight red cell and log it
+    cell.Interior.Color = RGB(255, 0, 0)
+    cell.Font.Color = RGB(255, 255, 255)
+    cell.Font.Bold = True
+
+    ' Ensure log sheet exists
+    Dim logSheet As Worksheet
+    On Error Resume Next
+    Set logSheet = ThisWorkbook.Sheets("LOG_TimeEntry")
+    On Error GoTo 0
+
+    If logSheet Is Nothing Then
+        Set logSheet = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        logSheet.Name = "LOG_TimeEntry"
+        logSheet.Range("A1:D1").Value = Array("Timestamp", "Sheet", "Cell", "Issue")
+        logSheet.Rows(1).Font.Bold = True
+    End If
+
+    Dim nextRow As Long
+    nextRow = logSheet.Cells(logSheet.Rows.Count, 1).End(xlUp).Row + 1
+
+    With logSheet
+        .Cells(nextRow, 1).Value = Now
+        .Cells(nextRow, 2).Value = cell.Worksheet.Name
+        .Cells(nextRow, 3).Value = cell.Address
+        .Cells(nextRow, 4).Value = "Invalid Time: '" & inputVal & "' — " & reason
+    End With
+End Sub

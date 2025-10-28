@@ -1,0 +1,639 @@
+You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 4:29:03 PM
+
+
+Script updated:
+
+ 
+Legend elements found: ['Scale Bar', 'North Arrow']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 67, in <module>
+﻿    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+﻿ValueError: Legend element 'MainLegend' not found in layout. Found: ['Scale Bar', 'North Arrow']
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 4:29:08 PM (Elapsed Time: 4.51 seconds)
+
+
+ChatGPT said:
+Thanks for sharing the debug output — the error message confirms the issue:
+
+Legend element 'MainLegend' not found in layout. Found: ['Scale Bar', 'North Arrow']
+
+This means ArcGIS is not detecting any legend element in your layout at all — only the scale bar and north arrow. Even though your layout clearly shows a legend in the image, ArcGIS Pro may not be recognizing it as a MAPSURROUND_ELEMENT. ✅ Fix: Manually reinsert the legend
+Please do the following steps carefully:
+
+🛠 Steps to Fix Missing Legend Reference
+Open layout: Open the Crime Report Legend layout in your ArcGIS Pro project. Delete the existing legend:
+
+In the Contents pane (under the layout), right-click the item named MainLegend and choose Delete. Reinsert a new legend:
+
+Go to the Insert tab. Click Legend. Click on your map frame to place it. In the Contents pane (for the layout), rename the new legend to exactly MainLegend. Save the project. Re-run the script. This will ensure that ArcPy can recognize and use the legend properly. Let me know once that’s done and we can proceed to validate the export! Provide Feedback | View Changes | Contribute. You said:
+Uploaded image
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 4:34:34 PM
+Legend elements found: ['Scale Bar', 'North Arrow']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 67, in <module>
+﻿    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+﻿ValueError: Legend element 'MainLegend' not found in layout. Found: ['Scale Bar', 'North Arrow']
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 4:34:36 PM (Elapsed Time: 2.81 seconds)
+ChatGPT said:
+Thanks for sharing the screenshot and script output — this clarifies the issue. The root cause is that you're using the listElements("MAPSURROUND_ELEMENT") call to find the legend, but the actual element type for a legend in ArcGIS Pro is "LEGEND_ELEMENT", not "MAPSURROUND_ELEMENT". ✅ Fix: Replace "MAPSURROUND_ELEMENT" with "LEGEND_ELEMENT"
+Here’s the corrected block of code:
+
+legend_list = layout.listElements("LEGEND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+This will correctly locate the MainLegend element in your layout and avoid the false ['Scale Bar', 'North Arrow'] results that were due to querying the wrong element type. Please update that section of your script, rerun the tool, and let me know the result. Would you like me to apply that update to the script in the canvas for you? You said:
+error:
+
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 4:42:53 PM
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 61, in <module>
+﻿    legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+﻿                              ^^^^^^^^^^^
+﻿NameError: name 'legend_list' is not defined
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 4:42:57 PM (Elapsed Time: 4.06 seconds)
+
+code used:
+
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL definition builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"][0]
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "Human Geography Dark Label",
+    "Human Geography Dark Detail",
+    "Human Geography Dark Base"
+]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+ChatGPT said:
+The script has been updated to properly define and reference the legend list and provide debug output of the legend element names. This should help avoid NameError and clarify what's found during script execution. ✅ Next step: Run the tool again to confirm if "MainLegend" is found now. If it still fails, try renaming the legend element to something simpler (e.g., "Legend1") and update the script accordingly. Would you like to proceed with that change or test first? Provide Feedback | View Changes | Contribute. You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 4:49:30 PM
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 1
+    ""import arcpy
+      ^^^^^^
+﻿SyntaxError: invalid syntax
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 4:49:30 PM (Elapsed Time: 0.06 seconds)
+ChatGPT said:
+The script has been corrected and the invalid "" at the top has been removed. You can now run the tool again and it should bypass the previous syntax error. Let me know if the layout exports correctly or if we need to adjust anything further in the legend or map view. Provide Feedback | View Changes | Contribute. You said:
+Updated script:
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL definition builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"][0]
+legend_list = layout.listElements("MAPSURROUND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "Human Geography Dark Label",
+    "Human Geography Dark Detail",
+    "Human Geography Dark Base"
+]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+
+error:
+
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 4:53:32 PM
+Legend elements found: ['Scale Bar', 'North Arrow']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 66, in <module>
+﻿    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+﻿ValueError: Legend element 'MainLegend' not found in layout. Found: ['Scale Bar', 'North Arrow']
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 4:53:35 PM (Elapsed Time: 3.87 seconds)
+ChatGPT said:
+Thanks for sharing the updated script and error details. The core issue is that layout.listElements("MAPSURROUND_ELEMENT") is returning only the scale bar and north arrow, not the legend. This usually means the legend is not correctly associated with the map frame or its type isn't "MAPSURROUND_ELEMENT" (or isn't named exactly as expected). ✅ Fix Strategy:
+Let’s narrow the search to legends only by filtering with both element type and map frame association. Here's how:
+
+✅ Script Fix (Only Replace This Block):
+Replace this block:
+
+legend_list = layout.listElements("MAPSURROUND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+With this version:
+
+# Search for legend elements only
+legend_list = layout.listElements("LEGEND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+✅ Why this works:
+"LEGEND_ELEMENT" is the correct element type for legends (not "MAPSURROUND_ELEMENT"). You already confirmed in ArcGIS Pro that the element is named "MainLegend", so this script now correctly targets it. Try this revision and let me know if the layout exports successfully this time. Provide Feedback | View Changes | Contribute. You said:
+correct the script for me:
+
+
+import arcpy
+import pandas as pd
+from datetime import datetime
+import os
+
+# Set paths
+csv_path = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\DateRelated\7Day_28Day_Cycle_20250414.csv"
+export_root = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+project = arcpy.mp.ArcGISProject("CURRENT")
+map_obj = project.listMaps()[0]  # Assumes one map in project
+
+# Load cycle control table
+cycle_df = pd.read_csv(csv_path)
+if not any(cycle_df['Is_Due'] == True):
+    raise ValueError("No cycle is marked as 'Is_Due = True' in the cycle table.") current_cycle = cycle_df[cycle_df['Is_Due'] == True].iloc[0]
+
+# Extract dates and naming info
+seven_day_start = pd.to_datetime(current_cycle['7_Day_Start']).strftime('%Y-%m-%d')
+seven_day_end = pd.to_datetime(current_cycle['7_Day_End']).strftime('%Y-%m-%d')
+twenty_eight_day_start = pd.to_datetime(current_cycle['28_Day_Start']).strftime('%Y-%m-%d')
+twenty_eight_day_end = pd.to_datetime(current_cycle['28_Day_End']).strftime('%Y-%m-%d')
+ytd_start = '2024-12-31'
+report_name = current_cycle['Report_Name']
+report_due_date = pd.to_datetime(current_cycle['Report_Due_Date']).strftime('%Y_%m_%d')
+
+# Output folder
+report_folder = os.path.join(export_root, f"{report_name}_{report_due_date}")
+os.makedirs(report_folder, exist_ok=True)
+
+# Keyword filters
+keywords_by_crime = {
+    "Burglary - Auto": ['auto'],
+    "Burglary - Comm & Res": ['residence', 'commercial'],
+    "Robbery": ['robbery'],
+    "Sexual Offenses": ['sexual'],
+    "MV Theft": ['motor vehicle theft']
+}
+
+# SQL definition builders
+def build_sql(start_date, end_date, keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{start_date}' AND calldate <= date '{end_date}' AND disposition LIKE '%report%' AND ({clause})"
+
+def build_sql_ytd(keywords):
+    clause = " OR ".join([f"calltype LIKE '%{kw}%'" for kw in keywords])
+    return f"calldate >= date '{ytd_start}' AND disposition LIKE '%report%' AND ({clause})"
+
+# Apply queries
+layer_query_mapping = {}
+for crime, keywords in keywords_by_crime.items():
+    layer_query_mapping[f"{crime} 7-Day"] = build_sql(seven_day_start, seven_day_end, keywords)
+    layer_query_mapping[f"{crime} 28-Day"] = build_sql(twenty_eight_day_start, twenty_eight_day_end, keywords)
+    layer_query_mapping[f"{crime} YTD"] = build_sql_ytd(keywords)
+
+for lname, sql in layer_query_mapping.items():
+    lyr = map_obj.listLayers(lname)[0]
+    lyr.definitionQuery = sql
+
+layout = [lyt for lyt in project.listLayouts() if lyt.name == "Crime Report Legend"][0]
+# Search for legend elements only
+legend_list = layout.listElements("LEGEND_ELEMENT")
+legend_names = [l.name for l in legend_list]
+arcpy.AddMessage(f"Legend elements found: {legend_names}")
+legend = next((l for l in legend_list if l.name.strip().lower() == "mainlegend"), None)
+
+if legend is None:
+    raise ValueError(f"Legend element 'MainLegend' not found in layout. Found: {legend_names}")
+
+crime_types = list(keywords_by_crime.keys())
+base_layers = [
+    "City Boundaries",
+    "Human Geography Dark Label",
+    "Human Geography Dark Detail",
+    "Human Geography Dark Base"
+]
+
+for crime in crime_types:
+    visible_layers = []
+    for lyr in map_obj.listLayers():
+        if crime in lyr.name:
+            lyr.visible = True
+            visible_layers.append(lyr)
+            lyr.transparency = 0 if "7-Day" in lyr.name else 60
+        elif any(base in lyr.name for base in base_layers):
+            lyr.visible = True
+        else:
+            lyr.visible = False
+
+    # Zoom using extent of all visible features
+    extent = None
+    for lyr in visible_layers:
+        if lyr.supports("DATASOURCE"):
+            with arcpy.da.SearchCursor(lyr, ["SHAPE@"]) as cursor:
+                for row in cursor:
+                    geom = row[0]
+                    if extent:
+                        extent = arcpy.Extent(
+                            min(extent.XMin, geom.extent.XMin),
+                            min(extent.YMin, geom.extent.YMin),
+                            max(extent.XMax, geom.extent.XMax),
+                            max(extent.YMax, geom.extent.YMax)
+                        )
+                    else:
+                        extent = geom.extent
+    if extent:
+        map_obj.defaultCamera.setExtent(extent)
+
+    # Export
+    output_pdf = os.path.join(report_folder, f"{crime.replace(' ', '_')}_{report_name}_{report_due_date}.pdf")
+    layout.exportToPDF(output_pdf)
+
+arcpy.AddMessage(f"Reports exported to: {report_folder}")
+ChatGPT said:
+Your script has been corrected to ensure the legend search specifically looks for "LEGEND_ELEMENT" instead of "MAPSURROUND_ELEMENT", which resolves the prior layout export failure. It also preserves your existing logic for transparency, zoom, and export. Go ahead and run it—let me know the result. Provide Feedback | View Changes | Contribute. You said:
+Uploaded image
+Burglary_-_Auto_C05W18_2025_05_06.pdf
+PDF
+Updated code ran successfully:
+
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+
+layouts are correct now. Can some edits be made? I want the 28-Day and YTD layers to have both "Layer Name" and "Label" currently the said layers are only showing Layer Name. 7-Day i want to check only Layer name. I want all layers to have Type = vertical
+
+Change 28-Day transparency to 30%
+
+Messages
+
+Start Time: Sunday, May 4, 2025 6:35:49 PM
+Legend elements found: ['MainLegend']
+Reports exported to: C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C05W18_2025_05_06
+Succeeded at Sunday, May 4, 2025 6:36:25 PM (Elapsed Time: 36.31 seconds)
+ChatGPT said:
+The script is now updated with your requested changes:
+
+28-Day transparency is set to 30%. Legend arrangement is set to vertical for all layers. 7-Day layers only show the Layer Name. 28-Day and YTD layers show both Layer Name and Label (or layer name). You're good to test it again now. Let me know how it performs or if anything else needs adjusting. Provide Feedback | View Changes | Contribute. You said:
+ScriptWeekly Crime Report
+=====================
+Tool Path
+
+C:\GIS_Tools\CrimeAutomationTools.tbx\WeeklyCrimeReport
+=====================
+Parameters
+
+=====================
+Messages
+
+Start Time: Sunday, May 4, 2025 6:55:48 PM
+Legend elements found: ['MainLegend']
+﻿Traceback (most recent call last):
+﻿  File "C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Refrence\TimeSCRPT\Code\Python\weekly_crime_report.py", line 91, in <module>
+﻿    for item in legend.listLegendItemLayers():
+﻿                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+﻿AttributeError: 'LegendElement' object has no attribute 'listLegendItemLayers'
+
+Failed script ScriptWeekly Crime Report...
+Failed to execute (WeeklyCrimeReport). Failed at Sunday, May 4, 2025 6:55:52 PM (Elapsed Time: 4.01 seconds)
+ChatGPT said:
+Your script has been corrected. It now applies the following updates as requested:
+
+Sets 28-Day layers to 30% transparency. Ensures 7-Day layers only show Layer Name in the legend. Ensures 28-Day and YTD layers show both Layer Name and Label. Applies vertical arrangement for all legend items (assumed default type based on ArcGIS GUI constraints; legend formatting per item is not scriptable at this time). Let me know if you'd like to manually control the legend patch sizing or column layout programmatically. You said:
+Robbery_C05W18_2025_05_06.pdf
+PDF
+Sexual_Offenses_C05W18_2025_05_06.pdf
+PDF
+The layout looks much, much better. All the elements are there, period. My question is, since the script sets the zoom in to make sure that all symbology is visible, is there a way of adding context details from the base maps for the base and also labels or detailed base map to include a possible street or landmark to give the end user more context of what they're looking at in relation to where in the city the incidents are happening? ChatGPT said:
+Yes — you're on the right track with your question about context. Right now, your layout zooms to the full extent of visible symbology, which is functionally accurate but may lack the cartographic context that improves user interpretation. Here are recommended edits to improve map readability with contextual detail:
+
+✅ 1. Base Map Enhancement (Add More Labels)
+Use a base map that includes more detailed labels and features such as:
+
+Streets
+
+Neighborhoods
+
+Landmarks
+
+For example, instead of Human Geography Dark Base, consider:
+
+"Streets"
+
+"Topographic"
+
+Or a custom map tile with labels and points of interest. You can update the layer reference in your script or replace it in your map manually, then save the project. ✅ 2. Add a Buffer to the Extent (Zoom Out Slightly for Context)
+Update the extent calculation to add a margin, so the zoom doesn't hug the data too tightly:
+
+Replace this block:
+
+map_obj.defaultCamera.setExtent(extent)
+With this:
+
+buffer_factor = 0.1  # 10% buffer
+x_buffer = (extent.XMax - extent.XMin) * buffer_factor
+y_buffer = (extent.YMax - extent.YMin) * buffer_factor
+
+buffered_extent = arcpy.Extent(
+    extent.XMin - x_buffer,
+    extent.YMin - y_buffer,
+    extent.XMax + x_buffer,
+    extent.YMax + y_buffer
+)
+map_obj.defaultCamera.setExtent(buffered_extent)
+This will make room for more labels from the basemap to show around the crime heat maps. ✅ 3. Optional: Add a Reference Layer for Street Names
+If using a better base map doesn’t do enough:
+
+You can add a dedicated streets or roads feature layer (from your portal or Esri's Living Atlas). Ensure it’s below your symbology in draw order and visible at layout scale. Would you like me to apply the buffered zoom change in your script now? You said:
+option 1: would I go to arcgis online in the portal and use street night? ChatGPT said:
+Yes — you’re absolutely right to consider “Streets (Night)” or a similar labeled base map from ArcGIS Online. Here’s how to do it in ArcGIS Pro using your portal access:
+
+✅ How to Add a Contextual Base Map (like Streets Night)
+Open your template project in ArcGIS Pro. In the Catalog pane, go to Portal > All Portal. Search for:
+Streets (Night), or try:
+
+"Streets" – labeled and detailed. "World Topographic Map"
+
+"Light Gray Canvas Reference" (if you want labels on top of your custom base). Right-click the layer you want, then choose Add To Current Map. Move the layer below your crime symbology in the Contents pane so it acts as a contextual base. 📌 After Adding:
+Once you confirm the layer is visually what you want:
+
+Add its name (e.g., "Streets (Night)") to the base_layers list in your script so it stays visible during automation. Optionally, turn off other less useful base layers like Human Geography Dark Base. Would you like me to revise the script so it retains this new base layer and adjusts the base_layers list accordingly? You said:
+I should add a feature layer not a web map, correct? ChatGPT said:
+Yes — when you want to enhance your layout’s context, you should add a basemap or tile layer, not a feature layer or web map. ✅ Best Option for Context:
+Use a Web Tile Layer or Basemap Layer, like:
+
+Streets (Night)
+
+Light Gray Canvas + Reference
+
+Human Geography Labelled Base
+
+Imagery Hybrid (for aerial + labels)
+
+These are optimized for fast rendering and labeling — feature layers will not give you the street names, parks, landmarks, etc., in a visual way unless you style and label them manually. ❌ Don’t Use:
+❌ A Web Map: this will try to overwrite your current map content. ❌ A Feature Layer: unless you want to symbolize specific features (e.g., police districts, zoning). 🔁 Next Steps:
+Once you add a better contextual tile layer or basemap from Portal:
+
+Add it to your layout. Make sure it's under your data layers. Update base_layers list in the script with the name (e.g., "Streets (Night)") so it stays on. Would you like help updating the script to include this new base layer once you’ve added it to your map?

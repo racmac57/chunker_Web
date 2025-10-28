@@ -1,0 +1,151 @@
+? ? 2025-06-10-21-16-53 (EST)
+# Time_SCRPA_Master_2.0/Sexual_Offenses
+# Author: R. A. Carucci
+# Purpose: M code export for query 'Sexual_Offenses'
+================================================================================
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\EXPORT_RMS"),
+    FilteredHiddenFiles = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    InvokedTransform = Table.AddColumn(FilteredHiddenFiles, "Transform File", each Transform_FileA1([Content])),
+    RenamedColumns1 = Table.RenameColumns(InvokedTransform, {"Name", "Source.Name"}),
+    RemovedOtherColumns = Table.SelectColumns(RenamedColumns1, {"Source.Name", "Transform File"}),
+    ExpandedTable = Table.ExpandTableColumn(RemovedOtherColumns, "Transform File", Table.ColumnNames(Transform_FileA1(#"Sample File"))),
+    
+    // Map PascalCase columns from Transform File to expected format
+    FixedColumns = Table.RenameColumns(ExpandedTable, {
+        {"CaseNumber", "Case Number"},
+        {"IncDate", "Incident Date"},
+        {"IncidentTime", "Incident Time"},
+        {"IncidentDateBetween", "Incident Date_Between"},
+        {"IncidentTimeBetween", "Incident Time_Between"},
+        {"ReportDate", "Report Date"},
+        {"ReportTime", "Report Time"},
+        {"IncidentType1", "Incident Type_1"},
+        {"IncidentType2", "Incident Type_2"},
+        {"IncidentType3", "Incident Type_3"},
+        {"TotalValueStolen", "Total Value Stolen"},
+        {"TotalValueRecover", "Total Value Recover"},
+        {"Registration1", "Registration 1"},
+        {"RegState1", "Reg State 1"},
+        {"Registration2", "Registration 2"},
+        {"RegState2", "Reg State 2"},
+        {"ReviewedBy", "Reviewed By"},
+        {"OfficerOfRecord", "Officer of Record"},
+        {"CaseNumberLength", "CASE_NUMBER_LENGTH"}
+    }, MissingField.Ignore),
+    
+    // Add missing ALL_INCIDENTS column
+    AddedALLINCIDENTS = Table.AddColumn(FixedColumns, "ALL_INCIDENTS", 
+        each [Incident Type_1] & (if [Incident Type_2] <> null then " - " & [Incident Type_2] else "") & 
+             (if [Incident Type_3] <> null then " - " & [Incident Type_3] else ""), type text),
+    
+    // FIXED: Proper time type transformations
+    ChangedType = Table.TransformColumnTypes(AddedALLINCIDENTS, {
+        {"Source.Name", type text}, {"Case Number", type text}, {"Incident Date", type date}, 
+        {"Incident Time", type datetime}, {"Incident Date_Between", type date}, 
+        {"Incident Time_Between", type time}, {"Report Date", type date}, 
+        {"Report Time", type time}, {"Incident Type_1", type text}, 
+        {"Incident Type_2", type text}, {"Incident Type_3", type text}, 
+        {"FullAddress", type text}, {"Grid", type text}, {"Zone", Int64.Type}, 
+        {"Narrative", type text}, {"Total Value Stolen", Currency.Type}, 
+        {"Total Value Recover", Currency.Type}, {"Registration 1", type text}, 
+        {"Make1", type text}, {"Model1", type text}, {"Reg State 1", type text}, 
+        {"Registration 2", type text}, {"Reg State 2", type text}, 
+        {"Make2", type text}, {"Model2", type text}, {"Reviewed By", type text}, 
+        {"CompleteCalc", type text}, {"Officer of Record", type text}, 
+        {"Squad", type text}, {"Det_Assigned", type text}, {"Case_Status", type text}, 
+        {"NibrsClassification", type text}, {"CASE_NUMBER_LENGTH", Int64.Type},
+        {"IncTime", type time}, {"StartOfHour", type time}
+    }),
+    RemovedSourceName = Table.RemoveColumns(ChangedType, {"Source.Name"}),
+    
+    // Create all missing calculated columns using the correct column references
+    AddedINCTIMEAlias = Table.AddColumn(RemovedSourceName, "INC_TIME", 
+        each [IncTime], type time),
+    AddedINCDATEAlias = Table.AddColumn(AddedINCTIMEAlias, "INC_DATE", 
+        each [Incident Date], type date),
+    AddedStartOfHourAlias = Table.AddColumn(AddedINCDATEAlias, "Start of Hour", 
+        each [StartOfHour], type time),
+    AddedINCDATEANDTIME = Table.AddColumn(AddedStartOfHourAlias, "INC_DATE_AND_TIME", 
+        each if [Incident Date] <> null and [Incident Time] <> null 
+             then DateTime.From([Incident Date]) + Duration.From([Incident Time]) 
+             else null, type datetime),
+    
+    // Enhanced TimeOfDay matching your successful MV Theft chart
+    AddedTOD = Table.AddColumn(AddedINCDATEANDTIME, "TOD", 
+        each let t = try Time.From([IncTime]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00�03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00�07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00�11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00�15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00�19:59)"
+           else "Night (20:00�23:59)", type text),
+    
+    // Add other missing calculated columns - All now reference "Incident Date" instead of "INC_DATE"
+    AddedDayName = Table.AddColumn(AddedTOD, "Day Name", 
+        each if [Incident Date] <> null then Date.DayOfWeekName([Incident Date]) else null, type text),
+    AddedMonthName = Table.AddColumn(AddedDayName, "Month Name", 
+        each if [Incident Date] <> null then Date.MonthName([Incident Date]) else null, type text),
+    AddedYear = Table.AddColumn(AddedMonthName, "Year", 
+        each if [Incident Date] <> null then Date.Year([Incident Date]) else null, Int64.Type),
+    AddedWeekOfYear = Table.AddColumn(AddedYear, "Week of Year", 
+        each if [Incident Date] <> null then Date.WeekOfYear([Incident Date]) else null, Int64.Type),
+    AddedWeekOfMonth = Table.AddColumn(AddedWeekOfYear, "Week of Month", 
+        each if [Incident Date] <> null then Date.WeekOfMonth([Incident Date]) else null, Int64.Type),
+    AddedDay = Table.AddColumn(AddedWeekOfMonth, "Day", 
+        each if [Incident Date] <> null then Date.Day([Incident Date]) else null, Int64.Type),
+    AddedDayOfYear = Table.AddColumn(AddedDay, "Day of Year", 
+        each if [Incident Date] <> null then Date.DayOfYear([Incident Date]) else null, Int64.Type),
+    
+    // Add block calculation using the CAD approach
+    AddedBLOCK = Table.AddColumn(AddedDayOfYear, "BLOCK", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+    
+    AddedLocation = Table.AddColumn(AddedBLOCK, "Location", 
+        each [FullAddress], type text),
+    AddedStNumber = Table.AddColumn(AddedLocation, "St#", 
+        each null, type text),
+    AddedNotes = Table.AddColumn(AddedStNumber, "Notes", 
+        each null, type text),
+    AddedVEHICLE = Table.AddColumn(AddedNotes, "VEHICLE", 
+        each if [Make1] <> null then [Make1] & " " & (if [Model1] <> null then [Model1] else "") else null, type text),
+    AddedSuspect = Table.AddColumn(AddedVEHICLE, "Suspect", 
+        each null, type text),
+    AddedTOTALSTOLENAMOUNT = Table.AddColumn(AddedSuspect, "TOTAL_STOLEN_AMOUNT", 
+        each [Total Value Stolen], Currency.Type),
+    AddedREPORTCYCLE = Table.AddColumn(AddedTOTALSTOLENAMOUNT, "REPORT_CYCLE", 
+        each null, type text),
+    AddedTIMEOFDAY = Table.AddColumn(AddedREPORTCYCLE, "TIME_OF_DAY", 
+        each [TOD], type text),
+    
+    // Enhanced TimeOfDay column (keeping the original for compatibility)
+    AddedEnhancedTimeOfDay = Table.AddColumn(AddedTIMEOFDAY, "Enhanced_TimeOfDay", 
+        each [TOD], type text),
+    
+    // Replace any remaining errors with null values
+    ColumnNames = Table.ColumnNames(AddedEnhancedTimeOfDay),
+    ErrorReplacements = List.Transform(ColumnNames, each {_, null}),
+    ReplacedErrors = Table.ReplaceErrorValues(AddedEnhancedTimeOfDay, ErrorReplacements),
+    
+    // Filter for sexual offense incidents
+    FilteredRows = Table.SelectRows(ReplacedErrors, each 
+        [ALL_INCIDENTS] <> null and 
+        (Text.Contains(Text.Upper([ALL_INCIDENTS]), "SEX") or 
+         Text.Contains(Text.Upper([ALL_INCIDENTS]), "SEXUAL") or
+         Text.Contains(Text.Upper([ALL_INCIDENTS]), "RAPE") or
+         Text.Contains(Text.Upper([ALL_INCIDENTS]), "ASSAULT"))),
+    RemovedDuplicates = Table.Distinct(FilteredRows, {"Case Number"}),
+    
+    // Clean and trim narrative text
+    TrimmedText = Table.TransformColumns(RemovedDuplicates,{{"Narrative", Text.Trim, type text}}),
+    CleanedText = Table.TransformColumns(TrimmedText,{{"Narrative", Text.Clean, type text}})
+in
+    CleanedText

@@ -1,0 +1,52 @@
+import pandas as pd
+from datetime import datetime
+
+# Sample function: Determine time of day category
+def get_time_of_day(hour):
+    if 0 <= hour < 4:
+        return "Early Morning (00:00–03:59)"
+    elif 4 <= hour < 8:
+        return "Morning (04:00–07:59)"
+    elif 8 <= hour < 12:
+        return "Morning Peak (08:00–11:59)"
+    elif 12 <= hour < 16:
+        return "Afternoon (12:00–15:59)"
+    elif 16 <= hour < 20:
+        return "Evening Peak (16:00–19:59)"
+    else:
+        return "Night (20:00–23:59)"
+
+# Sample function: Format address block
+def format_block(full_address):
+    if '&' in full_address:
+        return full_address.strip()  # Handle intersections as-is
+    try:
+        location = full_address.split(',')[0]  # Get '123 Main Street'
+        parts = location.strip().split(' ')
+        street_number = int(parts[0])
+        street_name = ' '.join(parts[1:])
+        block = (street_number // 100) * 100
+        # Normalize street name abbreviations
+        street_name = (street_name.replace("Street", "St")
+                                  .replace("Avenue", "Ave")
+                                  .replace("Place", "Pl")
+                                  .replace("Way", "Way"))
+        return f"{street_name}, {block} Block"
+    except Exception:
+        return "Unknown Block"
+
+# Example usage on a DataFrame (to be replaced with real CAD data later)
+sample_data = pd.DataFrame({
+    'calldate': ['2025-05-01 03:15:00', '2025-05-01 09:45:00', '2025-05-01 17:00:00'],
+    'FullAddress': ['123 Main Street, Hackensack, NJ, 07601',
+                    '456 Atlantic Avenue, Hackensack, NJ, 07601',
+                    'Main Street & Atlantic Street, Hackensack, NJ, 07601']
+})
+
+# Convert call date to datetime and extract hour
+sample_data['CallDatetime'] = pd.to_datetime(sample_data['calldate'])
+sample_data['Hour'] = sample_data['CallDatetime'].dt.hour
+sample_data['TimeOfDay'] = sample_data['Hour'].apply(get_time_of_day)
+sample_data['Block'] = sample_data['FullAddress'].apply(format_block)
+
+import ace_tools as tools; tools.display_dataframe_to_user(name="Processed CAD Data", dataframe=sample_data)
