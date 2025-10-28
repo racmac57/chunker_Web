@@ -11,6 +11,7 @@ import logging
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict, List, Optional
 import nltk
 from nltk.tokenize import sent_tokenize
 import json
@@ -19,6 +20,105 @@ from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from chunker_db import ChunkerDatabase
 from notification_system import NotificationSystem
+import re
+import openpyxl
+import PyPDF2
+import ast
+import docx
+import yaml
+# Graceful RAG imports with error handling
+try:
+    from rag_integration import ChromaRAG, extract_keywords
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"RAG components not available: {e}")
+    print("Continuing with core chunking functionality...")
+    RAG_AVAILABLE = False
+    ChromaRAG = None
+    extract_keywords = None
+
+# Graceful Celery imports with error handling
+try:
+    from celery_tasks import process_file_with_celery_chain, app as celery_app
+    CELERY_AVAILABLE = True
+    print("Celery integration available")
+except ImportError as e:
+    print(f"Celery components not available: {e}")
+    print("Continuing with direct processing...")
+    CELERY_AVAILABLE = False
+    process_file_with_celery_chain = None
+    celery_app = None
+from file_processors import get_file_processor, check_processor_dependencies, redact_sensitive_data
+
+# Graceful RAG imports with error handling
+try:
+    from langchain_rag_handler import LangChainRAGHandler, graceful_rag_handler, check_rag_dependencies
+    RAG_DEPENDENCIES_AVAILABLE = True
+except ImportError:
+    # Logger not yet defined, use print for now
+    print("LangChain RAG handler not available - using basic RAG only")
+    RAG_DEPENDENCIES_AVAILABLE = False
+
+def validate_config(config):
+    """Validate configuration parameters"""
+    errors = []
+    
+    # Check required fields
+    required_fields = ["watch_folder", "output_dir", "archive_dir"]
+    for field in required_fields:
+        if field not in config:
+            errors.append(f"Missing required field: {field}")
+    
+    # Check data types
+    if "rag_enabled" in config and not isinstance(config["rag_enabled"], bool):
+        errors.append("rag_enabled must be boolean")
+    
+    if "chunk_size" in config and not isinstance(config["chunk_size"], int):
+        errors.append("chunk_size must be integer")
+    
+    if "chroma_persist_dir" in config and not isinstance(config["chroma_persist_dir"], str):
+        errors.append("chroma_persist_dir must be string")
+    
+    # Check LangSmith config
+    if "langsmith" in config:
+        langsmith_config = config["langsmith"]
+        if not isinstance(langsmith_config, dict):
+            errors.append("langsmith config must be dictionary")
+        else:
+            if "project" in langsmith_config and not isinstance(langsmith_config["project"], str):
+                errors.append("langsmith.project must be string")
+    
+    if errors:
+        logger.error("Configuration validation errors:")
+        for error in errors:
+            logger.error(f"  - {error}")
+        return False
+    
+    logger.info("Configuration validation passed")
+    return True
+
+def safe_chroma_add(chunk, metadata, config):
+    """Safely add chunk to ChromaDB with error handling"""
+    try:
+        if not config.get("rag_enabled", False):
+            return None
+        
+        if not RAG_AVAILABLE:
+            logger.warning("RAG is enabled in config but ChromaDB is not available. Skipping RAG integration.")
+            return None
+        
+        chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
+        chunk_id = chroma_rag.add_chunk(chunk, metadata)
+        logger.debug(f"Added chunk to ChromaDB: {chunk_id}")
+        return chunk_id
+        
+    except ImportError as e:
+        logger.warning(f"ChromaDB not available: {e}")
+        logger.info("Continuing without RAG functionality")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to add chunk to ChromaDB: {e}")
+        return None
 
 # Resolve config path (supports PyInstaller .exe)
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -107,6 +207,7 @@ notifications = NotificationSystem()
 # Enhanced session statistics
 session_stats = {
     "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "session_start_time": time.time(),
     "files_processed": 0,
     "chunks_created": 0,
     "zero_byte_prevented": 0,
@@ -118,7 +219,8 @@ session_stats = {
     "performance_metrics": {
         "avg_processing_time": 0,
         "peak_memory_usage": 0,
-        "peak_cpu_usage": 0
+        "peak_cpu_usage": 0,
+        "files_per_minute": 0
     }
 }
 
@@ -296,6 +398,46 @@ def validate_chunk_content_enhanced(chunk, min_length=50, department_config=None
     
     return True
 
+def process_file_with_celery(file_path: Path, config: dict) -> bool:
+    """
+    Process file using Celery task queue with fallback to direct processing.
+    
+    Args:
+        file_path: Path to the file to process
+        config: Configuration dictionary
+        
+    Returns:
+        True if processing was successful, False otherwise
+    """
+    try:
+        if CELERY_AVAILABLE and config.get("celery_enabled", True):
+            # Use Celery task chain for advanced processing
+            logger.info(f"Queuing file for Celery processing: {file_path}")
+            
+            task_id = process_file_with_celery_chain(
+                str(file_path),
+                None,  # dest_path
+                "watcher",  # event_type
+                config
+            )
+            
+            logger.info(f"File queued for Celery processing: {file_path} (task_id: {task_id})")
+            
+            # For immediate feedback, we'll return True and let Celery handle the rest
+            # The actual processing will be handled by Celery workers
+            return True
+            
+        else:
+            # Fallback to direct processing
+            logger.info(f"Using direct processing (Celery not available): {file_path}")
+            return process_file_enhanced(file_path, config)
+            
+    except Exception as e:
+        logger.error(f"Error in Celery processing: {e}")
+        # Fallback to direct processing
+        logger.info(f"Falling back to direct processing: {file_path}")
+        return process_file_enhanced(file_path, config)
+
 def process_file_enhanced(file_path, config):
     """Enhanced file processing with comprehensive tracking"""
     start_time = time.time()
@@ -318,13 +460,31 @@ def process_file_enhanced(file_path, config):
                     logger.warning(f"Failed to log stability error to database: {db_error}")
             return False
 
-        # Read file with multiple attempts
+        # Read file with multiple attempts using appropriate processor
         text = None
         original_size = 0
+        file_type = file_path.suffix.lower()
+        
         for attempt in range(3):
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read()
+                # Read file content first
+                if file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log", ".py"]:
+                    with open(file_path, "r", encoding="utf-8", errors='replace') as f:
+                        text = f.read()
+                elif file_type in [".xlsx", ".pdf", ".docx"]:
+                    # Binary files - use processors directly
+                    processor = get_file_processor(file_type)
+                    text = processor(file_path)
+                else:
+                    # Default to text reading
+                    with open(file_path, "r", encoding="utf-8", errors='replace') as f:
+                        text = f.read()
+                
+                # Process text content if needed
+                if text and file_type in [".py", ".yaml", ".xml", ".log", ".sql"]:
+                    processor = get_file_processor(file_type)
+                    text = processor(text)
+                
                 original_size = len(text.encode('utf-8'))
                 break
             except Exception as e:
@@ -340,6 +500,17 @@ def process_file_enhanced(file_path, config):
                     db.log_error("FileReadError", error_msg, filename=str(file_path))
                 except Exception as db_error:
                     logger.warning(f"Failed to log read error to database: {db_error}")
+            
+            # Move unreadable file to archive to prevent processing loop
+            try:
+                archive_dir = Path(config.get("archive_dir", "processed")) / "failed"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = archive_dir / file_path.name
+                shutil.move(str(file_path), str(archive_path))
+                logger.info(f"Moved unreadable file to archive: {archive_path}")
+            except Exception as move_error:
+                logger.error(f"Failed to move unreadable file to archive: {move_error}")
+            
             return False
 
         # Validate input text
@@ -353,6 +524,17 @@ def process_file_enhanced(file_path, config):
                                     time.time() - start_time, False, error_msg, department)
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
+            
+            # Move too-short file to archive to prevent processing loop
+            try:
+                archive_dir = Path(config.get("archive_dir", "processed")) / "skipped"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = archive_dir / file_path.name
+                shutil.move(str(file_path), str(archive_path))
+                logger.info(f"Moved too-short file to archive: {archive_path}")
+            except Exception as move_error:
+                logger.error(f"Failed to move too-short file to archive: {move_error}")
+            
             return False
 
         # Chunk the text
@@ -368,6 +550,17 @@ def process_file_enhanced(file_path, config):
                                     time.time() - start_time, False, error_msg, department)
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
+            
+            # Move file with no valid chunks to archive to prevent processing loop
+            try:
+                archive_dir = Path(config.get("archive_dir", "processed")) / "no_chunks"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = archive_dir / file_path.name
+                shutil.move(str(file_path), str(archive_path))
+                logger.info(f"Moved file with no valid chunks to archive: {archive_path}")
+            except Exception as move_error:
+                logger.error(f"Failed to move file with no valid chunks to archive: {move_error}")
+            
             return False
 
         # Prepare output with organized folder structure
@@ -473,7 +666,59 @@ def process_file_enhanced(file_path, config):
                                     time.time() - start_time, False, error_msg, department)
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
+            
+            # Move file with no valid chunks to archive to prevent processing loop
+            try:
+                archive_dir = Path(config.get("archive_dir", "processed")) / "no_chunks"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = archive_dir / file_path.name
+                shutil.move(str(file_path), str(archive_path))
+                logger.info(f"Moved file with no valid chunks to archive: {archive_path}")
+            except Exception as move_error:
+                logger.error(f"Failed to move file with no valid chunks to archive: {move_error}")
+            
             return False
+
+        # RAG Integration - Add chunks to ChromaDB vector database
+        if config.get("rag_enabled", False):
+            try:
+                logger.info(f"Adding {len(chunks)} chunks to ChromaDB for {file_path.name}")
+                
+                chunks_added = 0
+                for i, chunk in enumerate(chunks):
+                    # Apply security redaction if enabled
+                    if department_config.get("enable_redaction", False):
+                        chunk = redact_sensitive_data(chunk)
+                    
+                    metadata = {
+                        "file_name": file_path.name,
+                        "file_type": file_path.suffix,
+                        "chunk_index": i + 1,
+                        "timestamp": datetime.now().isoformat(),
+                        "department": department,
+                        "keywords": extract_keywords(chunk) if extract_keywords else [],
+                        "file_size": file_path.stat().st_size,
+                        "processing_time": time.time() - start_time
+                    }
+                    
+                    chunk_id = safe_chroma_add(chunk, metadata, config)
+                    if chunk_id:
+                        chunks_added += 1
+                        logger.debug(f"Added chunk {i+1} to ChromaDB: {chunk_id}")
+                
+                if chunks_added > 0:
+                    logger.info(f"Successfully added {chunks_added}/{len(chunks)} chunks to ChromaDB")
+                else:
+                    logger.warning("No chunks were added to ChromaDB")
+                
+            except Exception as e:
+                logger.error(f"RAG integration failed: {e}")
+                # Don't fail the entire process if RAG fails
+                if db:
+                    try:
+                        db.log_error("RAGError", str(e), traceback.format_exc(), str(file_path))
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log RAG error to database: {db_error}")
 
         # Cloud copy with retry
         cloud_success = False
@@ -487,12 +732,51 @@ def process_file_enhanced(file_path, config):
                 logger.warning(f"Cloud sync attempt {attempt+1} failed for {file_path.name}")
                 time.sleep(2)
 
+        # Copy processed files back to source folder
+        source_copy_success = False
+        if config.get("copy_to_source", False) and chunk_files:
+            source_folder = Path(config.get("source_folder", "source"))
+            try:
+                # Create source folder if it doesn't exist
+                source_folder.mkdir(parents=True, exist_ok=True)
+                
+                files_copied = 0
+                
+                # Copy chunks if enabled
+                if config.get("copy_chunks_only", True):
+                    for chunk_file in chunk_files:
+                        dest_file = source_folder / chunk_file.name
+                        shutil.copy2(chunk_file, dest_file)
+                        files_copied += 1
+                        logger.info(f"Copied chunk to source: {dest_file.name}")
+                
+                # Copy transcript if enabled
+                if config.get("copy_transcript_only", False) and 'transcript_file' in locals():
+                    dest_transcript = source_folder / transcript_file.name
+                    shutil.copy2(transcript_file, dest_transcript)
+                    files_copied += 1
+                    logger.info(f"Copied transcript to source: {dest_transcript.name}")
+                
+                if files_copied > 0:
+                    source_copy_success = True
+                    logger.info(f"Successfully copied {files_copied} files to source folder: {source_folder}")
+                else:
+                    logger.warning("No files were copied to source folder")
+                    
+            except Exception as e:
+                logger.error(f"Failed to copy files to source folder: {e}")
+                if db:
+                    try:
+                        db.log_error("SourceCopyError", str(e), traceback.format_exc(), str(file_path))
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log source copy error to database: {db_error}")
+
         # Move to processed
         move_success = move_to_processed_enhanced(file_path, config.get("archive_dir", "processed"), department)
         
         processing_time = time.time() - start_time
         
-        # Update performance metrics
+        # Update performance metrics with enhanced tracking
         if session_stats["files_processed"] > 0:
             current_avg = session_stats["performance_metrics"]["avg_processing_time"]
             session_stats["performance_metrics"]["avg_processing_time"] = (
@@ -502,11 +786,52 @@ def process_file_enhanced(file_path, config):
         else:
             session_stats["performance_metrics"]["avg_processing_time"] = processing_time
         
+        # Track processing speed
+        if not hasattr(session_stats["performance_metrics"], "files_per_minute"):
+            session_stats["performance_metrics"]["files_per_minute"] = 0
+        
+        # Calculate files per minute
+        elapsed_time = time.time() - session_stats.get("session_start_time", time.time())
+        if elapsed_time > 0:
+            session_stats["performance_metrics"]["files_per_minute"] = (
+                session_stats["files_processed"] * 60 / elapsed_time
+            )
+        
         if move_success:
             session_stats["files_processed"] += 1
             logger.info(f"File processing complete: {file_path.name} -> {valid_chunks} chunks ({processing_time:.2f}s)")
             
-            # Log to database with retry
+        # Batch database operations to reduce locking
+        if db and config.get("database_batch_size", 10) > 1:
+            # Store processing data for batch logging
+            if not hasattr(session_stats, 'pending_db_operations'):
+                session_stats['pending_db_operations'] = []
+            
+            session_stats['pending_db_operations'].append({
+                'file_path': str(file_path),
+                'original_size': original_size,
+                'valid_chunks': valid_chunks,
+                'total_chunk_size': total_chunk_size,
+                'processing_time': processing_time,
+                'success': move_success,
+                'department': department
+            })
+            
+            # Process batch when it reaches the limit
+            if len(session_stats['pending_db_operations']) >= config.get("database_batch_size", 10):
+                try:
+                    for op in session_stats['pending_db_operations']:
+                        db.log_processing(op['file_path'], op['original_size'], 
+                                        op['valid_chunks'], op['total_chunk_size'],
+                                        op['processing_time'], op['success'], 
+                                        None, op['department'], department_config)
+                    session_stats['pending_db_operations'] = []
+                    logger.debug(f"Batch logged {config.get('database_batch_size', 10)} operations to database")
+                except Exception as db_error:
+                    logger.warning(f"Failed to batch log to database: {db_error}")
+                    session_stats['pending_db_operations'] = []
+        else:
+            # Individual database logging (fallback)
             if db:
                 try:
                     db.log_processing(str(file_path), original_size, valid_chunks, total_chunk_size,
@@ -542,43 +867,62 @@ def process_file_enhanced(file_path, config):
         return False
 
 def process_files_parallel(file_list, config):
-    """Process multiple files in parallel"""
+    """Process multiple files in parallel with optimized settings"""
     if not file_list:
         return []
     
-    max_workers = min(4, multiprocessing.cpu_count(), len(file_list))
-    logger.info(f"Processing {len(file_list)} files with {max_workers} workers")
+    # Use more workers for large batches, fewer for small batches
+    batch_size = config.get("batch_size", 50)
+    if len(file_list) >= batch_size:
+        max_workers = min(12, multiprocessing.cpu_count() * 2, len(file_list))
+    else:
+        max_workers = min(8, multiprocessing.cpu_count(), len(file_list))
+    
+    logger.info(f"Processing {len(file_list)} files with {max_workers} workers (batch size: {batch_size})")
     
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all jobs
-        future_to_file = {
-            executor.submit(process_file_enhanced, file_path, config): file_path 
-            for file_path in file_list
-        }
+        # Submit all jobs (use Celery if available, otherwise direct processing)
+        if CELERY_AVAILABLE and config.get("celery_enabled", True):
+            # Use Celery for processing
+            logger.info(f"Using Celery for processing {len(file_list)} files")
+            for file_path in file_list:
+                try:
+                    success = process_file_with_celery(file_path, config)
+                    results.append(success)
+                    session_stats["parallel_jobs_completed"] += 1
+                except Exception as e:
+                    logger.error(f"Celery processing failed for {file_path}: {e}")
+                    results.append(False)
+        else:
+            # Use direct processing with ThreadPoolExecutor
+            future_to_file = {
+                executor.submit(process_file_enhanced, file_path, config): file_path 
+                for file_path in file_list
+            }
         
-        # Collect results with timeout
-        for future in future_to_file:
-            try:
-                result = future.result(timeout=300)  # 5 minute timeout per file
-                results.append(result)
-                session_stats["parallel_jobs_completed"] += 1
-            except Exception as e:
-                file_path = future_to_file[future]
-                logger.error(f"Parallel processing failed for {file_path}: {e}")
-                if db:
-                    try:
-                        db.log_error("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path))
-                    except Exception as db_error:
-                        logger.warning(f"Failed to log parallel processing error to database: {db_error}")
-                results.append(False)
+            # Collect results with timeout (only for direct processing)
+            for future in future_to_file:
+                try:
+                    result = future.result(timeout=300)  # 5 minute timeout per file
+                    results.append(result)
+                    session_stats["parallel_jobs_completed"] += 1
+                except Exception as e:
+                    file_path = future_to_file[future]
+                    logger.error(f"Parallel processing failed for {file_path}: {e}")
+                    if db:
+                        try:
+                            db.log_error("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path))
+                        except Exception as db_error:
+                            logger.warning(f"Failed to log parallel processing error to database: {db_error}")
+                    results.append(False)
     
     successful = sum(1 for r in results if r)
     logger.info(f"Parallel processing complete: {successful}/{len(file_list)} files successful")
     return results
 
-def wait_for_file_stability(file_path, min_wait=2, max_wait=30):
-    """Enhanced file stability check"""
+def wait_for_file_stability(file_path, min_wait=1, max_wait=15):
+    """Enhanced file stability check with faster processing"""
     file_size = 0
     stable_count = 0
     wait_time = 0
@@ -586,14 +930,14 @@ def wait_for_file_stability(file_path, min_wait=2, max_wait=30):
     try:
         initial_size = os.path.getsize(file_path)
         if initial_size < 1000:
-            target_stable = 2
-            check_interval = 0.5
+            target_stable = 1  # Reduced from 2
+            check_interval = 0.3  # Reduced from 0.5
         else:
-            target_stable = 3
-            check_interval = 1
+            target_stable = 2  # Reduced from 3
+            check_interval = 0.5  # Reduced from 1
     except:
-        target_stable = 2
-        check_interval = 1
+        target_stable = 1  # Reduced from 2
+        check_interval = 0.5  # Reduced from 1
     
     while wait_time < max_wait:
         try:
@@ -698,13 +1042,31 @@ def log_session_stats():
         elif key == "performance_metrics":
             logger.info("Performance Metrics:")
             for metric, val in value.items():
-                logger.info(f"  {metric}: {val}")
+                if metric == "files_per_minute":
+                    logger.info(f"  {metric}: {val:.1f}")
+                elif metric == "avg_processing_time":
+                    logger.info(f"  {metric}: {val:.2f}s")
+                else:
+                    logger.info(f"  {metric}: {val}")
         else:
             logger.info(f"{key}: {value}")
 
 def main():
     """Enhanced main loop with enterprise features"""
     watch_folder = CONFIG.get("watch_folder", "C:/Users/carucci_r/Documents/chunker")
+    
+    # Validate configuration
+    if not validate_config(CONFIG):
+        logger.error("Configuration validation failed. Exiting.")
+        return
+    
+    # Check processor dependencies
+    processor_deps = check_processor_dependencies()
+    missing_deps = [dep for dep, available in processor_deps.items() if not available]
+    if missing_deps:
+        logger.warning(f"Missing file processor dependencies: {', '.join(missing_deps)}")
+        logger.info("Some file types may not be processed correctly")
+    
     os.makedirs(CONFIG.get("output_dir", "output"), exist_ok=True)
     os.makedirs(CONFIG.get("archive_dir", "processed"), exist_ok=True)
 
@@ -722,6 +1084,7 @@ def main():
     logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
     logger.info(f"Database tracking: Enabled")
     logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG enabled: {CONFIG.get('rag_enabled', False)}")
     
     processed_files = set()
     loop_count = 0
@@ -790,7 +1153,21 @@ def main():
                     
                     # Process files in parallel if multiple files
                     if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
-                        results = process_files_parallel(new_files, CONFIG)
+                        # For large batches, process in chunks to avoid memory issues
+                        batch_size = CONFIG.get("batch_size", 50)
+                        if len(new_files) > batch_size:
+                            logger.info(f"Processing {len(new_files)} files in batches of {batch_size}")
+                            all_results = []
+                            for i in range(0, len(new_files), batch_size):
+                                batch = new_files[i:i + batch_size]
+                                logger.info(f"Processing batch {i//batch_size + 1}: {len(batch)} files")
+                                batch_results = process_files_parallel(batch, CONFIG)
+                                all_results.extend(batch_results)
+                                # Small delay between batches to prevent system overload
+                                time.sleep(0.5)
+                            results = all_results
+                        else:
+                            results = process_files_parallel(new_files, CONFIG)
                         for i, result in enumerate(results):
                             if result:
                                 processed_files.add(new_files[i].name)

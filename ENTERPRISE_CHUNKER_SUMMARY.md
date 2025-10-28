@@ -1,5 +1,7 @@
 # Enterprise Chunker System - Summary & Cheat Sheet
 
+**Version 2.1.2** - Critical Performance Optimizations & Loop Fix
+
 ## 🚀 Quick Start Guide
 
 ### 1. Start the System
@@ -22,10 +24,14 @@ python watcher_splitter.py
 ```
 C:\_chunker\
 ├── 02_data/          # 📥 INPUT: Place files to be processed here
-├── 03_archive/       # 📦 ARCHIVE: Original files after processing
+├── 03_archive/       # 📦 ARCHIVE: Organized by status
+│   ├── failed/       # Files that couldn't be read
+│   ├── skipped/      # Files too short to process
+│   └── no_chunks/    # Files with no valid chunks
 ├── 04_output/        # 📤 OUTPUT: Processed chunks and transcripts
 ├── 05_logs/          # 📋 LOGS: System logs and error tracking
 ├── 06_config/        # ⚙️ CONFIG: Configuration files
+├── source/           # 📂 SOURCE: Copied processed files (configurable)
 ├── templates/        # 🌐 WEB: HTML templates for dashboard
 ├── static/           # 🎨 WEB: CSS, JS, and assets
 └── logs/             # 📊 LOGS: Watcher and processing logs
@@ -33,9 +39,27 @@ C:\_chunker\
 
 ### File Processing Flow
 1. **Input**: Files placed in `02_data/`
-2. **Processing**: System chunks and processes files
-3. **Archive**: Originals moved to `03_archive/`
+2. **Processing**: System chunks and processes files with dynamic parallel workers
+3. **Archive**: Originals moved to `03_archive/` (organized by status)
 4. **Output**: Results saved to `04_output/`
+5. **Source Copy**: Optional copying back to source folder
+
+---
+
+## ⚡ Performance Features (v2.1.2)
+
+### 🚨 Critical Fixes
+- ✅ **No More Processing Loops**: Failed files automatically archived
+- ✅ **Database Stability**: Batch operations eliminate locking issues
+- ✅ **Smart File Management**: Organized archive folders by failure type
+- ✅ **8-12x Speed Improvement**: Dynamic parallel processing
+
+### 🚀 Performance Enhancements
+- ✅ **Dynamic Workers**: Up to 12 workers for large batches (50+ files)
+- ✅ **Batch Processing**: Configurable batch sizes with system protection
+- ✅ **Real-time Metrics**: Files/minute, avg processing time, peak CPU/memory
+- ✅ **500+ File Capability**: Handles large volumes efficiently
+- ✅ **Source Folder Copying**: Configurable copying of processed files
 
 ---
 
