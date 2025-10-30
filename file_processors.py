@@ -38,6 +38,92 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def extract_python_blocks(text: str) -> List[Dict[str, Any]]:
+    """
+    Extract classes and functions with spans, signatures, and docstrings from Python source.
+    Returns a list of blocks suitable for JSON sidecar metadata.
+    """
+    blocks: List[Dict[str, Any]] = []
+    try:
+        # Compute line offsets to derive end_line by node body ranges
+        lines = text.splitlines()
+        tree = ast.parse(text)
+
+        def get_signature_for_function(node: ast.FunctionDef) -> str:
+            try:
+                args = [a.arg for a in node.args.args]
+                return f"def {node.name}({', '.join(args)}):"
+            except Exception:
+                return f"def {node.name}(…):"
+
+        def get_signature_for_class(node: ast.ClassDef) -> str:
+            try:
+                bases = [getattr(b, 'id', None) or getattr(b, 'attr', None) or ast.unparse(b) for b in node.bases]
+            except Exception:
+                bases = []
+            base_str = f"({', '.join(bases)})" if bases else ""
+            return f"class {node.name}{base_str}"
+
+        def node_end_line(node: ast.AST) -> int:
+            # Best-effort: prefer end_lineno (3.8+); fallback to last child
+            end = getattr(node, 'end_lineno', None)
+            if isinstance(end, int):
+                return end
+            last = None
+            for child in ast.walk(node):
+                ln = getattr(child, 'lineno', None)
+                if isinstance(ln, int):
+                    last = max(last or ln, ln)
+            return last or getattr(node, 'lineno', 1)
+
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                start = getattr(node, 'lineno', 1)
+                end = node_end_line(node)
+                doc = ast.get_docstring(node)
+                blocks.append({
+                    "type": "class",
+                    "name": node.name,
+                    "signature": get_signature_for_class(node),
+                    "start_line": start,
+                    "end_line": end,
+                    "docstring": doc or None,
+                    "summary": None,
+                })
+                # Include methods as separate blocks for finer navigation
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        start_f = getattr(item, 'lineno', start)
+                        end_f = node_end_line(item)
+                        doc_f = ast.get_docstring(item)
+                        blocks.append({
+                            "type": "function",
+                            "name": f"{node.name}.{item.name}",
+                            "signature": get_signature_for_function(item),
+                            "start_line": start_f,
+                            "end_line": end_f,
+                            "docstring": doc_f or None,
+                            "summary": None,
+                        })
+            elif isinstance(node, ast.FunctionDef):
+                start = getattr(node, 'lineno', 1)
+                end = node_end_line(node)
+                doc = ast.get_docstring(node)
+                blocks.append({
+                    "type": "function",
+                    "name": node.name,
+                    "signature": get_signature_for_function(node),
+                    "start_line": start,
+                    "end_line": end,
+                    "docstring": doc or None,
+                    "summary": None,
+                })
+        return blocks
+    except Exception as e:
+        logger.error(f"Failed to extract python blocks: {e}")
+        return []
+
+
 def process_python_file(text: str) -> str:
     """
     Extract detailed code structure from Python text content with descriptive blocks

@@ -48,7 +48,7 @@ except ImportError as e:
     CELERY_AVAILABLE = False
     process_file_with_celery_chain = None
     celery_app = None
-from file_processors import get_file_processor, check_processor_dependencies, redact_sensitive_data
+from file_processors import get_file_processor, check_processor_dependencies, redact_sensitive_data, extract_python_blocks
 
 # Graceful RAG imports with error handling
 try:
@@ -645,6 +645,54 @@ def process_file_enhanced(file_path, config):
                 logger.info(f"Final transcript created: {transcript_file.name}")
             except Exception as e:
                 logger.error(f"Failed to create final transcript for {file_path.name}: {e}")
+
+        # Emit JSON sidecar and optional block summary for Python files
+        try:
+            if CONFIG.get("enable_json_sidecar", True):
+                sidecar = {
+                    "file": str(file_path),
+                    "processed_at": datetime.now().isoformat(),
+                    "department": department,
+                    "type": file_type,
+                    "output_folder": str(file_output_folder),
+                    "transcript": str(transcript_file) if 'transcript_file' in locals() else None,
+                    "chunks": [
+                        {
+                            "filename": cf.name,
+                            "path": str(cf),
+                            "size": (os.path.getsize(cf) if os.path.exists(cf) else None),
+                            "index": i + 1,
+                        } for i, cf in enumerate(chunk_files)
+                    ],
+                }
+                # For Python files, include code blocks extracted via AST
+                if file_type == ".py":
+                    blocks = extract_python_blocks(text or "")
+                    sidecar["code_blocks"] = blocks
+
+                sidecar_path = file_output_folder / f"{timestamp}_{clean_base}_blocks.json"
+                with open(sidecar_path, "w", encoding="utf-8") as jf:
+                    json.dump(sidecar, jf, indent=2)
+                logger.info(f"Sidecar JSON written: {sidecar_path.name}")
+
+            # Append Code Blocks Summary to transcript for Python files if enabled
+            if CONFIG.get("enable_block_summary", True) and file_type == ".py" and 'transcript_file' in locals():
+                blocks = extract_python_blocks(text or "")
+                if blocks:
+                    try:
+                        with open(transcript_file, "a", encoding="utf-8") as tf:
+                            tf.write("\n\n## Code Blocks Summary\n")
+                            for b in blocks:
+                                label = "Class" if b.get("type") == "class" else "Function"
+                                tf.write(f"- {label}: {b.get('name')} (lines {b.get('start_line')}–{b.get('end_line')})\n")
+                                tf.write(f"  - Signature: {b.get('signature')}\n")
+                                doc = b.get('docstring')
+                                if doc:
+                                    tf.write(f"  - Docstring: {doc.splitlines()[0][:160]}\n")
+                    except Exception as e:
+                        logger.warning(f"Failed to append block summary: {e}")
+        except Exception as e:
+            logger.warning(f"Sidecar/summary step failed: {e}")
 
         session_stats["chunks_created"] += valid_chunks
         session_stats["total_bytes_created"] += total_chunk_size

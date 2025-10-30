@@ -28,6 +28,12 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 ### 🧩 File Type Support
 - Added support for `.xlsm` (Excel macro-enabled) files via openpyxl
 
+### 🧾 Sidecar & Code Block Summaries
+- Added optional JSON sidecar per processed file (enabled by default)
+- For Python files, extract class/function blocks with spans and signatures
+- Optional transcript appendix “Code Blocks Summary” for .py files (enabled by default)
+- New config flags: `enable_json_sidecar`, `enable_block_summary`, `enable_grok`
+
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

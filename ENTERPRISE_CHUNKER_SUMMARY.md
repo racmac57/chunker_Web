@@ -47,6 +47,13 @@ C:\_chunker\
 - Historical outputs migrated to `04_output\<Project>_<timestamp>`.
 - Timestamp‑prefixed script backups: `C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\backup_scripts\<Project>\`.
 
+### JSON Sidecar Feature
+- Enabled by default via `enable_json_sidecar` in `config.json`.
+- For every processed file, a sidecar `<timestamp>_<base>_blocks.json` is written in the output folder containing:
+  - file metadata, transcript path, chunk list
+  - for Python files: `code_blocks` with class/function spans and signatures
+- If `enable_block_summary` is true, Python transcripts append a “Code Blocks Summary” section.
+
 ### File Processing Flow
 1. **Input**: Files placed in `02_data/`
 2. **Processing**: System chunks and processes files with dynamic parallel workers

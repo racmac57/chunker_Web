@@ -149,8 +149,18 @@ For high-volume processing and advanced task management:
 - [x] **Performance Monitoring** - System metrics and performance tracking
 - [x] **Security Redaction** - PII masking in metadata
 - [x] **Modular Architecture** - Clean separation of concerns
+- [x] **JSON Sidecar (optional)** - Per-file sidecar with chunk list, metadata, and Python code blocks
 
 ## 🔄 Consolidation (2025-10-29)
+- New sidecar flags (config.json):
+  - `enable_json_sidecar` (default: true)
+  - `enable_block_summary` (default: true)
+  - `enable_grok` (default: false)
+
+Sidecar schema (high-level):
+- `file`, `processed_at`, `department`, `type`, `output_folder`, `transcript`
+- `chunks[]`: filename, path, size, index
+- `code_blocks[]` (for .py): type, name, signature, start_line, end_line, docstring
 
 - Older project iterations (e.g., ClaudeExportFixer, chat_log_chunker_v1, chat_watcher) were unified under `C:\_chunker`.
 - Historical outputs migrated to `C:\_chunker\04_output\<ProjectName>_<timestamp>`.
