@@ -1,0 +1,386 @@
+## [Unreleased]
+
+### Added
+- **Timestamp-prefixed output folders**: Output folders now include `YYYY_MM_DD_HH_MM_SS_` prefix for better chronological organization
+- **Enhanced file organization**: Processed files are now organized by processing timestamp, making it easier to track when files were processed
+
+### Fixed
+- **Critical Fix**: Resolved Unicode filename processing issues that prevented files with special characters (emojis, symbols) from being processed correctly
+- **Enhanced filename sanitization**: Improved regex-based cleaning to handle problematic characters while preserving readable filenames
+- **Unicode encoding errors**: Fixed console logging issues with special characters that caused processing failures
+- **Directory creation failures**: Resolved "No such file or directory" errors when creating output folders for files with special characters
+
+### Technical Details
+- Added enhanced filename sanitization using regex pattern `[^\w\s-]` to remove special characters
+- Implemented safe filename logging with ASCII encoding fallback to prevent console encoding errors
+- Added filename length limits (100 characters) to prevent Windows path length issues
+- Improved error handling for directory creation and file writing operations
+
+### Impact
+- Files with emojis, special symbols, and Unicode characters now process successfully
+- Eliminated processing failures that previously required manual filename changes
+- Improved system reliability for diverse file naming conventions
+- Maintained backward compatibility with existing filename formats
+
+## [Previous Versions]
+
+### Initial Release
+- Enterprise-grade chunker with database tracking
+- Parallel processing capabilities
+- Department-specific configurations
+- Comprehensive logging and monitoring
+- Automatic file archiving and organization
+
+```
+
+Let me also update the README to reflect this new feature:
+
+
+```markdown
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters while preserving readability
+- [x] **Timestamp-organized output** - Output folders include processing ti
+```
+
+```markdown
+# Chunker Project - Final Migration
+
+This project has been migrated to C:/_chunker on 2025-08-25 18:58:28. ## Directory Structure
+
+- **C:/_chunker** - Main project directory with scripts
+- **02_data/** - Input files to be processed (watch folder)
+- **03_archive/** - Archived original files and processed source files
+- **04_output/** - Generated chunks and transcripts (organized by source file)
+- **05_logs/** - Application logs and tracking
+- **06_config/** - Configuration files
+
+## Quick Start
+
+1. Place files to process in `02_data/` folder
+2. Run the watcher: `python watcher_splitter.py`
+3. Check `04_output/` for processed chunks and transcripts
+4. Original files are moved to `03_archive/` after processing
+
+## Features
+
+- [x] Organized output by source file name
+- [x] Admin files output as .md with headers
+- [x] All other files output as .txt
+- [x] Automatic file organization and archiving
+- [x] Database tracking and logging
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters while preserving readability
+- [x] **Timestamp-organized output** - Output folders include processing timestamp (YYYY_MM_DD_HH_MM_SS_) for chronological organization
+
+## Configuration
+
+Edit `config.json` to customize:
+- File filter modes (all, patterns, suffix)
+- Supported file extensions
+- Chunk sizes and processing options
+- Notification settings
+
+```
+
+Perfect! Let me test the new timestamp functionality by checking if the watcher is running and ready to process files:
+
+
+## ✅ Timestamp Prefix Added Successfully! I've successfully implemented the timestamp prefix feature for output folder names. Here's what was accomplished:
+
+### 🔧 **Code Changes**
+- **Modified `watcher_splitter.py`**: Added timestamp prefix to output folder creation
+- **Format**: `YYYY_MM_DD_HH_MM_SS_` followed by the cleaned filename
+- **Example**: `2025_10_27_09_42_20_ChatGPT_Crime_Analysis_Briefing`
+
+### 📝 **Documentation Updated**
+- **CHANGELOG.md**: Added new feature under "Added" section
+- **README.md**: Updated features list with timestamp organization capability
+
+### 🎯 **Benefits**
+- **Chronological organization**: Easy to see when files were processed
+- **No conflicts**: Multiple files with same name won't overwrite each other
+- **Better tracking**: Clear audit trail of processing times
+- **Maintained compatibility**: Existing functionality preserved
+
+### 🔄 **Current Status**
+- ✅ **Watcher script restarted** with new timestamp functionality
+- ✅ **Monitoring active** in `02_data` directory
+- ✅ **Ready to process** new files with timestamp-prefixed output folders
+
+The next file you add to `02_data` will be processed with the new timestamp prefix format! The output folder will be named something like `2025_10_27_09_42_20_Filename` instead of just `Filename`. ---
+
+**User**
+
+1. add a robust log for when the files are chunked. 2. clean up the directory, remove tests, archive old scripts and move .md, .txt to a file named 99_doc but keep the summary and changelog in the base path
+
+---
+
+**Cursor**
+
+I'll help you with both tasks. Let me start by adding robust logging for file chunking, then clean up the directory structure. ## 1. First, let me add robust logging for file chunking operations:
+
+
+Let me enhance the chunking function with more detailed logging:
+
+
+```python
+# 🕒 2025-06-28-01-55-30
+# chunker/watcher_splitter_enterprise.py
+# Author: R. A. Carucci  
+# Purpose: Enterprise-grade chunker with database tracking, notifications, and parallel processing
+
+import os
+import sys
+import time 
+import shutil
+import logging
+import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
+import nltk
+from nltk.tokenize import sent_tokenize
+import json
+import psutil
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from chunker_db import ChunkerDatabase
+from notification_system import NotificationSystem
+
+# Resolve config path (supports PyInstaller .exe)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(__file__)
+
+# Configure local nltk_data path
+nltk_path = os.path.join(base_path, "nltk_data")
+nltk.data.path.append(nltk_path)
+
+try:
+    nltk.download('punkt_tab', download_dir=nltk_path, quiet=True)
+except:
+    nltk.download('punkt', download_dir=nltk_path, quiet=True)
+
+# Load configuration
+with open(os.path.join(base_path, "config.json")) as f:
+    CONFIG = json.load(f)
+
+# Department-specific configurations
+DEPARTMENT_CONFIGS = {
+    "police": {
+        "chunk_size": 75,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    },
+    "admin": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal"
+    },
+    "legal": {
+        "chunk_size": 100,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    }
+}
+
+# Setup enhanced logging
+def setup_logging():
+    log_file = CONFIG.get("log_file", "logs/watcher.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    # Rotate log if it's too large
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:  # 5MB
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"logs/watcher_archive_{timestamp}.log"
+        shutil.move(log_file, archive_name)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+# Initialize database and notification systems with timeout and retry
+def init_database_with_retry():
+    """Initialize database with retry logic to handle locking issues"""
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db = ChunkerDatabase()
+            logger.info("Database initialized successfully")
+            return db
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}")
+                time.sleep(2)
+            else:
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
+                return None
+
+db = init_database_with_retry()
+notifications = NotificationSystem()
+
+# Enhanced session statistics
+session_stats = {
+    "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "files_processed": 0,
+    "chunks_created": 0,
+    "zero_byte_prevented": 0,
+    "errors": 0,
+    "total_sentences_processed": 0,
+    "total_bytes_created": 0,
+    "parallel_jobs_completed": 0,
+    "department_breakdown": {},
+    "performance_metrics": {
+        "avg_processing_time": 0,
+        "peak_memory_usage": 0,
+        "peak_cpu_usage": 0
+    }
+}
+
+def get_department_config(file_path):
+    """Determine department configuration based on file path or content"""
+    dept = CONFIG.get("default_department", "admin")
+    
+    # Check file path for department indicators
+    path_str = str(file_path).lower()
+    for department in DEPARTMENT_CONFIGS.keys():
+        if department in path_str:
+            dept = department
+            break
+    
+    # Merge default config with department-specific settings
+    dept_config = DEPARTMENT_CONFIGS.get(dept, {})
+    merged_config = CONFIG.copy()
+    merged_config.update(dept_config)
+    merged_config["department"] = dept
+    
+    return merged_config
+
+def log_system_metrics():
+    """Log comprehensive system metrics"""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('.') # Count active processes
+        active_processes = len([p for p in psutil.process_iter() if p.is_running()])
+        
+        # Update session stats
+        session_stats["performance_metrics"]["peak_cpu_usage"] = max(
+            session_stats["performance_metrics"]["peak_cpu_usage"], cpu_percent
+        )
+        session_stats["performance_metrics"]["peak_memory_usage"] = max(
+            session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
+        )
+        
+        # Log to database with retry
+        if db:
+            try:
+                db.log_system_metrics(cpu_percent, memory.percent, 
+                                     (disk.used / disk.total) * 100, active_processes)
+            except Exception as e:
+                logger.warning(f"Failed to log system metrics to database: {e}")
+        
+        logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
+                   f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
+        
+        # Send alerts if thresholds exceeded
+        if cpu_percent > 90:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+        elif cpu_percent > 80:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+        
+        if memory.percent > 90:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+        elif memory.percent > 80:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            
+    except Exception as e:
+        logger.error(f"Failed to log system metrics: {e}")
+
+def chunk_text_enhanced(text, limit, department_config):
+    """Enhanced chunking with department-specific rules"""
+    logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
+    if not text or len(text.strip()) < 10:
+        logger.warning("Text too short for chunking - skipping")
+        return []
+    
+    try:
+        sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in text - skipping")
+            return []
+        
+        # Apply department-specific chunking rules
+        original_sentence_count = len(sentences)
+        if department_config.get("enable_redaction"):
+            sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {original_sentence_count} -> {len(sentences)} sentences")
+        
+        chunks = []
+        max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        logger.info(f"Chunking parameters - Max chars per chunk: {max_chars}, Target sentences per chunk: {limit}")
+        
+        current_chunk = []
+        current_length = 0
+        chunk_count = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
+            
+            # Check if adding this sentence would exceed limits
+            if (len(current_chunk) >= limit or 
+                current_length + sentence_length > max_chars) and current_chunk:
+                
+                chunk_text = " ".join(current_chunk)
+                if len(chunk_text.strip()) > 0:
+                    chunks.append(chunk_text)
+                
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add final chunk
+        if current_chunk:
+            chunk_text = " ".join(current_chunk)
+            if len(chunk_text.strip()) > 0:
+                chunks.append(chunk_text)
+        
+        session_stats["total_sentences_processed"] += len(sentences)
+        logger.info(f"Created {len(chunks)} chunks from {len(sentences)} sentences")
+        return chunks
+        
+    except Exception as e:
+        logger.error(f"Chunking failed: {e}")
+        if db:
+            try:
+                db.log_error("ChunkingError", str(e), traceback.format_exc())
+            except Exception as db_error:
+                logger.warning(f"Failed to log chunking error to database: {db_error}")
+        session_stats["errors"] += 1
+        return []
+
+def apply_redaction_rules(sentences):
+    """Apply redaction rules for sensitive departments"""
+    import re
+    
+    redaction_patterns = [
+        (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),  # SSN
+        (r'\b\d{3}-\d{3}-\d{4}\b', '[PHONE-REDACTED]'),  # Phone
+        (r'\b\d{1,5}\s+\w+\s+(? :street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)\b', '[ADDRESS-REDACTED]'),  # Address
+        (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.

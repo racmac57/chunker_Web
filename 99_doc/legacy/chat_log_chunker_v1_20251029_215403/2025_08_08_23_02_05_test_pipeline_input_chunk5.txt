@@ -1,0 +1,167 @@
+https://aka.ms/PSWindows
+
+PS C:\Users\carucci_r> cd C:\Users\carucci_r\Documents\chunker
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1 -MonitorOnly
+At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:32 char:64
++ ... te-Host "nðŸ“ Test file created: $testFile ($fileSize bytes)" -Fore ...
++                                                             ~~~~~
+Unexpected token 'bytes' in expression or statement. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:32 char:63
++ ...    Write-Host "nðŸ“ Test file created: $testFile ($fileSize bytes)" ...
++                                                                  ~
+Missing closing ')' in expression. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:19 char:23
++ function New-TestFile {
++                       ~
+Missing closing '}' in statement block or type definition. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:32 char:69
++ ... e-Host "nðŸ“ Test file created: $testFile ($fileSize bytes)" -Foreg ...
++                                                                 ~
+Unexpected token ')' in expression or statement. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:38 char:17
++ ... Write-Host "nðŸ“Š Monitoring logs... (Press Ctrl+C to stop)" -Foregr ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Unexpected token 'nðŸ“Š Monitoring logs... (Press Ctrl+C to stop)"' in expression or statement. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:52 char:1
++ }
++ ~
+Unexpected token '}' in expression or statement. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:63 char:65
++ ...     Write-Host "    ðŸ“„ $($file.Name) ($($file.Length) bytes)" -Fore ...
++                                                             ~~~~~
+Unexpected token 'bytes' in expression or statement. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:63 char:64
++ ...           Write-Host "    ðŸ“„ $($file.Name) ($($file.Length) bytes)" ...
++                                                                  ~
+Missing closing ')' in expression. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:55 char:23
++ function Test-Results {
++                       ~
+Missing closing '}' in statement block or type definition. At C:\Users\carucci_r\Documents\chunker\test_chunker.ps1:63 char:70
++ ...    Write-Host "    ðŸ“„ $($file.Name) ($($file.Length) bytes)" -Foreg ...
++                                                                 ~
+Unexpected token ')' in expression or statement. Not all parse errors were reported. Correct the reported errors and try again. + CategoryInfo          : ParserError: (:) [], ParseException
+    + FullyQualifiedErrorId : UnexpectedToken
+
+PS C:\Users\carucci_r\Documents\chunker>
+ChatGPT said:
+Thanks — this confirms that the script failed to parse due to:
+
+Emoji characters like 📋, 📝, 📄 (which sometimes get garbled in PowerShell or copy/paste),
+
+And improper parentheses around "($fileSize bytes)". ✅ Here's a Clean & Working Version of test_chunker.ps1
+Please replace your existing file with this exact version, which avoids emojis and syntax issues:
+
+param (
+    [switch]$MonitorOnly
+)
+
+$testFile = "test_full_conversation.txt"
+$testContent = @"
+This is a test conversation with multiple sentences. We need enough content to generate valid chunks. Chunking depends on this structure to split the file logically. Finally, this last sentence completes our test conversation file. "@
+
+if (-not $MonitorOnly) {
+    $testContent | Out-File -FilePath $testFile -Encoding UTF8
+    $fileSize = (Get-Item $testFile).Length
+    Write-Host "`nTest file created: $testFile ($fileSize bytes)"
+}
+
+# Monitor the log file
+Write-Host "`nMonitoring logs... (Press Ctrl+C to stop)"
+Get-Content "logs\watcher.log" -Wait -Tail 20
+▶️ How to Use It
+Save as test_chunker.ps1 in your chunker folder. Open PowerShell and run:
+
+cd C:\Users\carucci_r\Documents\chunker
+.\test_chunker.ps1
+Or if you just want to monitor logs (skip file creation):
+
+.\test_chunker.ps1 -MonitorOnly
+Let me know if you want it to also:
+
+Check output/, processed/, and cloud folders for chunk results
+
+Add timestamps or session summaries
+
+I can expand it easily for those. You said:
+how long does the test take
+ChatGPT said:
+The test you’re running with test_chunker.ps1 takes approximately 10 to 20 seconds, assuming everything is working smoothly. Here's the breakdown:
+
+🧪 Step-by-Step Timing Estimate
+Step	Description	Est. Time
+1. File Creation	Writes test_full_conversation.txt	<1 second
+2. Watcher detects file	watcher_splitter.py polls for new files	0–5 seconds (based on your polling_interval, usually 5s)
+3. File stability check	Ensures file size is stable	1–3 seconds
+4. Chunking	Splits the file into chunks	1–2 seconds
+5. Write chunk(s)	Writes chunk files to output/	<1 second
+6. Cloud copy	Copies chunks to cloud dir	<2 seconds
+7. Move original file	Moves file to processed/	<1 second
+8. Log output	Logs all steps	Real-time
+⏱️ Total Time Estimate:
+~5–15 seconds from test file creation to chunk completion — depending mostly on:
+
+How quickly the watcher polls (CONFIG["polling_interval"])
+
+File I/O speed and system load
+
+You can speed it up even more by setting:
+
+"polling_interval": 1
+In config.json, if you're actively testing (and change it back later to avoid excessive polling). Let me know if you'd like to log exact timestamps for each stage — easy to add! You said:
+the test have been running for 45 mminutes
+ChatGPT said:
+Thanks for the update — a 45-minute runtime definitely means something went wrong. Let’s diagnose this step-by-step and fix it:
+
+🧩 Top Possible Causes
+🔁 1. Watcher Is Running but Skipped the File
+If the watcher:
+
+Didn't detect the file
+
+Or processed it but encountered a silent error
+
+You’ll see no chunks, no processed file, or cloud copy — but logs will show something. ➡️ Check the log:
+
+Get-Content logs\watcher.log -Tail 50
+Look for:
+
+Processing file: test_full_conversation.txt
+
+Errors like: Could not read, No valid chunks, or Validation failed
+
+⚠️ 2. File Was Too Short
+In your code:
+
+if len(text.strip()) < 100:
+    logger.warning(f"File too short ({len(text)} chars), skipping")
+    return False
+➡️ Check if your test file has fewer than 100 characters. Run this in PowerShell:
+
+(Get-Content test_full_conversation.txt).Length
+If it’s under 100, the script intentionally skips it. 🗂️ 3. It Already Processed the File
+The watcher skips files that are already processed (based on filename). ➡️ Check processed/:
+
+Get-ChildItem processed\test_full_conversation.txt
+If it’s there, it already ran, succeeded or failed. 📁 4. Chunks Created but You Missed Them
+Try:
+
+Get-ChildItem output\*test_full_conversation*.txt
+If chunks exist — the test succeeded and watcher just kept looping as designed. 💡 What You Can Do Right Now
+Run this diagnostic bundle from PowerShell:
+
+# Check if watcher is stuck or working
+Get-Content logs\watcher.log -Tail 30
+
+# Check if output was generated
+Get-ChildItem output\*test_full_conversation*.txt
+
+# Check if file was moved
+Get-ChildItem processed\test_full_conversation.txt
+
+# Check test file length
+(Get-Content test_full_conversation.txt).Length
+✅ Next Step
+If you share the output of those 4 checks, I can tell you:
+
+If the watcher worked
+
+If it failed silently
+
+Or if a config/length mismatch is the culprit
+
+Would you like help modifying the script to log timings, or add explicit success/failure flags to speed up debugging? You said:
+Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved. Install the latest PowerShell for new features and improvements!

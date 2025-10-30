@@ -1,0 +1,701 @@
+{crime_type}")
+        
+        print(f"\nFOLDER STRUCTURE TEST")
+        print("-" * 40)
+        
+        try:
+            os.makedirs(output_path, exist_ok=True)
+            print(f"Main folder created: {output_path}")
+            
+            from config import get_crime_type_folder
+            for crime_type in crime_types:
+                crime_folder = get_crime_type_folder(crime_type, target_date_str)
+                print(f"{crime_type}: {os.path.basename(crime_folder)}")
+                
+        except Exception as e:
+            print(f"Folder creation failed: {e}")
+            logging.error(f"Folder creation failed: {e}")
+        
+        print(f"\nDEBUG SUMMARY")
+        print("=" * 60)
+        
+        checks = [
+            (report_name is not None, f"Excel lookup: {report_name}"),
+            (start_date is not None and end_date is not None, f"Date range valid"),
+            (os.path.exists(output_path), f"Output folder exists"),
+            (paths_valid, "All config paths valid")
+        ]
+        
+        all_passed = True
+        for passed, description in checks:
+            status = "✅ OK" if passed else "❌ FAILED"
+            print(f"{status} {description}")
+            all_passed &= passed
+        
+        print(f"\nOVERALL STATUS: {'✅ READY' if all_passed else '⚠️ ISSUES DETECTED'}")
+        return all_passed
+        
+    except Exception as e:
+        print(f"Debug mode failed: {e}")
+        logging.error(f"Debug mode failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def validate_mode():
+    """Validation mode - check all folders and templates exist"""
+    print(f"\nVALIDATION MODE")
+    print("=" * 60)
+    
+    try:
+        from config import validate_all_paths, POWERPOINT_TEMPLATES, CRIME_FOLDER_MAPPING
+        
+        print(f"Checking all config paths...")
+        paths_valid = validate_all_paths()
+        
+        print(f"\nPowerPoint Templates:")
+        for name, path in POWERPOINT_TEMPLATES.items():
+            exists = os.path.exists(path) if path else False
+            status = "✅ OK" if exists else "❌ FAILED"
+            print(f"{status} {name}: {path}")
+        
+        print(f"\nCrime Types Configuration:")
+        crime_types = list(CRIME_FOLDER_MAPPING.keys())
+        print(f"Total: {len(crime_types)}")
+        for crime_type in crime_types:
+            print(f"  • {crime_type}")
+        
+        print(f"\nVALIDATION SUMMARY")
+        print("-" * 40)
+        overall_valid = paths_valid and any(os.path.exists(p) for p in POWERPOINT_TEMPLATES.values() if p)
+        status = "✅ SYSTEM READY" if overall_valid else "⚠️ ISSUES DETECTED - CONTINUING ANYWAY"
+        print(f"{status}")
+        
+        return overall_valid
+        
+    except Exception as e:
+        print(f"Validation failed: {e}")
+        logging.error(f"Validation failed: {e}")
+        return False
+
+# Check for debug/validation modes FIRST
+if "--debug" in sys.argv:
+    custom_date = None
+    debug_index = sys.argv.index("--debug")
+    if debug_index + 1 < len(sys.argv) and not sys.argv[debug_index + 1].startswith("-"):
+        custom_date = sys.argv[debug_index + 1]
+    
+    success = debug_mode(custom_date)
+    sys.exit(0 if success else 1)
+
+elif "--validate" in sys.argv:
+    success = validate_mode()
+    sys.exit(0 if success else 1)
+
+def check_and_import_dependencies():
+    """Check and import all required dependencies with detailed error reporting"""
+    missing_modules = []
+    
+    try:
+        import arcpy
+        logging.info("✅ ArcPy imported successfully")
+    except ImportError as e:
+        logging.error(f"❌ ArcPy import failed: {e}")
+        logging.error("Ensure you're running in ArcGIS Pro Python environment")
+        missing_modules.append("arcpy")
+    
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches
+        logging.info("✅ python-pptx imported successfully")
+    except ImportError as e:
+        logging.error(f"❌ python-pptx import failed: {e}")
+        logging.error("Install with: pip install python-pptx")
+        missing_modules.append("python-pptx")
+    
+    try:
+        import pandas as pd
+        logging.info("✅ pandas imported successfully")
+    except ImportError as e:
+        logging.warning(f"⚠️ pandas import failed: {e}")
+        logging.warning("Some features will be limited without pandas")
+    
+    try:
+        import matplotlib.pyplot as plt
+        logging.info("✅ matplotlib imported successfully")
+    except ImportError as e:
+        logging.warning(f"⚠️ matplotlib import failed: {e}")
+        logging.warning("Auto-fit charts will be limited without matplotlib")
+    
+    try:
+        from PIL import Image
+        logging.info("✅ PIL imported successfully")
+    except ImportError as e:
+        logging.warning(f"⚠️ PIL import failed: {e}")
+        logging.warning("Placeholder images will be limited without PIL")
+    
+    return missing_modules
+
+# Check dependencies first
+missing_deps = check_and_import_dependencies()
+if missing_deps:
+    logging.error(f"Critical dependencies missing: {missing_deps}")
+    if 'arcpy' in missing_deps:
+        logging.error("Cannot run without ArcPy - exiting")
+        sys.exit(1)
+
+# Import config
+try:
+    from config import (
+        get_crime_type_folder, get_7day_period_dates, CRIME_FOLDER_MAPPING, POWERPOINT_TEMPLATES,
+        REPORT_BASE_DIR, get_correct_folder_name, get_standardized_filename, get_output_folder
+    )
+    logging.info("✅ config imported successfully")
+    CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+except ImportError as e:
+    logging.error(f"❌ config import failed: {e}")
+    logging.error("config.py is required - cannot continue")
+    sys.exit(1)
+
+def import_local_modules():
+    """Import local modules with fallback handling"""
+    modules_status = {}
+    
+    try:
+        from map_export import export_maps
+        modules_status['map_export'] = True
+        logging.info("✅ map_export imported successfully")
+    except ImportError as e:
+        logging.error(f"❌ map_export import failed: {e}")
+        modules_status['map_export'] = False
+        def export_maps(crime_type, output_folder, args):
+            logging.error(f"Map export unavailable for {crime_type}")
+            return False
+    
+    try:
+        from chart_export import export_chart
+        modules_status['chart_export'] = True
+        logging.info("✅ chart_export imported successfully")
+    except ImportError as e:
+        logging.warning(f"⚠️ chart_export import failed: {e}")
+        modules_status['chart_export'] = False
+        def export_chart(crime_type):
+            logging.warning(f"Chart export skipped for {crime_type} - chart_export.py not available")
+            return True
+    
+    try:
+        from incident_table_automation import export_incident_table_data_with_autofit, create_incident_table_placeholder
+        modules_status['incident_table'] = True
+        logging.info("✅ incident_table_automation imported successfully")
+    except ImportError as e:
+        logging.warning(f"⚠️ incident_table_automation import failed: {e}")
+        modules_status['incident_table'] = False
+        def export_incident_table_data_with_autofit(crime_type, target_date):
+            logging.warning(f"Incident table export skipped for {crime_type}")
+            return True
+        def create_incident_table_placeholder(crime_type, output_path):
+            logging.warning(f"Incident table placeholder skipped for {crime_type}")
+            return True
+    
+    return modules_status, export_maps, export_chart, export_incident_table_data_with_autofit, create_incident_table_placeholder
+
+modules_status, export_maps, export_chart, export_incident_table_data_with_autofit, create_incident_table_placeholder = import_local_modules()
+from pptx import Presentation
+from pptx.util import Inches
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+POWERPOINT_COORDINATES = {
+    'chart': {'left': 0.5, 'top': 2.8, 'width': 5.84, 'height': 4.00},
+    'map': {'left': 6.8, 'top': 2.8, 'width': 5.60, 'height': 4.03},
+    'table': {'left': 6.8, 'top': 0.8, 'width': 8.33, 'height': 1.98}
+}
+
+def diagnose_powerpoint_template(template_path):
+    """Diagnose PowerPoint template structure"""
+    try:
+        prs = Presentation(template_path)
+        logging.info(f"📊 Template Analysis: {template_path}")
+        logging.info(f"   Total slides: {len(prs.slides)}")
+        
+        for i, slide in enumerate(prs.slides):
+            logging.info(f"   Slide {i+1}: {len(slide.shapes)} shapes")
+            try:
+                layout_name = slide.slide_layout.name if hasattr(slide.slide_layout, 'name') else 'Unknown'
+                logging.info(f"              Layout: {layout_name}")
+            except:
+                logging.info(f"              Layout: Unknown")
+        
+        return len(prs.slides)
+        
+    except Exception as e:
+        logging.error(f"❌ Template diagnosis failed: {e}")
+        return 0
+
+def add_crime_content_to_slide(slide, crime_type, output_folder, report_date_str):
+    """Add crime-specific content to a PowerPoint slide"""
+    try:
+        crime_output_folder = get_crime_type_folder(crime_type, report_date_str)
+        filename_prefix = get_standardized_filename(crime_type)
+        
+        logging.info(f"📊 Adding content for {crime_type} to slide")
+        logging.info(f"Looking in: {crime_output_folder}")
+        
+        # Set coordinates
+        chart_left = Inches(POWERPOINT_COORDINATES['chart']['left'])
+        chart_top = Inches(POWERPOINT_COORDINATES['chart']['top'])
+        chart_width = Inches(POWERPOINT_COORDINATES['chart']['width'])
+        chart_height = Inches(POWERPOINT_COORDINATES['chart']['height'])
+        
+        map_left = Inches(POWERPOINT_COORDINATES['map']['left'])
+        map_top = Inches(POWERPOINT_COORDINATES['map']['top'])
+        map_width = Inches(POWERPOINT_COORDINATES['map']['width'])
+        map_height = Inches(POWERPOINT_COORDINATES['map']['height'])
+        
+        table_left = Inches(POWERPOINT_COORDINATES['table']['left'])
+        table_top = Inches(POWERPOINT_COORDINATES['table']['top'])
+        table_width = Inches(POWERPOINT_COORDINATES['table']['width'])
+        table_height = Inches(POWERPOINT_COORDINATES['table']['height'])
+        
+        # Add chart
+        chart_path = os.path.join(crime_output_folder, f"{filename_prefix}_Chart.png")
+        if os.path.exists(chart_path):
+            try:
+                slide.shapes.add_picture(chart_path, chart_left, chart_top, chart_width, chart_height)
+                logging.info(f"  ✅ Added chart: {filename_prefix}_Chart.png")
+            except Exception as e:
+                logging.error(f"  ❌ Failed to add chart: {e}")
+        else:
+            logging.warning(f"  ⚠️ Chart not found: {chart_path}")
+        
+        # Add map
+        map_path = os.path.join(crime_output_folder, f"{filename_prefix}_Map.png")
+        if os.path.exists(map_path):
+            try:
+                slide.shapes.add_picture(map_path, map_left, map_top, map_width, map_height)
+                logging.info(f"  ✅ Added map: {filename_prefix}_Map.png")
+            except Exception as e:
+                logging.error(f"  ❌ Failed to add map: {e}")
+        else:
+            logging.warning(f"  ⚠️ Map not found: {map_path}")
+        
+        # Add incident table
+        table_paths = [
+            os.path.join(crime_output_folder, f"{filename_prefix}_IncidentTable_AutoFit.png"),
+            os.path.join(crime_output_folder, f"{filename_prefix}_IncidentTable.png"),
+            os.path.join(crime_output_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+        ]
+        
+        table_added = False
+        for table_path in table_paths:
+            if os.path.exists(table_path):
+                try:
+                    slide.shapes.add_picture(table_path, table_left, table_top, table_width, table_height)
+                    logging.info(f"  ✅ Added incident table: {os.path.basename(table_path)}")
+                    table_added = True
+                    break
+                except Exception as e:
+                    logging.error(f"  ❌ Failed to add incident table: {e}")
+        
+        if not table_added:
+            logging.warning(f"  ⚠️ No incident table found for {crime_type}")
+        
+        return True
+        
+    except Exception as e:
+        logging.error(f"❌ Failed to add content for {crime_type}: {e}")
+        return False
+
+def auto_assemble_powerpoint_enhanced(output_folder, crime_types, report_date_str):
+    """Enhanced PowerPoint assembly that creates missing slides"""
+    try:
+        ppt_files = glob.glob(os.path.join(output_folder, "*.pptx"))
+        if not ppt_files:
+            logging.error(f"❌ No PowerPoint file found in: {output_folder}")
+            all_files = os.listdir(output_folder) if os.path.exists(output_folder) else []
+            logging.info(f"Available files in output folder: {all_files}")
+            return False
+            
+        ppt_file = ppt_files[0]
+        logging.info(f"📊 Loading PowerPoint: {os.path.basename(ppt_file)}")
+        
+        try:
+            prs = Presentation(ppt_file)
+            logging.info(f"✅ PowerPoint loaded successfully")
+        except Exception as e:
+            logging.error(f"❌ PowerPoint file appears corrupted: {e}")
+            return False
+        
+        # Diagnose template structure
+        slides_needed = len(crime_types)
+        slides_available = len(prs.slides)
+        
+        logging.info(f"📊 PowerPoint analysis:")
+        logging.info(f"   Slides needed: {slides_needed}")
+        logging.info(f"   Slides available: {slides_available}")
+        
+        # Add missing slides by duplicating the first slide
+        if slides_available > 0 and slides_needed > slides_available:
+            master_slide = prs.slides[0]
+            master_layout = master_slide.slide_layout
+            
+            for i in range(slides_available, slides_needed):
+                # Add new slide with same layout
+                new_slide = prs.slides.add_slide(master_layout)
+                logging.info(f"✅ Created slide {i+1} for {crime_types[i]}")
+        elif slides_available == 0:
+            logging.error(f"❌ Template has no slides - cannot create presentation")
+            return False
+        
+        # Now process all slides with content
+        slides_processed = 0
+        for i, crime_type in enumerate(crime_types):
+            if i < len(prs.slides):
+                slide = prs.slides[i]
+                success = add_crime_content_to_slide(slide, crime_type, output_folder, report_date_str)
+                if success:
+                    slides_processed += 1
+            else:
+                logging.warning(f"⚠️ Still missing slide for {crime_type}")
+        
+        try:
+            prs.save(ppt_file)
+            logging.info(f"✅ Enhanced PowerPoint saved: {len(prs.slides)} slides")
+            logging.info(f"📊 Processed {slides_processed} slides with content")
+            return True
+        except Exception as e:
+            logging.error(f"❌ Failed to save PowerPoint: {e}")
+            return False
+        
+    except Exception as e:
+        logging.error(f"❌ Enhanced PowerPoint assembly failed: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return False
+
+def process_crime_type(crime_type, report_date, report_date_str, generate_map=True, generate_chart=True, generate_table=True):
+    """Process a single crime type with enhanced error handling"""
+    start_time = time.time()
+    logging.info(f"\n{'='*50}")
+    logging.info(f"PROCESSING: {crime_type}")
+    logging.info(f"{'='*50}")
+
+    success = True
+    errors = []
+
+    try:
+        output_folder = get_crime_type_folder(crime_type, report_date_str)
+        logging.info(f"Output folder: {output_folder}")
+        
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder, exist_ok=True)
+            logging.info(f"Created output folder: {output_folder}")
+            
+    except Exception as e:
+        logging.error(f"Failed to get/create output folder: {e}")
+        return False
+
+    if generate_map and modules_status.get('map_export', False):
+        logging.info("\nRunning map export...")
+        try:
+            success_map = export_maps(crime_type, output_folder, sys.argv)
+            if success_map:
+                logging.info("✅ Map export completed successfully")
+            else:
+                logging.error("❌ Map export failed")
+                errors.append("Map export failed")
+            success &= success_map
+        except Exception as e:
+            logging.error(f"❌ Map export crashed: {e}")
+            errors.append(f"Map export crashed: {e}")
+            success = False
+    elif generate_map:
+        logging.error("❌ Map export requested but map_export.py not available")
+        errors.append("Map export unavailable")
+        success = False
+
+    if generate_chart and modules_status.get('chart_export', False):
+        logging.info("\nRunning chart export...")
+        try:
+            success_chart = export_chart(crime_type)
+            if success_chart:
+                logging.info("✅ Chart export completed successfully")
+            else:
+                logging.error("❌ Chart export failed")
+                errors.append("Chart export failed")
+            success &= success_chart
+        except Exception as e:
+            logging.error(f"❌ Chart export crashed: {e}")
+            errors.append(f"Chart export crashed: {e}")
+            success = False
+    elif generate_chart:
+        logging.warning("⚠️ Chart export skipped - chart_export.py not available")
+
+    if generate_table and modules_status.get('incident_table', False):
+        logging.info("\nRunning incident table export...")
+        try:
+            success_table = export_incident_table_data_with_autofit(crime_type, report_date)
+            if not success_table:
+                logging.warning(f"⚠️ Creating placeholder for {crime_type}")
+                placeholder_path = os.path.join(output_folder, f"{get_standardized_filename(crime_type)}_IncidentTable_Placeholder.png")
+                success_table = create_incident_table_placeholder(crime_type, placeholder_path)
+                if success_table:
+                    logging.info("✅ Placeholder created successfully")
+                else:
+                    logging.error("❌ Placeholder creation failed")
+                    errors.append("Placeholder creation failed")
+            else:
+                logging.info("✅ Incident table export completed successfully")
+            success &= success_table
+        except Exception as e:
+            logging.error(f"❌ Incident table export crashed: {e}")
+            errors.append(f"Incident table crashed: {e}")
+            success = False
+    elif generate_table:
+        logging.warning("⚠️ Incident table export skipped - incident_table_automation.py not available")
+
+    duration = time.time() - start_time
+    logging.info(f"\n📊 PROCESSING SUMMARY FOR {crime_type}")
+    logging.info(f"Duration: {duration:.2f} seconds")
+    logging.info(f"Success: {'✅ YES' if success else '❌ NO'}")
+    
+    if errors:
+        logging.info(f"Errors encountered:")
+        for error in errors:
+            logging.info(f"  • {error}")
+    
+    return success
+
+def create_output_folder_and_copy_template(report_date_str):
+    """Create output folder and copy PowerPoint template with enhanced error handling"""
+    try:
+        output_folder = get_output_folder(report_date_str)
+        logging.info(f"Creating output folder: {output_folder}")
+        
+        os.makedirs(output_folder, exist_ok=True)
+        if not os.path.exists(output_folder):
+            logging.error(f"❌ Failed to create output folder: {output_folder}")
+            return None
+        
+        template_path = POWERPOINT_TEMPLATES.get("7day") or POWERPOINT_TEMPLATES.get("main")
+        if template_path and os.path.exists(template_path):
+            folder_name = get_correct_folder_name(report_date_str)
+            dest_ppt = os.path.join(output_folder, f"{folder_name}.pptx")
+            
+            try:
+                # Diagnose template before copying
+                slide_count = diagnose_powerpoint_template(template_path)
+                logging.info(f"📊 Template has {slide_count} slides")
+                
+                shutil.copy2(template_path, dest_ppt)
+                logging.info(f"✅ Copied PowerPoint template: {os.path.basename(dest_ppt)}")
+                
+                if not os.path.exists(dest_ppt):
+                    logging.error(f"❌ PowerPoint copy verification failed: {dest_ppt}")
+                    return None
+                    
+            except Exception as e:
+                logging.error(f"❌ Failed to copy PowerPoint template: {e}")
+                return None
+        else:
+            logging.error(f"❌ PowerPoint template not found: {template_path}")
+            note_file = os.path.join(output_folder, "MANUAL_POWERPOINT_ASSEMBLY_REQUIRED.txt")
+            try:
+                with open(note_file, 'w') as f:
+                    f.write(f"PowerPoint template not found at: {template_path}\n")
+                    f.write(f"Manual PowerPoint assembly required for: {report_date_str}\n")
+                    f.write(f"Generated files are in crime-specific subfolders.\n")
+                logging.info(f"📝 Created manual assembly note: {note_file}")
+            except Exception as e:
+                logging.warning(f"⚠️ Could not create note file: {e}")
+            
+        return output_folder
+        
+    except Exception as e:
+        logging.error(f"❌ Failed to create output folder: {e}")
+        return None
+
+def validate_system_readiness():
+    """Validate system is ready to run"""
+    logging.info("\n🔍 VALIDATING SYSTEM READINESS")
+    logging.info("=" * 50)
+    
+    issues = []
+    
+    missing_modules = [name for name, status in modules_status.items() if not status]
+    if missing_modules:
+        issues.append(f"Missing modules: {missing_modules}")
+    
+    try:
+        if not CRIME_TYPES:
+            issues.append("No crime types defined")
+    except Exception as e:
+        issues.append(f"Cannot access CRIME_TYPES: {e}")
+    
+    if issues:
+        logging.warning("⚠️ SYSTEM READINESS ISSUES:")
+        for issue in issues:
+            logging.warning(f"  • {issue}")
+        logging.warning("Proceeding with limited functionality...")
+    else:
+        logging.info("✅ SYSTEM READY")
+    
+    return len(issues) == 0
+
+def main(generate_maps=True, generate_charts=True, generate_tables=True, max_features=30, debug_mode=False, report_date_str=None):
+    """Main processing function with comprehensive error handling"""
+    batch_start = time.time()
+    overall_success = True
+    crime_results = {}
+    
+    try:
+        if report_date_str is None:
+            report_date_str = dt_date.today().strftime("%Y_%m_%d")
+        
+        report_date = parse_date_string(report_date_str)
+        logging.info(f"📅 Processing date: {report_date} ({report_date_str})")
+    except Exception as e:
+        logging.error(f"❌ Invalid date format. Use YYYY_MM_DD. Error: {e}")
+        return False
+
+    logging.info(f"\n🚀 CRIME ANALYSIS SESSION STARTING")
+    logging.info(f"Date: {report_date_str}")
+    logging.info(f"Parameters:")
+    logging.info(f"  • Maps: {generate_maps}")
+    logging.info(f"  • Charts: {generate_charts}")
+    logging.info(f"  • Tables: {generate_tables}")
+    logging.info(f"  • Max Features: {max_features}")
+    logging.info(f"  • Debug Mode: {debug_mode}")
+
+    system_ready = validate_system_readiness()
+    if not system_ready:
+        logging.warning("⚠️ System has issues but continuing...")
+
+    output_folder = create_output_folder_and_copy_template(report_date_str)
+    if not output_folder:
+        logging.error("❌ Failed to create output folder - cannot continue")
+        return False
+
+    logging.info(f"\n📊 PROCESSING {len(CRIME_TYPES)} CRIME TYPES")
+    logging.info("=" * 60)
+    
+    for i, crime_type in enumerate(CRIME_TYPES, 1):
+        logging.info(f"\n[{i}/{len(CRIME_TYPES)}] Starting {crime_type}")
+        
+        success = process_crime_type(
+            crime_type, 
+            report_date, 
+            report_date_str, 
+            generate_map=generate_maps, 
+            generate_chart=generate_charts, 
+            generate_table=generate_tables
+        )
+        
+        crime_results[crime_type] = success
+        overall_success &= success
+        
+        logging.info(f"[{i}/{len(CRIME
+````
+
+
+
+## Prompt:
+6/24/2025, 3:56:02 AM
+
+Continue
+
+
+
+## Response:
+6/24/2025, 3:57:34 AM
+
+
+
+**Complete main.py - Drop-in Ready with PowerPoint Fix** ∙ Version 3
+
+````python
+# 🕒 2025-01-27-22-40-00
+# SCRPA_Police_Analysis/main_complete_fixed
+# Author: R. A. Carucci
+# Purpose: Complete drop-in replacement for main.py with PowerPoint slide creation and enhanced error handling
+
+import sys
+import logging
+import time
+import os
+import glob
+import shutil
+from pathlib import Path
+from datetime import datetime as dt_datetime, date as dt_date
+import arcpy
+
+# Initialize ArcGIS Pro license
+try:
+    # Check available license types
+    if arcpy.CheckProduct("ArcInfo") == "Available":
+        arcpy.CheckOutExtension("ArcInfo")
+        logging.info("✅ ArcInfo license initialized")
+    elif arcpy.CheckProduct("ArcEditor") == "Available":
+        arcpy.CheckOutExtension("ArcEditor")
+        logging.info("✅ ArcEditor license initialized")
+    elif arcpy.CheckProduct("ArcView") == "Available":
+        arcpy.CheckOutExtension("ArcView")
+        logging.info("✅ ArcView license initialized")
+    else:
+        logging.error("❌ No ArcGIS license available")
+        sys.exit(1)
+except Exception as e:
+    logging.error(f"❌ License initialization failed: {e}")
+    sys.exit(1)
+
+print("OK DateTime imported correctly as dt_datetime and dt_date")
+
+def parse_date_string(date_str):
+    """Parse date string from YYYY_MM_DD format"""
+    try:
+        return dt_datetime.strptime(date_str, "%Y_%m_%d").date()
+    except ValueError:
+        raise ValueError(f"Invalid date format: {date_str}. Expected YYYY_MM_DD")
+
+def debug_mode(target_date_str=None):
+    """Enhanced debug mode with Excel patching and comprehensive testing"""
+    if target_date_str is None:
+        target_date_str = "2025_01_27"
+    
+    print(f"\nDEBUG MODE ACTIVE")
+    print("=" * 60)
+    print(f"Target Date: {target_date_str}")
+    
+    try:
+        target_date = dt_datetime.strptime(target_date_str, "%Y_%m_%d").date()
+        
+        from config import (
+            get_excel_report_name, get_correct_folder_name, get_output_folder,
+            get_7day_period_dates, validate_all_paths, CRIME_FOLDER_MAPPING, REPORT_BASE_DIR
+        )
+        
+        print(f"\nEXCEL INTEGRATION TEST")
+        print("-" * 40)
+        
+        report_name = get_excel_report_name(target_date)
+        print(f"Excel Report Name: {report_name}")
+        
+        folder_name = get_correct_folder_name(target_date)
+        print(f"Folder Name: {folder_name}")
+        
+        start_date, end_date = get_7day_period_dates(target_date)
+        print(f"7-Day Period: {start_date} to {end_date}")
+        
+        output_path = get_output_folder(target_date_str)
+        print(f"Output Path: {output_path}")
+        
+        print(f"\nPATH VALIDATION")
+        print("-" * 40)
+        paths_valid = validate_all_paths()
+        
+        print(f"\nCRIME TYPES")
+        print("-" * 40)
+        crime_types = list(CRIME_FOLDER_MAPPING.keys())
+        print(f"Count: {len(crime_types)}")
+        for i, crime_type in enumerate(crime_types, 1):
+            print(f"  {i}.

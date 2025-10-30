@@ -1,0 +1,603 @@
+Exiting.") return
+    
+    # Check processor dependencies
+    processor_deps = check_processor_dependencies()
+    missing_deps = [dep for dep, available in processor_deps.items() if not available]
+    if missing_deps:
+        logger.warning(f"Missing file processor dependencies: {', '.join(missing_deps)}")
+        logger.info("Some file types may not be processed correctly")
+    
+    os.makedirs(CONFIG.get("output_dir", "output"), exist_ok=True)
+    os.makedirs(CONFIG.get("archive_dir", "processed"), exist_ok=True)
+
+    logger.info("=== ENTERPRISE CHUNKER STARTED ===")
+    logger.info(f"Monitoring: {watch_folder}")
+    supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    filter_mode = CONFIG.get("file_filter_mode", "all")
+    logger.info(f"File types: {', '.join(supported_extensions)} files")
+    logger.info(f"Filter mode: {filter_mode}")
+    if filter_mode == "patterns":
+        patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+        logger.info(f"Required patterns: {', '.join(patterns)}")
+    elif filter_mode == "suffix":
+        logger.info("Required suffix: _full_conversation")
+    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    logger.info(f"Database tracking: Enabled")
+    logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG enabled: {CONFIG.get('rag_enabled', False)}")
+    
+    processed_files = set()
+    loop_count = 0
+    last_cleanup = datetime.now()
+    last_report = datetime.now()
+    
+    # Send startup notification
+    notifications.send_email(
+        notifications.config["admin_emails"],
+        "🚀 Chunker System Started",
+        f"Enterprise Chunker system started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Monitoring: {watch_folder}\n"
+        f"File types: {', '.join(supported_extensions)} files\n"
+        f"Filter mode: {filter_mode}\n"
+        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Database: Enabled\n"
+        f"Dashboard: http://localhost:5000"
+    )
+    
+    try:
+        while True:
+            try:
+                # Look for files with supported extensions
+                all_files = []
+                supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+                for ext in supported_extensions:
+                    all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
+                
+                # Filter files based on configuration
+                excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
+                
+                # Apply file filtering based on mode
+                filter_mode = CONFIG.get("file_filter_mode", "all")
+                file_patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+                exclude_patterns = CONFIG.get("exclude_patterns", [])
+                
+                filtered_files = []
+                for f in all_files:
+                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                        continue
+                    
+                    # Check exclude patterns first
+                    if any(pattern in f.name for pattern in exclude_patterns):
+                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        continue
+                    
+                    # Apply filter mode
+                    if filter_mode == "all":
+                        filtered_files.append(f)
+                    elif filter_mode == "patterns":
+                        if any(pattern in f.name for pattern in file_patterns):
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                    elif filter_mode == "suffix":
+                        # Only process files with _full_conversation suffix
+                        if "_full_conversation" in f.name:
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                new_files = filtered_files
+                
+                if new_files:
+                    logger.info(f"Found {len(new_files)} new files to process")
+                    
+                    # Process files in parallel if multiple files
+                    if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
+                        # For large batches, process in chunks to avoid memory issues
+                        batch_size = CONFIG.get("batch_size", 50)
+                        if len(new_files) > batch_size:
+                            logger.info(f"Processing {len(new_files)} files in batches of {batch_size}")
+                            all_results = []
+                            for i in range(0, len(new_files), batch_size):
+                                batch = new_files[i:i + batch_size]
+                                logger.info(f"Processing batch {i//batch_size + 1}: {len(batch)} files")
+                                batch_results = process_files_parallel(batch, CONFIG)
+                                all_results.extend(batch_results)
+                                # Small delay between batches to prevent system overload
+                                time.sleep(0.5)
+                            results = all_results
+                        else:
+                            results = process_files_parallel(new_files, CONFIG)
+                        for i, result in enumerate(results):
+                            if result:
+                                processed_files.add(new_files[i].name)
+                    else:
+                        # Process files sequentially
+                        for file_path in new_files:
+                            try:
+                                if process_file_enhanced(file_path, CONFIG):
+                                    processed_files.add(file_path.name)
+                                    logger.info(f"Successfully processed: {file_path.name}")
+                                else:
+                                    logger.error(f"Failed to process: {file_path.name}")
+                            except Exception as e:
+                                logger.exception(f"Error processing {file_path.name}: {e}")
+                                if db:
+                                    try:
+                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                    except Exception as db_error:
+                                        logger.warning(f"Failed to log processing error to database: {db_error}")
+                
+                # Periodic maintenance
+                loop_count += 1
+                
+                # Log session stats every minute
+                if loop_count % 12 == 0:  # Every minute at 5s intervals
+                    log_session_stats()
+                
+                # Log system metrics every 5 minutes
+                if loop_count % 60 == 0:
+                    log_system_metrics()
+                
+                # Daily cleanup and reporting
+                if datetime.now() - last_cleanup > timedelta(hours=24):
+                    if db:
+                        try:
+                            db.cleanup_old_data(days=30)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to run database cleanup: {db_error}")
+                    last_cleanup = datetime.now()
+                
+                # Send daily report
+                if datetime.now() - last_report > timedelta(hours=24):
+                    if db:
+                        try:
+                            analytics = db.get_analytics(days=1)
+                            notifications.send_daily_summary(session_stats, analytics)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to get analytics or send daily summary: {db_error}")
+                    last_report = datetime.now()
+                
+                time.sleep(CONFIG.get("polling_interval", 5))
+                
+            except KeyboardInterrupt:
+                logger.info("Watcher stopped by user")
+                break
+            except Exception as e:
+                logger.exception("Critical error in main loop")
+                if db:
+                    try:
+                        db.log_error("MainLoopError", str(e), traceback.format_exc())
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                try:
+                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
+                except Exception as notify_error:
+                    logger.warning(f"Failed to send error alert: {notify_error}")
+                time.sleep(10)
+                
+    finally:
+        # Final statistics and cleanup
+        log_session_stats()
+        
+        # Send shutdown notification
+        notifications.send_email(
+            notifications.config["admin_emails"],
+            "🛑 Chunker System Stopped",
+            f"Enterprise Chunker system stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Session Summary:\n"
+            f"Files Processed: {session_stats['files_processed']}\n"
+            f"Chunks Created: {session_stats['chunks_created']}\n"
+            f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}\n"
+            f"Errors: {session_stats['errors']}\n"
+            f"Uptime: {datetime.now() - datetime.strptime(session_stats['session_start'], '%Y-%m-%d %H:%M:%S')}"
+        )
+
+if __name__ == "__main__":
+    main()
+```
+
+Now let me also fix the second occurrence of "no valid chunks":
+
+
+```python
+# 🕒 2025-06-28-01-55-30
+# chunker/watcher_splitter_enterprise.py
+# Author: R. A. Carucci  
+# Purpose: Enterprise-grade chunker with database tracking, notifications, and parallel processing
+
+import os
+import sys
+import time 
+import shutil
+import logging
+import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+import nltk
+from nltk.tokenize import sent_tokenize
+import json
+import psutil
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from chunker_db import ChunkerDatabase
+from notification_system import NotificationSystem
+import re
+import openpyxl
+import PyPDF2
+import ast
+import docx
+import yaml
+# Graceful RAG imports with error handling
+try:
+    from rag_integration import ChromaRAG, extract_keywords
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"RAG components not available: {e}")
+    print("Continuing with core chunking functionality...")
+    RAG_AVAILABLE = False
+    ChromaRAG = None
+    extract_keywords = None
+
+# Graceful Celery imports with error handling
+try:
+    from celery_tasks import process_file_with_celery_chain, app as celery_app
+    CELERY_AVAILABLE = True
+    print("Celery integration available")
+except ImportError as e:
+    print(f"Celery components not available: {e}")
+    print("Continuing with direct processing...")
+    CELERY_AVAILABLE = False
+    process_file_with_celery_chain = None
+    celery_app = None
+from file_processors import get_file_processor, check_processor_dependencies, redact_sensitive_data
+
+# Graceful RAG imports with error handling
+try:
+    from langchain_rag_handler import LangChainRAGHandler, graceful_rag_handler, check_rag_dependencies
+    RAG_DEPENDENCIES_AVAILABLE = True
+except ImportError:
+    # Logger not yet defined, use print for now
+    print("LangChain RAG handler not available - using basic RAG only")
+    RAG_DEPENDENCIES_AVAILABLE = False
+
+def validate_config(config):
+    """Validate configuration parameters"""
+    errors = []
+    
+    # Check required fields
+    required_fields = ["watch_folder", "output_dir", "archive_dir"]
+    for field in required_fields:
+        if field not in config:
+            errors.append(f"Missing required field: {field}")
+    
+    # Check data types
+    if "rag_enabled" in config and not isinstance(config["rag_enabled"], bool):
+        errors.append("rag_enabled must be boolean")
+    
+    if "chunk_size" in config and not isinstance(config["chunk_size"], int):
+        errors.append("chunk_size must be integer")
+    
+    if "chroma_persist_dir" in config and not isinstance(config["chroma_persist_dir"], str):
+        errors.append("chroma_persist_dir must be string")
+    
+    # Check LangSmith config
+    if "langsmith" in config:
+        langsmith_config = config["langsmith"]
+        if not isinstance(langsmith_config, dict):
+            errors.append("langsmith config must be dictionary")
+        else:
+            if "project" in langsmith_config and not isinstance(langsmith_config["project"], str):
+                errors.append("langsmith.project must be string")
+    
+    if errors:
+        logger.error("Configuration validation errors:")
+        for error in errors:
+            logger.error(f"  - {error}")
+        return False
+    
+    logger.info("Configuration validation passed")
+    return True
+
+def safe_chroma_add(chunk, metadata, config):
+    """Safely add chunk to ChromaDB with error handling"""
+    try:
+        if not config.get("rag_enabled", False):
+            return None
+        
+        if not RAG_AVAILABLE:
+            logger.warning("RAG is enabled in config but ChromaDB is not available. Skipping RAG integration.") return None
+        
+        chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
+        chunk_id = chroma_rag.add_chunk(chunk, metadata)
+        logger.debug(f"Added chunk to ChromaDB: {chunk_id}")
+        return chunk_id
+        
+    except ImportError as e:
+        logger.warning(f"ChromaDB not available: {e}")
+        logger.info("Continuing without RAG functionality")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to add chunk to ChromaDB: {e}")
+        return None
+
+# Resolve config path (supports PyInstaller .exe)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(__file__)
+
+# Configure local nltk_data path
+nltk_path = os.path.join(base_path, "nltk_data")
+nltk.data.path.append(nltk_path)
+
+try:
+    nltk.download('punkt_tab', download_dir=nltk_path, quiet=True)
+except:
+    nltk.download('punkt', download_dir=nltk_path, quiet=True)
+
+# Load configuration
+with open(os.path.join(base_path, "config.json")) as f:
+    CONFIG = json.load(f)
+
+# Department-specific configurations
+DEPARTMENT_CONFIGS = {
+    "police": {
+        "chunk_size": 75,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    },
+    "admin": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal"
+    },
+    "legal": {
+        "chunk_size": 100,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    }
+}
+
+# Setup enhanced logging
+def setup_logging():
+    log_file = CONFIG.get("log_file", "logs/watcher.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    # Rotate log if it's too large
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:  # 5MB
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"logs/watcher_archive_{timestamp}.log"
+        shutil.move(log_file, archive_name)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+# Initialize database and notification systems with timeout and retry
+def init_database_with_retry():
+    """Initialize database with retry logic to handle locking issues"""
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db = ChunkerDatabase()
+            logger.info("Database initialized successfully")
+            return db
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}")
+                time.sleep(2)
+            else:
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
+                return None
+
+db = init_database_with_retry()
+notifications = NotificationSystem()
+
+# Enhanced session statistics
+session_stats = {
+    "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "session_start_time": time.time(),
+    "files_processed": 0,
+    "chunks_created": 0,
+    "zero_byte_prevented": 0,
+    "errors": 0,
+    "total_sentences_processed": 0,
+    "total_bytes_created": 0,
+    "parallel_jobs_completed": 0,
+    "department_breakdown": {},
+    "performance_metrics": {
+        "avg_processing_time": 0,
+        "peak_memory_usage": 0,
+        "peak_cpu_usage": 0,
+        "files_per_minute": 0
+    }
+}
+
+def get_department_config(file_path):
+    """Determine department configuration based on file path or content"""
+    dept = CONFIG.get("default_department", "admin")
+    
+    # Check file path for department indicators
+    path_str = str(file_path).lower()
+    for department in DEPARTMENT_CONFIGS.keys():
+        if department in path_str:
+            dept = department
+            break
+    
+    # Merge default config with department-specific settings
+    dept_config = DEPARTMENT_CONFIGS.get(dept, {})
+    merged_config = CONFIG.copy()
+    merged_config.update(dept_config)
+    merged_config["department"] = dept
+    
+    return merged_config
+
+def log_system_metrics():
+    """Log comprehensive system metrics"""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('.') # Count active processes
+        active_processes = len([p for p in psutil.process_iter() if p.is_running()])
+        
+        # Update session stats
+        session_stats["performance_metrics"]["peak_cpu_usage"] = max(
+            session_stats["performance_metrics"]["peak_cpu_usage"], cpu_percent
+        )
+        session_stats["performance_metrics"]["peak_memory_usage"] = max(
+            session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
+        )
+        
+        # Log to database with retry
+        if db:
+            try:
+                db.log_system_metrics(cpu_percent, memory.percent, 
+                                     (disk.used / disk.total) * 100, active_processes)
+            except Exception as e:
+                logger.warning(f"Failed to log system metrics to database: {e}")
+        
+        logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
+                   f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
+        
+        # Send alerts if thresholds exceeded
+        if cpu_percent > 90:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+        elif cpu_percent > 80:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+        
+        if memory.percent > 90:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+        elif memory.percent > 80:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            
+    except Exception as e:
+        logger.error(f"Failed to log system metrics: {e}")
+
+def chunk_text_enhanced(text, limit, department_config):
+    """Enhanced chunking with department-specific rules"""
+    logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
+    if not text or len(text.strip()) < 10:
+        logger.warning("Text too short for chunking - skipping")
+        return []
+    
+    try:
+        sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in text - skipping")
+            return []
+        
+        # Apply department-specific chunking rules
+        original_sentence_count = len(sentences)
+        if department_config.get("enable_redaction"):
+            sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {original_sentence_count} -> {len(sentences)} sentences")
+        
+        chunks = []
+        max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        logger.info(f"Chunking parameters - Max chars per chunk: {max_chars}, Target sentences per chunk: {limit}")
+        
+        current_chunk = []
+        current_length = 0
+        chunk_count = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
+            
+            # Check if adding this sentence would exceed limits
+            if (len(current_chunk) >= limit or 
+                current_length + sentence_length > max_chars) and current_chunk:
+                
+                chunk_text = " ".join(current_chunk)
+                if len(chunk_text.strip()) > 0:
+                    chunks.append(chunk_text)
+                    chunk_count += 1
+                    logger.debug(f"Created chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+                
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add final chunk
+        if current_chunk:
+            chunk_text = " ".join(current_chunk)
+            if len(chunk_text.strip()) > 0:
+                chunks.append(chunk_text)
+                chunk_count += 1
+                logger.debug(f"Created final chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+        
+        session_stats["total_sentences_processed"] += len(sentences)
+        logger.info(f"Chunking complete - Created {len(chunks)} chunks from {len(sentences)} sentences (avg: {len(sentences)/len(chunks):.1f} sentences/chunk)")
+        return chunks
+        
+    except Exception as e:
+        logger.error(f"Chunking failed: {e}")
+        if db:
+            try:
+                db.log_error("ChunkingError", str(e), traceback.format_exc())
+            except Exception as db_error:
+                logger.warning(f"Failed to log chunking error to database: {db_error}")
+        session_stats["errors"] += 1
+        return []
+
+def apply_redaction_rules(sentences):
+    """Apply redaction rules for sensitive departments"""
+    import re
+    
+    redaction_patterns = [
+        (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),  # SSN
+        (r'\b\d{3}-\d{3}-\d{4}\b', '[PHONE-REDACTED]'),  # Phone
+        (r'\b\d{1,5}\s+\w+\s+(? :street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)\b', '[ADDRESS-REDACTED]'),  # Address
+        (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\. [A-Z|a-z]{2,}\b', '[EMAIL-REDACTED]')  # Email
+    ]
+    
+    redacted_sentences = []
+    for sentence in sentences:
+        redacted = sentence
+        for pattern, replacement in redaction_patterns:
+            redacted = re.sub(pattern, replacement, redacted, flags=re.IGNORECASE)
+        redacted_sentences.append(redacted)
+    
+    return redacted_sentences
+
+def validate_chunk_content_enhanced(chunk, min_length=50, department_config=None):
+    """Enhanced chunk validation with department-specific rules"""
+    if not chunk or len(chunk.strip()) < min_length:
+        return False
+    
+    word_count = len(chunk.split())
+    if word_count < 10:
+        return False
+    
+    # Check for reasonable content-to-whitespace ratio
+    if len(chunk.strip()) / len(chunk) < 0.7:
+        return False
+    
+    # Department-specific validation
+    if department_config and department_config.get("audit_level") == "full":
+        # Additional validation for high-security departments
+        if any(pattern in chunk.lower() for pattern in ["[redacted]", "[error]", "[corrupt]"]):
+            logger.warning("Chunk contains redaction or error markers")
+    
+    return True
+
+def process_file_with_celery(file_path: Path, config: dict) -> bool:
+    """
+    Process file using Celery task queue with fallback to direct processing.

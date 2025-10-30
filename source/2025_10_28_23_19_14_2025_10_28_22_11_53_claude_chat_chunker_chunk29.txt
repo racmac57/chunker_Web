@@ -1,0 +1,780 @@
+Install with: pip install ijson")
+    
+    logging.info(f"Streaming from {input_file} to {output_file}")
+    
+    # For simplicity, fall back to non-streaming for now
+    # Full streaming implementation would require incremental JSON writing
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    data = process_conversation_data(data, projects, merge_to_files, keep_invalid)
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        if pretty:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        else:
+            json.dump(data, f, ensure_ascii=False)
+
+
+def process_json_file(
+    input_file: Path,
+    output_file: Path,
+    projects: Optional[Dict[str, Any]] = None,
+    pretty: bool = False,
+    stream: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False
+) -> None:
+    """
+    Process a JSON conversation file. Args:
+        input_file: Input JSON file path
+        output_file: Output JSON file path
+        projects: Projects data (optional)
+        pretty: Whether to pretty-print JSON
+        stream: Whether to use streaming mode
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid messages
+    """
+    if stream:
+        process_json_streaming(input_file, output_file, projects, pretty, merge_to_files, keep_invalid)
+        return
+    
+    logging.info(f"Processing {input_file}")
+    
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    data = process_conversation_data(data, projects, merge_to_files, keep_invalid)
+    
+    logging.info(f"Writing to {output_file}")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        if pretty:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        else:
+            json.dump(data, f, ensure_ascii=False)
+
+
+def process_zip_file(
+    input_file: Path,
+    output_file: Path,
+    projects_data: Optional[Dict[str, Any]] = None,
+    pretty: bool = False,
+    stream: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False,
+    no_backup: bool = False
+) -> None:
+    """
+    Process a ZIP archive containing conversations.json. Args:
+        input_file: Input ZIP file path
+        output_file: Output ZIP file path
+        projects_data: Projects data (optional, if not in ZIP)
+        pretty: Whether to pretty-print JSON
+        stream: Whether to use streaming mode
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid messages
+        no_backup: Skip creating backup of original ZIP
+    """
+    logging.info(f"Processing ZIP: {input_file}")
+    
+    # Create backup unless disabled
+    if not no_backup:
+        backup_path = input_file.with_suffix(input_file.suffix + '.bak')
+        import shutil
+        shutil.copy2(input_file, backup_path)
+        logging.info(f"Backup created: {backup_path}")
+    
+    conversations_data = None
+    projects_from_zip = None
+    other_files = {}
+    
+    # Read ZIP contents
+    with zipfile.ZipFile(input_file, 'r') as zin:
+        for info in zin.infolist():
+            if info.filename == 'conversations.json':
+                with zin.open(info) as f:
+                    conversations_data = json.load(f)
+            elif info.filename == 'projects.json':
+                with zin.open(info) as f:
+                    projects_from_zip = json.load(f)
+            else:
+                # Preserve other files (metadata, attachments, etc.) other_files[info.filename] = (zin.read(info), info)
+    
+    if conversations_data is None:
+        raise ValueError("No conversations.json found in ZIP")
+    
+    # Use projects from ZIP if available, otherwise use provided
+    projects = projects_from_zip or projects_data
+    
+    # Process conversations
+    conversations_data = process_conversation_data(
+        conversations_data, projects, merge_to_files, keep_invalid
+    )
+    
+    # Write output ZIP
+    logging.info(f"Writing to {output_file}")
+    with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+        # Write processed conversations
+        conversations_json = json.dumps(
+            conversations_data,
+            indent=2 if pretty else None,
+            ensure_ascii=False
+        )
+        zout.writestr('conversations.json', conversations_json)
+        
+        # Preserve projects.json if it existed
+        if projects_from_zip:
+            projects_json = json.dumps(
+                projects_from_zip,
+                indent=2 if pretty else None,
+                ensure_ascii=False
+            )
+            zout.writestr('projects.json', projects_json)
+        
+        # Preserve other files with original metadata
+        for filename, (data, info) in other_files.items():
+            zinfo = zipfile.ZipInfo(filename, info.date_time)
+            zinfo.compress_type = info.compress_type
+            zinfo.external_attr = info.external_attr
+            zout.writestr(zinfo, data)
+
+
+def find_projects_file(input_file: Path) -> Optional[Path]:
+    """
+    Try to find projects.json next to the input file. Args:
+        input_file: Input file path
+        
+    Returns:
+        Path to projects.json if found, None otherwise
+    """
+    projects_path = input_file.parent / 'projects.json'
+    if projects_path.exists():
+        logging.debug(f"Found projects file: {projects_path}")
+        return projects_path
+    return None
+
+
+def load_projects(projects_path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """
+    Load projects.json if path provided and exists. Args:
+        projects_path: Path to projects.json
+        
+    Returns:
+        Projects data dictionary or None
+    """
+    if projects_path and projects_path.exists():
+        logging.info(f"Loading projects from {projects_path}")
+        with open(projects_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def generate_report(
+    input_file: Path,
+    output_file: Path,
+    report_path: Path,
+    success: bool,
+    error: Optional[str] = None
+) -> None:
+    """
+    Generate a CSV report of the processing. Args:
+        input_file: Input file path
+        output_file: Output file path
+        report_path: Report output path
+        success: Whether processing succeeded
+        error: Error message if failed
+    """
+    import csv
+    from datetime import datetime
+    
+    with open(report_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'input', 'output', 'success', 'error'])
+        writer.writerow([
+            datetime.now().isoformat(),
+            str(input_file),
+            str(output_file) if success else '',
+            'yes' if success else 'no',
+            error or ''
+        ])
+    
+    logging.info(f"Report written to {report_path}")
+
+
+def process_file(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    projects_path: Optional[Union[str, Path]] = None,
+    zip_output: bool = False,
+    stream: bool = False,
+    pretty: bool = False,
+    strict: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+    no_backup: bool = False,
+    no_merge_to_files: bool = False,
+    keep_invalid: bool = False
+) -> int:
+    """
+    Main processing function. Args:
+        input_path: Input file path (JSON or ZIP)
+        output_path: Output file path
+        projects_path: Optional projects.json path
+        zip_output: Force ZIP output
+        stream: Use streaming mode
+        pretty: Pretty-print JSON
+        strict: Strict mode (fail on any error)
+        verbose: Verbose logging
+        quiet: Quiet mode (errors only)
+        no_backup: Don't create backup of ZIP files
+        no_merge_to_files: Don't merge file/attachment references
+        keep_invalid: Keep invalid messages instead of skipping
+        
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    setup_logging(verbose, quiet)
+    
+    input_file = Path(input_path)
+    output_file = Path(output_path)
+    
+    if not input_file.exists():
+        logging.error(f"Input file not found: {input_file}")
+        return 1
+    
+    # Auto-detect projects.json if not provided
+    if projects_path:
+        projects_file = Path(projects_path)
+    else:
+        projects_file = find_projects_file(input_file)
+    
+    projects_data = load_projects(projects_file)
+    
+    # Determine report path
+    report_path = output_file.with_name(output_file.stem + '_report.csv')
+    
+    try:
+        # Process based on input type
+        if input_file.suffix.lower() == '.zip':
+            if zip_output or output_file.suffix.lower() == '.zip':
+                # ZIP to ZIP
+                process_zip_file(
+                    input_file, output_file, projects_data,
+                    pretty, stream, not no_merge_to_files, keep_invalid, no_backup
+                )
+            else:
+                # ZIP to JSON (extract conversations.json)
+                with zipfile.ZipFile(input_file, 'r') as zin:
+                    if 'conversations.json' not in zin.namelist():
+                        raise ValueError("No conversations.json in ZIP")
+                    
+                    with zin.open('conversations.json') as f:
+                        data = json.load(f)
+                    
+                    # Check for projects in ZIP
+                    if 'projects.json' in zin.namelist() and not projects_data:
+                        with zin.open('projects.json') as f:
+                            projects_data = json.load(f)
+                
+                data = process_conversation_data(data, projects_data, not no_merge_to_files, keep_invalid)
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    if pretty:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    else:
+                        json.dump(data, f, ensure_ascii=False)
+        else:
+            # JSON input
+            if zip_output or output_file.suffix.lower() == '.zip':
+                # JSON to ZIP
+                process_json_file(
+                    input_file, output_file.with_suffix('.json'),
+                    projects_data, pretty, stream, not no_merge_to_files, keep_invalid
+                )
+                # Create ZIP with the processed JSON
+                with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+                    with open(output_file.with_suffix('.json'), 'r') as f:
+                        zout.writestr('conversations.json', f.read())
+                    if projects_data:
+                        projects_json = json.dumps(projects_data, indent=2 if pretty else None)
+                        zout.writestr('projects.json', projects_json)
+                # Clean up temp JSON
+                output_file.with_suffix('.json').unlink()
+            else:
+                # JSON to JSON
+                process_json_file(
+                    input_file, output_file, projects_data,
+                    pretty, stream, not no_merge_to_files, keep_invalid
+                )
+        
+        logging.info("Processing complete!") generate_report(input_file, output_file, report_path, True)
+        return 0
+        
+    except Exception as e:
+        logging.error(f"Processing failed: {e}")
+        if strict:
+            raise
+        generate_report(input_file, output_file, report_path, False, str(e))
+        return 1
+
+
+def main() -> int:
+    """Main CLI entry point.""" parser = argparse.ArgumentParser(
+        description='Normalize Claude.ai conversation exports for compatibility. ',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s conversations.json -o fixed.json --pretty
+  %(prog)s export.zip -o patched.zip --zip-output --stream
+  %(prog)s --gui
+        """
+    )
+    
+    parser.add_argument('input', nargs='? ', help='Input file (JSON or ZIP)')
+    parser.add_argument('-o', '--output', help='Output file path')
+    parser.add_argument('-p', '--projects', help='Path to projects.json (auto-detected if not specified)')
+    parser.add_argument('--zip-output', action='store_true', help='Force ZIP output')
+    parser.add_argument('--stream', action='store_true', help='Use streaming mode for large files (requires ijson)')
+    parser.add_argument('--pretty', action='store_true', help='Pretty-print JSON output')
+    parser.add_argument('--strict', action='store_true', help='Strict mode: fail on any error')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Quiet mode (errors only)')
+    parser.add_argument('--no-backup', action='store_true', help='Do not create backup of ZIP files')
+    parser.add_argument('--no-merge-to-files', action='store_true', help='Do not merge file/attachment references')
+    parser.add_argument('--keep-invalid', action='store_true', help='Keep invalid messages instead of skipping')
+    parser.add_argument('--gui', action='store_true', help='Launch a simple Tkinter UI (optional)')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    
+    args = parser.parse_args()
+    
+    # GUI mode
+    if args.gui:
+        try:
+            from gui import launch_gui
+            launch_gui()
+            return 0
+        except ImportError as e:
+            print(f"ERROR: GUI not available: {e}", file=sys.stderr)
+            print("Tkinter is required for GUI mode (usually included with Python)", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"ERROR: GUI failed to launch: {e}", file=sys.stderr)
+            return 1
+    
+    # CLI mode - require input and output
+    if not args.input:
+        parser.error("the following arguments are required: input (or use --gui)")
+    
+    if not args.output:
+        parser.error("the following arguments are required: -o/--output (or use --gui)")
+    
+    return process_file(
+        args.input,
+        args.output,
+        args.projects,
+        args.zip_output,
+        args.stream,
+        args.pretty,
+        args.strict,
+        args.verbose,
+        args.quiet,
+        args.no_backup,
+        args.no_merge_to_files,
+        args.keep_invalid
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+```
+
+Now let's update the tests to handle the new parameter:
+
+```python
+"""Test enhanced merge_file_references for Claude rich attachment format.""" import unittest
+from patch_conversations import merge_file_references
+
+
+class TestMergeRichAttachments(unittest.TestCase):
+    """Test merging of Claude's rich attachment format.""" def test_simple_uuid_backward_compatible(self):
+        """Test backward compatibility with simple UUID format.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "files": ["file1.txt"],
+            "attachments": [{"uuid": "att1"}]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)
+        # Files should contain both
+        file_uuids = [f.get('file_uuid') if isinstance(f, dict) else f for f in result['files']]
+        self.assertIn('file1.txt', file_uuids)
+        self.assertIn('att1', file_uuids)
+    
+    def test_rich_claude_attachment(self):
+        """Test merging Claude's rich attachment format.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.md"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 11023,
+                    "file_type": "md",
+                    "extracted_content": "Full content here..."
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)  # Deduplicated
+        
+        # Should have rich attachment data (attachments wins)
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['file_name'], 'doc.md')
+        self.assertEqual(file_obj['file_uuid'], 'doc.md')  # Mapped for viewer
+        self.assertEqual(file_obj['file_size'], 11023)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+    
+    def test_deduplication_by_file_name(self):
+        """Test deduplication when same file appears in both arrays.""" message = {
+            "text": "Example",
+            "files": [
+                {"file_name": "script.py"},
+                {"file_name": "doc.md"}
+            ],
+            "attachments": [
+                {
+                    "file_name": "script.py",
+                    "file_size": 5462,
+                    "file_type": "py",
+                    "extracted_content": "Code here..."
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)  # doc.md + script.py (deduplicated)
+        
+        # script.py should have rich data from attachment
+        script_file = next(f for f in result['files'] if f.get('file_name') == 'script.py')
+        self.assertEqual(script_file['file_size'], 5462)
+        self.assertIn('extracted_content', script_file)
+    
+    def test_empty_file_name_dropped(self):
+        """Test that empty file_name values are dropped.""" message = {
+            "text": "Example",
+            "files": [{"file_name": ""}],
+            "attachments": [
+                {"file_name": "", "file_size": 100},
+                {"file_name": "valid.txt", "file_size": 200}
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_name'], 'valid.txt')
+    
+    def test_empty_arrays(self):
+        """Test handling of empty files and attachments arrays.""" message = {
+            "text": "Example",
+            "files": [],
+            "attachments": []
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertNotIn('files', result)  # Both removed when empty
+    
+    def test_mixed_formats(self):
+        """Test handling mixed format (strings, UUIDs, rich objects).""" message = {
+            "text": "Example",
+            "files": ["simple.txt", {"uuid": "uuid123"}],
+            "attachments": [
+                {"uuid": "att456"},
+                {
+                    "file_name": "rich.md",
+                    "file_size": 999,
+                    "extracted_content": "Content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 4)  # All unique
+        
+        # Verify all were merged
+        identifiers = []
+        for f in result['files']:
+            if isinstance(f, dict):
+                identifiers.append(f.get('file_uuid') or f.get('uuid') or f.get('file_name'))
+        
+        self.assertIn('simple.txt', identifiers)
+        self.assertIn('uuid123', identifiers)
+        self.assertIn('att456', identifiers)
+        self.assertIn('rich.md', identifiers)
+    
+    def test_preserves_extracted_content(self):
+        """Test that extracted_content is preserved from attachments.""" message = {
+            "text": "Example",
+            "attachments": [
+                {
+                    "file_name": "document.txt",
+                    "file_size": 5000,
+                    "file_type": "txt",
+                    "extracted_content": "This is the full file content that should be preserved." }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['extracted_content'], "This is the full file content that should be preserved.") self.assertEqual(file_obj['file_uuid'], 'document.txt')
+    
+    def test_attachment_overwrites_file(self):
+        """Test that attachment data overwrites files data when deduplicating.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.md", "custom_field": "from_files"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 1234,
+                    "file_type": "md",
+                    "extracted_content": "Rich content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertEqual(len(result['files']), 1)
+        file_obj = result['files'][0]
+        
+        # Should have attachment data (richer)
+        self.assertEqual(file_obj['file_size'], 1234)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+        # custom_field from files should be lost (attachment overwrites)
+        self.assertNotIn('custom_field', file_obj)
+    
+    def test_no_attachments_field(self):
+        """Test messages without attachments field.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.txt"}]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'doc.txt')
+    
+    def test_no_files_field(self):
+        """Test messages with only attachments.""" message = {
+            "text": "Example",
+            "attachments": [
+                {
+                    "file_name": "attachment.pdf",
+                    "file_size": 9999,
+                    "file_type": "pdf"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'attachment.pdf')
+        self.assertEqual(result['files'][0]['file_size'], 9999)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+```
+
+I need to update all the test methods. Let me do that more efficiently:
+
+```python
+"""Test enhanced merge_file_references for Claude rich attachment format.""" import unittest
+from patch_conversations import merge_file_references
+
+
+class TestMergeRichAttachments(unittest.TestCase):
+    """Test merging of Claude's rich attachment format.""" def test_simple_uuid_backward_compatible(self):
+        """Test backward compatibility with simple UUID format.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "files": ["file1.txt"],
+            "attachments": [{"uuid": "att1"}]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)
+        # Files should contain both
+        file_uuids = [f.get('file_uuid') if isinstance(f, dict) else f for f in result['files']]
+        self.assertIn('file1.txt', file_uuids)
+        self.assertIn('att1', file_uuids)
+    
+    def test_rich_claude_attachment(self):
+        """Test merging Claude's rich attachment format.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "files": [{"file_name": "doc.md"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 11023,
+                    "file_type": "md",
+                    "extracted_content": "Full content here..."
+                }
+            ]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)  # Deduplicated
+        
+        # Should have rich attachment data (attachments wins)
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['file_name'], 'doc.md')
+        self.assertEqual(file_obj['file_uuid'], 'doc.md')  # Mapped for viewer
+        self.assertEqual(file_obj['file_size'], 11023)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+    
+    def test_deduplication_by_file_name(self):
+        """Test deduplication when same file appears in both arrays.""" message = {
+            "text": "Example",
+            "files": [
+                {"file_name": "script.py"},
+                {"file_name": "doc.md"}
+            ],
+            "attachments": [
+                {
+                    "file_name": "script.py",
+                    "file_size": 5462,
+                    "file_type": "py",
+                    "extracted_content": "Code here..."
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)  # doc.md + script.py (deduplicated)
+        
+        # script.py should have rich data from attachment
+        script_file = next(f for f in result['files'] if f.get('file_name') == 'script.py')
+        self.assertEqual(script_file['file_size'], 5462)
+        self.assertIn('extracted_content', script_file)
+    
+    def test_empty_file_name_dropped(self):
+        """Test that empty file_name values are dropped.""" message = {
+            "text": "Example",
+            "files": [{"file_name": ""}],
+            "attachments": [
+                {"file_name": "", "file_size": 100},
+                {"file_name": "valid.txt", "file_size": 200}
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_name'], 'valid.txt')
+    
+    def test_empty_arrays(self):
+        """Test handling of empty files and attachments arrays.""" message = {
+            "text": "Example",
+            "files": [],
+            "attachments": []
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertNotIn('files', result)  # Both removed when empty
+    
+    def test_mixed_formats(self):
+        """Test handling mixed format (strings, UUIDs, rich objects).""" message = {
+            "text": "Example",
+            "files": ["simple.txt", {"uuid": "uuid123"}],
+            "attachments": [
+                {"uuid": "att456"},
+                {
+                    "file_name": "rich.md",
+                    "file_size": 999,
+                    "extracted_content": "Content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 4)  # All unique
+        
+        # Verify all were merged
+        identifiers = []
+        for f in result['files']:
+            if isinstance(f, dict):
+                identifiers.append(f.get('file_uuid') or f.get('uuid') or f.get('file_name'))
+        
+        self.assertIn('simple.txt', identifiers)
+        self.assertIn('uuid123', identifiers)
+        self.assertIn('att456', identifiers)
+        self.assertIn('rich.md', identifiers)
+    
+    def test_preserves_extracted_content(self):
+        """Test that extracted_content is preserved from attachments.""" message = {
+            "text": "Example",
+            "attachments": [
+                {
+                    "file_name": "document.txt",
+                    "file_size": 5000,
+                    "file_type": "txt",
+                    "extracted_content": "This is the full file content that should be preserved." }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['extracted_content'], "This is the full file content that should be preserved.") self.assertEqual(file_obj['file_uuid'], 'document.txt')
+    
+    def test_attachment_overwrites_file(self):
+        """Test that attachment data overwrites files data when deduplicating.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.md", "custom_field": "from_files"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 1234,
+                    "file_type": "md",
+                    "extracted_content": "Rich content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertEqual(len(result['files']), 1)
+        file_obj = result['files'][0]
+        
+        # Should have attachment data (richer)
+        self.assertEqual(file_obj['file_size'], 1234)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+        # custom_field from files should be lost (attachment overwrites)
+        self.assertNotIn('custom_field', file_obj)
+    
+    def test_no_attachments_field(self):
+        """Test messages without attachments field."""

@@ -1,0 +1,807 @@
+faithfulness_score = scorer.calculate_faithfulness(answer, context)
+print(f"Faithfulness Score: {faithfulness_score:.2f}")
+
+detailed_analysis = scorer.detailed_faithfulness_analysis(answer, context)
+print(f"Supported claims: {detailed_analysis['supported_claims']}/{detailed_analysis['total_claims']}")
+
+ChromaDB Integration:
+import chromadb
+from chromadb.config import Settings
+import uuid
+from datetime import datetime
+import json
+
+class ChromaRAG:
+    def __init__(self, persist_directory="./chroma_db"):
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        
+        # Create or get collection
+        self.collection = self.client.get_or_create_collection(
+            name="chunker_knowledge_base",
+            metadata={"description": "Enterprise chunker knowledge base"}
+        )
+    
+    def add_chunk(self, chunk_text, metadata):
+        """Add a chunk to the vector database"""
+        chunk_id = f"{metadata['timestamp']}_{metadata['file_name']}_chunk{metadata['chunk_index']}"
+        
+        # Prepare metadata for ChromaDB
+        chroma_metadata = {
+            "file_name": metadata["file_name"],
+            "file_type": metadata["file_type"],
+            "chunk_index": metadata["chunk_index"],
+            "timestamp": metadata["timestamp"],
+            "department": metadata.get("department", "admin"),
+            "keywords": json.dumps(metadata.get("keywords", [])),
+            "file_size": metadata.get("file_size", 0),
+            "processing_time": metadata.get("processing_time", 0)
+        }
+        
+        # Add to collection
+        self.collection.add(
+            documents=[chunk_text],
+            metadatas=[chroma_metadata],
+            ids=[chunk_id]
+        )
+        
+        return chunk_id
+    
+    def search_similar(self, query, n_results=5, file_type=None, department=None):
+        """Search for similar chunks"""
+        where_clause = {}
+        
+        if file_type:
+            where_clause["file_type"] = file_type
+        if department:
+            where_clause["department"] = department
+        
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where_clause if where_clause else None
+        )
+        
+        return self._format_results(results)
+    
+    def search_by_keywords(self, keywords, n_results=5):
+        """Search by specific keywords"""
+        # Convert keywords to query string
+        query = " ".join(keywords)
+        return self.search_similar(query, n_results)
+    
+    def get_chunk_by_id(self, chunk_id):
+        """Retrieve specific chunk by ID"""
+        results = self.collection.get(ids=[chunk_id])
+        return self._format_results(results)
+    
+    def update_chunk(self, chunk_id, new_text, new_metadata):
+        """Update existing chunk"""
+        self.collection.update(
+            ids=[chunk_id],
+            documents=[new_text],
+            metadatas=[new_metadata]
+        )
+    
+    def delete_chunk(self, chunk_id):
+        """Delete chunk from database"""
+        self.collection.delete(ids=[chunk_id])
+    
+    def get_collection_stats(self):
+        """Get statistics about the collection"""
+        count = self.collection.count()
+        return {
+            "total_chunks": count,
+            "collection_name": self.collection.name,
+            "last_updated": datetime.now().isoformat()
+        }
+    
+    def _format_results(self, results):
+        """Format ChromaDB results for easier use"""
+        formatted_results = []
+        
+        if results.get("documents"):
+            for i, doc in enumerate(results["documents"][0]):
+                formatted_results.append({
+                    "id": results["ids"][0][i],
+                    "document": doc,
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i] if results.get("distances") else None
+                })
+        
+        return formatted_results
+
+# Integration with watcher_splitter.py
+def integrate_chroma_with_watcher():
+    """Example of how to integrate ChromaDB with the existing watcher"""
+    
+    # Initialize ChromaDB
+    chroma_rag = ChromaRAG()
+    
+    def process_file_with_chroma(file_path, config):
+        """Enhanced file processing with ChromaDB integration"""
+        # ... existing processing code ...
+        
+        # After creating chunks, add them to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = {
+                "file_name": file_path.name,
+                "file_type": file_path.suffix,
+                "chunk_index": i + 1,
+                "timestamp": datetime.now().isoformat(),
+                "department": department,
+                "keywords": extract_keywords(chunk),
+                "file_size": file_path.stat().st_size,
+                "processing_time": time.time() - start_time
+            }
+            
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+        
+        return True
+
+# Usage examples
+def example_usage():
+    # Initialize
+    rag = ChromaRAG()
+    
+    # Add chunks
+    metadata = {
+        "file_name": "excel_guide.md",
+        "file_type": ".md",
+        "chunk_index": 1,
+        "timestamp": "2025-10-27T12:00:00Z",
+        "department": "admin",
+        "keywords": ["excel", "vlookup", "formulas"]
+    }
+    
+    chunk_id = rag.add_chunk(
+        "VLOOKUP is used to find values in a table. Syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])",
+        metadata
+    )
+    
+    # Search
+    results = rag.search_similar("How do I use vlookup in Excel? ", n_results=3)
+    print(f"Found {len(results)} similar chunks")
+    
+    # Search by keywords
+    keyword_results = rag.search_by_keywords(["vlookup", "excel"])
+    print(f"Found {len(keyword_results)} chunks with keywords")
+    
+    # Get stats
+    stats = rag.get_collection_stats()
+    print(f"Total chunks in database: {stats['total_chunks']}")
+
+Concrete Examples:
+1. Complete RAG Pipeline:
+def complete_rag_example():
+    """Complete RAG pipeline with evaluation"""
+    
+    # Initialize components
+    chroma_rag = ChromaRAG()
+    faithfulness_scorer = FaithfulnessScorer()
+    
+    # Query
+    query = "How do I fix Power BI query errors?" # Retrieve relevant chunks
+    retrieved_chunks = chroma_rag.search_similar(query, n_results=5)
+    
+    # Generate answer (simplified)
+    context = "\n".join([chunk["document"] for chunk in retrieved_chunks])
+    answer = f"Based on the context: {context[:500]}..."
+    
+    # Evaluate faithfulness
+    faithfulness_score = faithfulness_scorer.calculate_faithfulness(answer, context)
+    
+    # Return results
+    return {
+        "query": query,
+        "answer": answer,
+        "sources": [chunk["metadata"]["file_name"] for chunk in retrieved_chunks],
+        "faithfulness_score": faithfulness_score,
+        "retrieved_chunks": len(retrieved_chunks)
+    }
+
+2. Batch Processing:
+def batch_process_files(file_paths):
+    """Process multiple files and add to ChromaDB"""
+    chroma_rag = ChromaRAG()
+    
+    for file_path in file_paths:
+        # Process file (existing logic)
+        chunks = process_file_enhanced(file_path, config)
+        
+        # Add each chunk to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = extract_metadata(file_path, chunk, i)
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            print(f"Added {chunk_id} to knowledge base")
+    
+    # Get final stats
+    stats = chroma_rag.get_collection_stats()
+    print(f"Knowledge base now contains {stats['total_chunks']} chunks")
+
+3. Evaluation Pipeline:
+def evaluate_rag_performance():
+    """Evaluate RAG performance with test queries"""
+    
+    test_queries = [
+        {
+            "query": "How do I fix vlookup errors? ",
+            "expected_answer": "Check data types and table references",
+            "expected_sources": ["excel_guide.md", "troubleshooting.xlsx"]
+        },
+        {
+            "query": "What is Power BI query syntax? ",
+            "expected_answer": "Use M language for Power Query",
+            "expected_sources": ["power_bi_guide.md"]
+        }
+    ]
+    
+    chroma_rag = ChromaRAG()
+    faithfulness_scorer = FaithfulnessScorer()
+    
+    results = []
+    
+    for test_case in test_queries:
+        # Retrieve
+        retrieved = chroma_rag.search_similar(test_case["query"], n_results=5)
+        
+        # Generate answer
+        context = "\n".join([chunk["document"] for chunk in retrieved])
+        answer = generate_answer(test_case["query"], context)
+        
+        # Evaluate
+        faithfulness = faithfulness_scorer.calculate_faithfulness(answer, context)
+        
+        # Check source relevance
+        retrieved_sources = [chunk["metadata"]["file_name"] for chunk in retrieved]
+        source_relevance = len(set(retrieved_sources) & set(test_case["expected_sources"])) / len(test_case["expected_sources"])
+        
+        results.append({
+            "query": test_case["query"],
+            "faithfulness_score": faithfulness,
+            "source_relevance": source_relevance,
+            "retrieved_sources": retrieved_sources
+        })
+    
+    return results
+
+Benefits:
+1. Quality assurance: Catch bad retrievals; Identify problematic chunks/queries; Track improvements. 2. Optimization: Tune chunk sizes; Adjust retrieval; Improve metadata. 3. User experience: Faster/accurate answers; Better citations; Reduced hallucination. Next steps:
+1. Set up LangSmith account and get API key. 2. Create evaluation datasets with common queries. 3. Implement core metrics (precision@k, recall@k, MRR). 4. Add LangSmith tracing to RAG pipeline. 5. Set up monitoring and alerting. Apply these code patches/enhancements:
+
+### requirements_rag.txt
+ollama==0.3.3
+faiss-cpu==1.8.0
+pandas==2.2.3
+langchain==0.3.1
+langchain-community==0.3.1
+openpyxl==3.1.5  # For .xlsx
+pypdf2==3.0.1  # For .pdf
+langsmith==0.1.129  # For LangSmith
+rouge-score==0.1.2  # For ROUGE
+nltk==3.9.1  # For BLEU
+bert-score==0.3.13  # For BERTScore
+sentence-transformers==3.1.1  # For faithfulness
+chromadb==0.5.11  # For ChromaDB
+# Add others: pdfminer.six, python-docx, etc. ### ollama_integration.py
+"""RAG search using Ollama embeddings and FAISS vector store.""" from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.retrievers import BM25Retriever
+
+def initialize_ollama(model_name="nomic-embed-text"):
+    """Initialize Ollama embeddings.""" return OllamaEmbeddings(model=model_name)
+
+def initialize_vectorstore(embeddings, chunks=None, metadatas=None):
+    """Initialize FAISS vector store with optional pre-loaded chunks.""" if chunks and metadatas:
+        return FAISS.from_texts(texts=chunks, embedding=embeddings, metadatas=metadatas)
+    return FAISS(embeddings.embed_query, index=None)  # Placeholder for empty
+
+def hybrid_search(query, vectorstore, keyword_retriever, top_k=5):
+    """Combine semantic and keyword search.""" vector_results = vectorstore.similarity_search_with_score(query, k=top_k)
+    keyword_results = keyword_retriever.get_relevant_documents(query)[:top_k]
+    combined = list(set([(r[0].page_content, r[0].metadata, r[1]) for r in vector_results] +
+                        [(r.page_content, r.metadata, 0.0) for r in keyword_results]))
+    return sorted(combined, key=lambda x: x[2], reverse=True)[:top_k]
+
+def search_knowledge_base(query, vectorstore, keyword_retriever):
+    """Search knowledge base and return formatted results.""" results = hybrid_search(query, vectorstore, keyword_retriever)
+    return [{"content": r[0], "metadata": r[1], "score": r[2]} for r in results]
+
+### embedding_helpers.py
+"""Helpers for embedding generation and storage.""" import faiss
+import numpy as np
+from langchain_community.vectorstores import FAISS
+
+def save_embeddings(vectorstore, path="faiss_index"):
+    """Save FAISS index to disk.""" vectorstore.save_local(path)
+
+def load_embeddings(embeddings, path="faiss_index"):
+    """Load FAISS index from disk.""" return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)
+
+def generate_chunk_metadata(chunk, filename, file_type, timestamp, index, extract_keywords):
+    """Generate metadata for a chunk.""" return {
+        "source_file": filename,
+        "file_type": file_type,
+        "keywords": extract_keywords(chunk),
+        "timestamp": timestamp,
+        "chunk_index": index
+    }
+
+### Patch watcher_splitter.py
+# Add imports
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from embedding_helpers import generate_chunk_metadata, save_embeddings
+from langchain.retrievers import BM25Retriever
+# For new file types: import openpyxl, pypdf2, ast, etc. # Globals
+embeddings = OllamaEmbeddings(model="nomic-embed-text")
+splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+vectorstore = FAISS(embeddings.embed_query, index=None)  # Init empty
+keyword_retriever = None
+
+def update_embeddings(filename, file_content, file_type, timestamp, extract_keywords):
+    """Update embeddings for a file.""" global vectorstore, keyword_retriever
+    chunks = splitter.split_text(file_content)
+    metadatas = [generate_chunk_metadata(chunk, filename, file_type, timestamp, i, extract_keywords)
+                 for i, chunk in enumerate(chunks)]
+    
+    # Remove old
+    if vectorstore.index.ntotal > 0:
+        ids_to_delete = [id for id, meta in vectorstore.docstore._dict.items() if meta["source_file"] == filename]
+        vectorstore.delete(ids_to_delete)
+    
+    # Add new
+    vectorstore.add_texts(texts=chunks, metadatas=metadatas)
+    keyword_retriever = BM25Retriever.from_texts(chunks, metadatas=metadatas)
+    
+    # Save
+    save_embeddings(vectorstore, "faiss_index")
+
+# In process_file:
+def process_file(filename, file_content, file_type, timestamp):
+    # Existing logic + extract_metadata(file_type, file_content) -> add to chunks
+    update_embeddings(filename, file_content, file_type, timestamp, extract_keywords)  # Assume extract_keywords exists
+
+# Add file-type handlers (e.g., def extract_from_xlsx(file_path): load_workbook, get sheets/formulas/etc.) ### New rag_evaluation.py
+"""RAG evaluation metrics.""" from rouge_score import rouge_scorer
+from nltk.translate.bleu_score import sentence_bleu
+from bert_score import score as bertscore
+import numpy as np
+
+def precision_at_k(relevant, k):
+    """Precision@K."""
+    return sum(relevant[:k]) / k
+
+def recall_at_k(relevant, total_relevant):
+    """Recall@K."""
+    return sum(relevant) / total_relevant
+
+def mrr(relevant):
+    """Mean Reciprocal Rank.""" for idx, rel in enumerate(relevant):
+        if rel == 1:
+            return 1 / (idx + 1)
+    return 0
+
+def evaluate_retrieval(ground_truth, retrieved, k=5):
+    """Compute precision, recall, MRR.""" relevant = [1 if doc in ground_truth else 0 for doc in retrieved[:k]]
+    p_at_k = precision_at_k(relevant, k)
+    r_at_k = recall_at_k(relevant, len(ground_truth))
+    mrr_score = mrr(relevant)
+    return {"precision_at_k": p_at_k, "recall_at_k": r_at_k, "mrr": mrr_score}
+
+def evaluate_generation(reference, generated):
+    """ROUGE, BLEU, BERTScore.""" scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+    rouge_scores = scorer.score(reference, generated)
+    bleu = sentence_bleu([reference.split()], generated.split())
+    P, R, F1 = bertscore([generated], [reference], lang="en")
+    return {"rouge": rouge_scores, "bleu": bleu, "bertscore": F1.mean().item()}
+
+def evaluate_end_to_end(query, response, context):
+    """Faithfulness, relevancy - use heuristics or LLM judge.""" # Placeholder: Implement with LangSmith evaluators or custom logic
+    pass
+
+# Integrate: In rag_search.py, log metrics for test queries; export to CSV/JSON. ### New langsmith_integration.py
+"""LangSmith integration for tracing and evaluation.""" import os
+from langsmith import Client, traceable
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Example, Run
+
+os.environ["LANGCHAIN_API_KEY"] = "your_langsmith_api_key"
+os.environ["LANGCHAIN_PROJECT"] = "chunker-rag-eval"
+
+client = Client()
+
+@traceable(run_type="chain")
+def traced_rag_chain(query):
+    # Wrap existing rag_chain or search_knowledge_base
+    results = search_knowledge_base(query, vectorstore, keyword_retriever)
+    # Generation step here if needed
+    return results
+
+def create_feedback(run_id, score, comment=""):
+    client.create_feedback(run_id=run_id, key="user_feedback", score=score, comment=comment)
+
+def run_evaluation(examples, rag_func):
+    results = evaluate(
+        rag_func,
+        data=examples,
+        evaluators=["answer_relevance", "context_relevance", "faithfulness", "answer_correctness"],
+        experiment_prefix="rag-eval-v1"
+    )
+    return results
+
+# Example evaluation dataset
+def load_eval_dataset(path="test_queries.json"):
+    import json
+    with open(path, "r") as f:
+        data = json.load(f)
+    return [Example(inputs={"question": d["query"]}, outputs={"answer": d["expected_answer"]}) for d in data]
+
+# Usage: eval_results = run_evaluation(load_eval_dataset(), traced_rag_chain)
+
+### New automated_eval.py
+"""Automated RAG evaluation.""" import schedule
+import time
+
+def run_auto_eval():
+    examples = load_eval_dataset()
+    results = run_evaluation(examples, traced_rag_chain)
+    # Compare to baseline, alert if regression (e.g., via email/slack)
+    # Generate report (CSV/JSON)
+    pass
+
+schedule.every().day.at("02:00").do(run_auto_eval)
+
+while True:
+    schedule.run_pending()
+    time.sleep(60)
+
+Update README: Add setup (Ollama pull/run nomic-embed-text, deps, LangSmith API key), usage (process files, query KB, run evaluations), metrics eval, LangSmith dashboards. Ensure: Local-first, no costs (except LangSmith if scaled), handle updates/security/performance. Make all changes, add comments/docstrings for clarity/maintainability. ```
+
+---
+
+**Cursor**
+
+I can see you have a comprehensive enhancement request for Chunker_v2! This is a substantial expansion that adds RAG evaluation, LangSmith integration, ChromaDB, faithfulness scoring, and watchdog monitoring. Let me implement these enhancements systematically. Let me start by creating the enhanced requirements file:
+
+
+```pip-requirements
+# Enhanced Requirements for Chunker_v2 with RAG Integration
+# Core dependencies
+nltk>=3.9.1
+psutil>=5.9.0
+sqlite3
+json
+pathlib
+datetime
+logging
+concurrent.futures
+multiprocessing
+threading
+time
+shutil
+traceback
+re
+ast
+collections
+typing
+
+# RAG and Vector Database
+ollama>=0.3.3
+faiss-cpu>=1.8.0
+chromadb>=0.5.11
+sentence-transformers>=3.1.1
+langchain>=0.3.1
+langchain-community>=0.3.1
+langsmith>=0.1.129
+
+# File Processing
+openpyxl>=3.1.5  # For .xlsx files
+pypdf2>=3.0.1  # For .pdf files
+python-docx>=1.2.0  # For .docx files
+pyyaml>=6.0.2  # For .yaml files
+lxml>=4.9.0  # For .xml files
+
+# Evaluation Metrics
+rouge-score>=0.1.2  # For ROUGE metrics
+bert-score>=0.3.13  # For BERTScore
+scikit-learn>=1.7.2  # For cosine similarity
+numpy>=1.22.5  # For numerical operations
+pandas>=2.2.3  # For data handling
+
+# Monitoring and File Watching
+watchdog>=3.0.0  # For real-time file monitoring
+schedule>=1.2.0  # For automated evaluations
+
+# Optional: Advanced PDF processing
+pdfminer.six>=20221105  # Alternative PDF processor
+pymupdf>=1.23.0  # Another PDF option
+
+# Development and Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+```
+
+Now let me create the Ollama integration module:
+
+
+```python
+"""
+Ollama Integration for Chunker_v2
+Provides local embeddings using Ollama with nomic-embed-text model
+"""
+
+import logging
+import os
+from typing import List, Dict, Any, Optional
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.retrievers import BM25Retriever
+from langchain.schema import Document
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+class OllamaRAGSystem:
+    """
+    RAG system using Ollama for local embeddings and FAISS for vector storage. Provides hybrid search combining semantic and keyword retrieval.
+    """ def __init__(self, model_name: str = "nomic-embed-text", persist_dir: str = "./faiss_index"):
+        """
+        Initialize Ollama RAG system. Args:
+            model_name: Ollama embedding model to use
+            persist_dir: Directory to persist FAISS index
+        """
+        self.model_name = model_name
+        self.persist_dir = persist_dir
+        self.embeddings = None
+        self.vectorstore = None
+        self.keyword_retriever = None
+        self.documents = []
+        self.metadatas = []
+        
+        self._initialize_ollama()
+        self._initialize_vectorstore()
+    
+    def _initialize_ollama(self) -> None:
+        """Initialize Ollama embeddings.""" try:
+            self.embeddings = OllamaEmbeddings(model=self.model_name)
+            logger.info(f"Initialized Ollama embeddings with model: {self.model_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Ollama embeddings: {e}")
+            raise
+    
+    def _initialize_vectorstore(self) -> None:
+        """Initialize FAISS vector store.""" try:
+            # Create empty FAISS index
+            self.vectorstore = FAISS(self.embeddings.embed_query, index=None)
+            logger.info("Initialized FAISS vector store")
+        except Exception as e:
+            logger.error(f"Failed to initialize FAISS vector store: {e}")
+            raise
+    
+    def add_documents(self, texts: List[str], metadatas: List[Dict[str, Any]]) -> None:
+        """
+        Add documents to the vector store. Args:
+            texts: List of text chunks
+            metadatas: List of metadata dictionaries
+        """
+        try:
+            # Add to FAISS
+            self.vectorstore.add_texts(texts=texts, metadatas=metadatas)
+            
+            # Update BM25 retriever
+            self.keyword_retriever = BM25Retriever.from_texts(texts, metadatas=metadatas)
+            
+            # Store for persistence
+            self.documents.extend(texts)
+            self.metadatas.extend(metadatas)
+            
+            logger.info(f"Added {len(texts)} documents to vector store")
+            
+        except Exception as e:
+            logger.error(f"Failed to add documents: {e}")
+            raise
+    
+    def hybrid_search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid search combining semantic and keyword retrieval. Args:
+            query: Search query
+            top_k: Number of results to return
+            
+        Returns:
+            List of search results with content, metadata, and scores
+        """
+        try:
+            # Semantic search
+            vector_results = self.vectorstore.similarity_search_with_score(query, k=top_k)
+            
+            # Keyword search
+            keyword_results = []
+            if self.keyword_retriever:
+                keyword_results = self.keyword_retriever.get_relevant_documents(query)[:top_k]
+            
+            # Combine and deduplicate results
+            combined_results = []
+            seen_content = set()
+            
+            # Add vector results
+            for doc, score in vector_results:
+                if doc.page_content not in seen_content:
+                    combined_results.append({
+                        "content": doc.page_content,
+                        "metadata": doc.metadata,
+                        "score": float(score),
+                        "type": "semantic"
+                    })
+                    seen_content.add(doc.page_content)
+            
+            # Add keyword results
+            for doc in keyword_results:
+                if doc.page_content not in seen_content:
+                    combined_results.append({
+                        "content": doc.page_content,
+                        "metadata": doc.metadata,
+                        "score": 0.0,  # BM25 doesn't provide scores in this implementation
+                        "type": "keyword"
+                    })
+                    seen_content.add(doc.page_content)
+            
+            # Sort by score (higher is better for semantic, lower is better for FAISS distance)
+            combined_results.sort(key=lambda x: x["score"], reverse=True)
+            
+            return combined_results[:top_k]
+            
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
+            return []
+    
+    def search_similar(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Perform semantic similarity search. Args:
+            query: Search query
+            top_k: Number of results to return
+            
+        Returns:
+            List of similar documents
+        """
+        try:
+            results = self.vectorstore.similarity_search_with_score(query, k=top_k)
+            return [
+                {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                    "score": float(score),
+                    "type": "semantic"
+                }
+                for doc, score in results
+            ]
+        except Exception as e:
+            logger.error(f"Semantic search failed: {e}")
+            return []
+    
+    def search_by_keywords(self, keywords: List[str], top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search by specific keywords using BM25. Args:
+            keywords: List of keywords to search for
+            top_k: Number of results to return
+            
+        Returns:
+            List of documents matching keywords
+        """
+        try:
+            if not self.keyword_retriever:
+                return []
+            
+            query = " ".join(keywords)
+            results = self.keyword_retriever.get_relevant_documents(query)[:top_k]
+            
+            return [
+                {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                    "score": 0.0,
+                    "type": "keyword"
+                }
+                for doc in results
+            ]
+        except Exception as e:
+            logger.error(f"Keyword search failed: {e}")
+            return []
+    
+    def save_index(self) -> None:
+        """Save FAISS index to disk.""" try:
+            os.makedirs(self.persist_dir, exist_ok=True)
+            self.vectorstore.save_local(self.persist_dir)
+            logger.info(f"Saved FAISS index to {self.persist_dir}")
+        except Exception as e:
+            logger.error(f"Failed to save index: {e}")
+            raise
+    
+    def load_index(self) -> bool:
+        """
+        Load FAISS index from disk. Returns:
+            True if loaded successfully, False otherwise
+        """
+        try:
+            if os.path.exists(self.persist_dir):
+                self.vectorstore = FAISS.load_local(
+                    self.persist_dir, 
+                    self.embeddings, 
+                    allow_dangerous_deserialization=True
+                )
+                
+                # Rebuild BM25 retriever
+                if self.documents and self.metadatas:
+                    self.keyword_retriever = BM25Retriever.from_texts(
+                        self.documents, 
+                        metadatas=self.metadatas
+                    )
+                
+                logger.info(f"Loaded FAISS index from {self.persist_dir}")
+                return True
+            else:
+                logger.info("No existing index found, starting fresh")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to load index: {e}")
+            return False
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get statistics about the vector store. Returns:
+            Dictionary with statistics
+        """
+        try:
+            count = self.vectorstore.index.ntotal if self.vectorstore.index else 0
+            return {
+                "total_documents": count,
+                "model_name": self.model_name,
+                "persist_dir": self.persist_dir,
+                "has_keyword_retriever": self.keyword_retriever is not None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get stats: {e}")
+            return {"error": str(e)}
+
+def initialize_ollama_rag(model_name: str = "nomic-embed-text", persist_dir: str = "./faiss_index") -> OllamaRAGSystem:
+    """
+    Initialize Ollama RAG system. Args:
+        model_name: Ollama embedding model to use
+        persist_dir: Directory to persist FAISS index
+        
+    Returns:
+        Initialized OllamaRAGSystem instance
+    """
+    return OllamaRAGSystem(model_name=model_name, persist_dir=persist_dir)
+
+def check_ollama_availability() -> bool:
+    """
+    Check if Ollama is available and the model is installed. Returns:
+        True if Ollama is available, False otherwise
+    """
+    try:
+        embeddings = OllamaEmbeddings(model="nomic-embed-text")
+        # Try a simple embedding to test
+        test_embedding = embeddings.embed_query("test")
+        return len(test_embedding) > 0
+    except Exception as e:
+        logger.warning(f"Ollama not available: {e}")
+        return False
+
+# Example usage
+if __name__ == "__main__":
+    # Initialize RAG system
+    rag = initialize_ollama_rag()
+    
+    # Add some test documents
+    test_docs = [
+        "VLOOKUP is used to find values in Excel tables. ",
+        "Power BI uses M language for data transformation. ",
+        "Python pandas is great for data analysis."

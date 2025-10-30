@@ -1,0 +1,857 @@
+Args:
+        config: Configuration dictionary
+        rag_system: RAG system to evaluate
+        test_queries: Test queries
+    """
+    try:
+        evaluator = AutomatedEvaluator(config)
+        report = evaluator.run_evaluation(rag_system, test_queries)
+        
+        logger.info("Scheduled evaluation completed")
+        logger.info(f"Summary: {report.get('summary', 'No summary available')}")
+        
+    except Exception as e:
+        logger.error(f"Scheduled evaluation failed: {e}")
+
+def start_automated_evaluation(config: Dict[str, Any], rag_system, test_queries: List[Dict[str, Any]]) -> None:
+    """
+    Start automated evaluation scheduler. Args:
+        config: Configuration dictionary
+        rag_system: RAG system to evaluate
+        test_queries: Test queries
+    """
+    # Schedule evaluations
+    schedule.every().day.at("02:00").do(run_scheduled_evaluation, config, rag_system, test_queries)
+    schedule.every().monday.at("09:00").do(lambda: AutomatedEvaluator(config).generate_csv_report(days=7))
+    schedule.every().month.do(lambda: AutomatedEvaluator(config).cleanup_old_files(days=30))
+    
+    logger.info("Started automated evaluation scheduler")
+    
+    # Run scheduler
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+# Example usage
+if __name__ == "__main__":
+    # Configuration
+    config = {
+        "evaluation_dir": "./evaluations",
+        "reports_dir": "./reports",
+        "baseline_file": "./baseline_metrics.json",
+        "alert_thresholds": {
+            "precision_at_5_mean": 10.0,
+            "recall_at_5_mean": 10.0,
+            "faithfulness_mean": 15.0
+        }
+    }
+    
+    # Sample test queries
+    test_queries = [
+        {
+            "query": "How do I fix vlookup errors? ",
+            "expected_answer": "Check data types and table references",
+            "expected_sources": ["excel_guide.md", "troubleshooting.xlsx"]
+        }
+    ]
+    
+    # Initialize evaluator
+    evaluator = AutomatedEvaluator(config)
+    
+    # Run evaluation (would normally use real RAG system)
+    print("Automated evaluation test completed successfully!") ```
+
+Now let me create the watchdog monitoring system:
+
+
+```python
+"""
+Watchdog Monitoring System for Chunker_v2
+Real-time file monitoring with debouncing and event handling
+"""
+
+import os
+import time
+import logging
+import threading
+from typing import Dict, Any, Optional, Callable
+from datetime import datetime, timedelta
+from pathlib import Path
+from collections import defaultdict, deque
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler, FileMovedEvent, FileCreatedEvent
+
+logger = logging.getLogger(__name__)
+
+class ChunkerEventHandler(FileSystemEventHandler):
+    """
+    Custom event handler for chunker file monitoring.
+    """ def __init__(self, config: Dict[str, Any], process_callback: Callable):
+        """
+        Initialize event handler. Args:
+            config: Configuration dictionary
+            process_callback: Callback function for processing files
+        """
+        self.config = config
+        self.process_callback = process_callback
+        self.debounce_window = config.get("debounce_window", 1.0)  # seconds
+        self.max_workers = config.get("max_workers", 4)
+        self.failed_dir = config.get("failed_dir", "03_archive/failed")
+        self.default_source_folder = config.get("default_source_folder", "02_data")
+        
+        # Event tracking
+        self.event_queue = deque()
+        self.event_timestamps = defaultdict(list)
+        self.processing_files = set()
+        self.worker_pool = []
+        
+        # Create failed directory
+        os.makedirs(self.failed_dir, exist_ok=True)
+        
+        logger.info("Initialized ChunkerEventHandler")
+    
+    def on_moved(self, event: FileMovedEvent) -> None:
+        """
+        Handle file moved events. Args:
+            event: File moved event
+        """
+        if event.is_directory:
+            return
+        
+        self._handle_file_event(event.src_path, event.dest_path, "moved")
+    
+    def on_created(self, event: FileCreatedEvent) -> None:
+        """
+        Handle file created events. Args:
+            event: File created event
+        """
+        if event.is_directory:
+            return
+        
+        self._handle_file_event(event.src_path, None, "created")
+    
+    def _handle_file_event(self, src_path: str, dest_path: Optional[str], event_type: str) -> None:
+        """
+        Handle file events with debouncing. Args:
+            src_path: Source file path
+            dest_path: Destination file path (for moved events)
+            event_type: Type of event (moved, created)
+        """
+        try:
+            file_path = Path(src_path)
+            
+            # Skip if not a supported file type
+            if not self._is_supported_file(file_path):
+                return
+            
+            # Skip if already processing
+            if str(file_path) in self.processing_files:
+                return
+            
+            # Skip symlinks
+            if file_path.is_symlink():
+                logger.debug(f"Skipping symlink: {file_path}")
+                return
+            
+            # Add to event queue with debouncing
+            self._add_to_queue(file_path, dest_path, event_type)
+            
+        except Exception as e:
+            logger.error(f"Error handling file event: {e}")
+    
+    def _is_supported_file(self, file_path: Path) -> bool:
+        """
+        Check if file is supported for processing. Args:
+            file_path: Path to file
+            
+        Returns:
+            True if supported, False otherwise
+        """
+        supported_extensions = self.config.get("supported_extensions", [".txt", ".md"])
+        return file_path.suffix.lower() in supported_extensions
+    
+    def _add_to_queue(self, file_path: Path, dest_path: Optional[str], event_type: str) -> None:
+        """
+        Add file to processing queue with debouncing. Args:
+            file_path: Path to file
+            dest_path: Destination path (for moved events)
+            event_type: Type of event
+        """
+        file_str = str(file_path)
+        current_time = time.time()
+        
+        # Clean old timestamps
+        cutoff_time = current_time - self.debounce_window
+        self.event_timestamps[file_str] = [
+            ts for ts in self.event_timestamps[file_str] if ts > cutoff_time
+        ]
+        
+        # Add new timestamp
+        self.event_timestamps[file_str].append(current_time)
+        
+        # If this is the first event or enough time has passed, add to queue
+        if len(self.event_timestamps[file_str]) == 1:
+            self.event_queue.append({
+                "file_path": file_path,
+                "dest_path": dest_path,
+                "event_type": event_type,
+                "timestamp": current_time
+            })
+            logger.debug(f"Added to queue: {file_path} ({event_type})")
+    
+    def process_queue(self) -> None:
+        """
+        Process files in the event queue.
+        """ while True:
+            try:
+                if not self.event_queue:
+                    time.sleep(0.1)
+                    continue
+                
+                # Get next file from queue
+                event_data = self.event_queue.popleft()
+                file_path = event_data["file_path"]
+                dest_path = event_data["dest_path"]
+                event_type = event_data["event_type"]
+                
+                # Check if file is still stable
+                if not self._is_file_stable(file_path):
+                    logger.debug(f"File not stable, requeuing: {file_path}")
+                    self.event_queue.append(event_data)
+                    time.sleep(0.5)
+                    continue
+                
+                # Process file
+                self._process_file(file_path, dest_path, event_type)
+                
+            except Exception as e:
+                logger.error(f"Error processing queue: {e}")
+                time.sleep(1)
+    
+    def _is_file_stable(self, file_path: Path) -> bool:
+        """
+        Check if file is stable (not being written to). Args:
+            file_path: Path to file
+            
+        Returns:
+            True if stable, False otherwise
+        """
+        try:
+            if not file_path.exists():
+                return False
+            
+            # Check file size stability
+            initial_size = file_path.stat().st_size
+            time.sleep(0.5)
+            final_size = file_path.stat().st_size
+            
+            return initial_size == final_size
+            
+        except Exception as e:
+            logger.error(f"Error checking file stability: {e}")
+            return False
+    
+    def _process_file(self, file_path: Path, dest_path: Optional[str], event_type: str) -> None:
+        """
+        Process a file. Args:
+            file_path: Path to file
+            dest_path: Destination path (for moved events)
+            event_type: Type of event
+        """
+        try:
+            # Mark as processing
+            self.processing_files.add(str(file_path))
+            
+            logger.info(f"Processing file: {file_path} ({event_type})")
+            
+            # Call processing callback
+            success = self.process_callback(file_path, dest_path, event_type)
+            
+            if success:
+                logger.info(f"Successfully processed: {file_path}")
+            else:
+                logger.error(f"Failed to process: {file_path}")
+                self._handle_failed_file(file_path)
+            
+        except Exception as e:
+            logger.error(f"Error processing file {file_path}: {e}")
+            self._handle_failed_file(file_path)
+        
+        finally:
+            # Remove from processing set
+            self.processing_files.discard(str(file_path))
+    
+    def _handle_failed_file(self, file_path: Path) -> None:
+        """
+        Handle failed file processing. Args:
+            file_path: Path to failed file
+        """
+        try:
+            # Move to failed directory
+            failed_path = Path(self.failed_dir) / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file_path.name}"
+            file_path.rename(failed_path)
+            logger.info(f"Moved failed file to: {failed_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to move failed file: {e}")
+
+class WatchdogMonitor:
+    """
+    Watchdog-based file monitoring system.
+    """ def __init__(self, config: Dict[str, Any], process_callback: Callable):
+        """
+        Initialize watchdog monitor. Args:
+            config: Configuration dictionary
+            process_callback: Callback function for processing files
+        """
+        self.config = config
+        self.process_callback = process_callback
+        self.watch_folder = config.get("watch_folder", "02_data")
+        self.observer = None
+        self.event_handler = None
+        self.queue_thread = None
+        self.running = False
+        
+        logger.info("Initialized WatchdogMonitor")
+    
+    def start(self) -> None:
+        """
+        Start the watchdog monitor.
+        """ try:
+            # Create event handler
+            self.event_handler = ChunkerEventHandler(self.config, self.process_callback)
+            
+            # Create observer
+            self.observer = Observer()
+            self.observer.schedule(self.event_handler, self.watch_folder, recursive=True)
+            
+            # Start observer
+            self.observer.start()
+            
+            # Start queue processing thread
+            self.queue_thread = threading.Thread(target=self.event_handler.process_queue, daemon=True)
+            self.queue_thread.start()
+            
+            self.running = True
+            logger.info(f"Started watchdog monitor for: {self.watch_folder}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start watchdog monitor: {e}")
+            raise
+    
+    def stop(self) -> None:
+        """
+        Stop the watchdog monitor.
+        """ try:
+            self.running = False
+            
+            if self.observer:
+                self.observer.stop()
+                self.observer.join()
+            
+            logger.info("Stopped watchdog monitor")
+            
+        except Exception as e:
+            logger.error(f"Error stopping watchdog monitor: {e}")
+    
+    def is_running(self) -> bool:
+        """
+        Check if monitor is running. Returns:
+            True if running, False otherwise
+        """
+        return self.running and self.observer and self.observer.is_alive()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get monitoring statistics. Returns:
+            Statistics dictionary
+        """
+        if not self.event_handler:
+            return {"error": "Event handler not initialized"}
+        
+        return {
+            "queue_size": len(self.event_handler.event_queue),
+            "processing_files": len(self.event_handler.processing_files),
+            "watch_folder": self.watch_folder,
+            "running": self.running,
+            "observer_alive": self.observer.is_alive() if self.observer else False
+        }
+
+def create_watchdog_monitor(config: Dict[str, Any], process_callback: Callable) -> WatchdogMonitor:
+    """
+    Create watchdog monitor instance. Args:
+        config: Configuration dictionary
+        process_callback: Callback function for processing files
+        
+    Returns:
+        WatchdogMonitor instance
+    """
+    return WatchdogMonitor(config, process_callback)
+
+def process_file_callback(file_path: Path, dest_path: Optional[str], event_type: str) -> bool:
+    """
+    Example file processing callback. Args:
+        file_path: Path to file
+        dest_path: Destination path (for moved events)
+        event_type: Type of event
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        logger.info(f"Processing {event_type} event for: {file_path}")
+        
+        # Simulate processing
+        time.sleep(1)
+        
+        # For moved events, copy outputs back to source folder
+        if event_type == "moved" and dest_path:
+            logger.info(f"File moved from {file_path} to {dest_path}")
+            # TODO: Implement copy back logic
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Processing callback failed: {e}")
+        return False
+
+# Example usage
+if __name__ == "__main__":
+    # Configuration
+    config = {
+        "watch_folder": "02_data",
+        "debounce_window": 1.0,
+        "max_workers": 4,
+        "failed_dir": "03_archive/failed",
+        "default_source_folder": "02_data",
+        "supported_extensions": [".txt", ".md", ".json", ".csv", ".xlsx", ".pdf", ".py", ".docx", ".sql", ".yaml", ".xml", ".log"]
+    }
+    
+    # Create monitor
+    monitor = create_watchdog_monitor(config, process_file_callback)
+    
+    try:
+        # Start monitoring
+        monitor.start()
+        
+        # Keep running
+        while monitor.is_running():
+            time.sleep(1)
+            
+            # Print stats every 10 seconds
+            if int(time.time()) % 10 == 0:
+                stats = monitor.get_stats()
+                logger.info(f"Monitor stats: {stats}")
+    
+    except KeyboardInterrupt:
+        logger.info("Stopping monitor...")
+        monitor.stop()
+    
+    print("Watchdog monitor test completed successfully!") ```
+
+Now let me update the todos and create a comprehensive RAG search script:
+
+
+```python
+"""
+RAG Search Script for Chunker_v2
+Interactive search interface for the knowledge base
+"""
+
+import os
+import json
+import logging
+import argparse
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class RAGSearchInterface:
+    """
+    Interactive search interface for RAG knowledge base.
+    """ def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize RAG search interface. Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.rag_system = None
+        self.langsmith = None
+        
+        # Initialize components
+        self._initialize_components()
+        
+        logger.info("Initialized RAG Search Interface")
+    
+    def _initialize_components(self) -> None:
+        """
+        Initialize RAG system and LangSmith integration.
+        """ try:
+            # Initialize Ollama RAG system
+            from ollama_integration import initialize_ollama_rag
+            self.rag_system = initialize_ollama_rag(
+                model_name=self.config.get("ollama_model", "nomic-embed-text"),
+                persist_dir=self.config.get("faiss_persist_dir", "./faiss_index")
+            )
+            
+            # Load existing index
+            if not self.rag_system.load_index():
+                logger.warning("No existing FAISS index found. Run watcher_splitter.py first to build knowledge base.") # Initialize LangSmith (optional)
+            if self.config.get("langsmith_enabled", False):
+                from langsmith_integration import initialize_langsmith
+                self.langsmith = initialize_langsmith(
+                    api_key=self.config.get("langsmith_api_key"),
+                    project=self.config.get("langsmith_project", "chunker-rag-eval")
+                )
+            
+            logger.info("Components initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize components: {e}")
+            raise
+    
+    def search(self, query: str, search_type: str = "hybrid", top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search the knowledge base. Args:
+            query: Search query
+            search_type: Type of search (hybrid, semantic, keyword)
+            top_k: Number of results to return
+            
+        Returns:
+            List of search results
+        """
+        try:
+            if not self.rag_system:
+                return []
+            
+            # Perform search based on type
+            if search_type == "hybrid":
+                results = self.rag_system.hybrid_search(query, top_k=top_k)
+            elif search_type == "semantic":
+                results = self.rag_system.search_similar(query, top_k=top_k)
+            elif search_type == "keyword":
+                keywords = query.split()
+                results = self.rag_system.search_by_keywords(keywords, top_k=top_k)
+            else:
+                logger.error(f"Unknown search type: {search_type}")
+                return []
+            
+            # Add LangSmith tracing if enabled
+            if self.langsmith:
+                traced_results = self.langsmith.traced_rag_query(query, self.rag_system)
+                logger.info("Query traced with LangSmith")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+            return []
+    
+    def format_results(self, results: List[Dict[str, Any]], query: str) -> str:
+        """
+        Format search results for display. Args:
+            results: Search results
+            query: Original query
+            
+        Returns:
+            Formatted results string
+        """
+        if not results:
+            return f"No results found for query: '{query}'"
+        
+        output = [f"Search Results for: '{query}'", "=" * 50]
+        
+        for i, result in enumerate(results, 1):
+            content = result.get("content", "")
+            metadata = result.get("metadata", {})
+            score = result.get("score", 0.0)
+            search_type = result.get("type", "unknown")
+            
+            # Truncate content for display
+            display_content = content[:200] + "..." if len(content) > 200 else content
+            
+            output.extend([
+                f"\n{i}. Score: {score:.3f} ({search_type})",
+                f"   Source: {metadata.get('source_file', 'Unknown')}",
+                f"   Type: {metadata.get('file_type', 'Unknown')}",
+                f"   Content: {display_content}",
+                f"   Keywords: {', '.join(metadata.get('keywords', []))}"
+            ])
+        
+        return "\n".join(output)
+    
+    def interactive_search(self) -> None:
+        """
+        Start interactive search session.
+        """ print("RAG Search Interface")
+        print("=" * 50)
+        print("Commands:")
+        print("  search <query> - Search the knowledge base")
+        print("  semantic <query> - Semantic similarity search")
+        print("  keyword <query> - Keyword-based search")
+        print("  stats - Show knowledge base statistics")
+        print("  quit - Exit the interface")
+        print()
+        
+        while True:
+            try:
+                command = input("RAG> ").strip()
+                
+                if not command:
+                    continue
+                
+                if command.lower() == "quit":
+                    print("Goodbye!") break
+                
+                elif command.lower() == "stats":
+                    self._show_stats()
+                
+                elif command.startswith("search "):
+                    query = command[7:].strip()
+                    if query:
+                        self._perform_search(query, "hybrid")
+                
+                elif command.startswith("semantic "):
+                    query = command[9:].strip()
+                    if query:
+                        self._perform_search(query, "semantic")
+                
+                elif command.startswith("keyword "):
+                    query = command[8:].strip()
+                    if query:
+                        self._perform_search(query, "keyword")
+                
+                else:
+                    print("Unknown command. Type 'help' for available commands.") except KeyboardInterrupt:
+                print("\nGoodbye!") break
+            except Exception as e:
+                logger.error(f"Error in interactive search: {e}")
+                print(f"Error: {e}")
+    
+    def _perform_search(self, query: str, search_type: str) -> None:
+        """
+        Perform search and display results. Args:
+            query: Search query
+            search_type: Type of search
+        """
+        start_time = datetime.now()
+        results = self.search(query, search_type)
+        end_time = datetime.now()
+        
+        # Display results
+        formatted_results = self.format_results(results, query)
+        print(formatted_results)
+        
+        # Show timing
+        duration = (end_time - start_time).total_seconds()
+        print(f"\nSearch completed in {duration:.3f} seconds")
+        print(f"Found {len(results)} results")
+    
+    def _show_stats(self) -> None:
+        """
+        Show knowledge base statistics.
+        """ if not self.rag_system:
+            print("RAG system not available")
+            return
+        
+        stats = self.rag_system.get_stats()
+        print("Knowledge Base Statistics:")
+        print("=" * 30)
+        for key, value in stats.items():
+            print(f"{key}: {value}")
+    
+    def batch_search(self, queries: List[str], output_file: str = None) -> List[Dict[str, Any]]:
+        """
+        Perform batch search on multiple queries. Args:
+            queries: List of search queries
+            output_file: Optional output file for results
+            
+        Returns:
+            List of search results
+        """
+        results = []
+        
+        for query in queries:
+            try:
+                query_results = self.search(query)
+                results.append({
+                    "query": query,
+                    "results": query_results,
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+            except Exception as e:
+                logger.error(f"Batch search failed for query '{query}': {e}")
+                results.append({
+                    "query": query,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                })
+        
+        # Save results if output file specified
+        if output_file:
+            try:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, indent=2, ensure_ascii=False)
+                logger.info(f"Saved batch search results to {output_file}")
+            except Exception as e:
+                logger.error(f"Failed to save results: {e}")
+        
+        return results
+
+def load_config(config_file: str = "config.json") -> Dict[str, Any]:
+    """
+    Load configuration from file. Args:
+        config_file: Path to configuration file
+        
+    Returns:
+        Configuration dictionary
+    """
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        return config
+    except Exception as e:
+        logger.error(f"Failed to load config: {e}")
+        return {}
+
+def main():
+    """
+    Main function for RAG search script.
+    """ parser = argparse.ArgumentParser(description="RAG Search Interface for Chunker_v2")
+    parser.add_argument("--config", default="config.json", help="Configuration file path")
+    parser.add_argument("--query", help="Single query to search")
+    parser.add_argument("--batch", help="File containing batch queries (one per line)")
+    parser.add_argument("--output", help="Output file for results")
+    parser.add_argument("--search-type", choices=["hybrid", "semantic", "keyword"], 
+                       default="hybrid", help="Type of search to perform")
+    parser.add_argument("--top-k", type=int, default=5, help="Number of results to return")
+    parser.add_argument("--interactive", action="store_true", help="Start interactive mode")
+    
+    args = parser.parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
+    
+    # Initialize search interface
+    try:
+        search_interface = RAGSearchInterface(config)
+    except Exception as e:
+        logger.error(f"Failed to initialize search interface: {e}")
+        return
+    
+    # Handle different modes
+    if args.interactive:
+        search_interface.interactive_search()
+    
+    elif args.query:
+        results = search_interface.search(args.query, args.search_type, args.top_k)
+        formatted_results = search_interface.format_results(results, args.query)
+        print(formatted_results)
+        
+        if args.output:
+            with open(args.output, 'w', encoding='utf-8') as f:
+                f.write(formatted_results)
+    
+    elif args.batch:
+        try:
+            with open(args.batch, 'r', encoding='utf-8') as f:
+                queries = [line.strip() for line in f if line.strip()]
+            
+            results = search_interface.batch_search(queries, args.output)
+            print(f"Processed {len(queries)} queries")
+            
+        except Exception as e:
+            logger.error(f"Batch search failed: {e}")
+    
+    else:
+        # Default to interactive mode
+        search_interface.interactive_search()
+
+# Example usage
+if __name__ == "__main__":
+    # Example configuration
+    example_config = {
+        "ollama_model": "nomic-embed-text",
+        "faiss_persist_dir": "./faiss_index",
+        "langsmith_enabled": False,
+        "langsmith_api_key": None,
+        "langsmith_project": "chunker-rag-eval"
+    }
+    
+    # Example queries
+    example_queries = [
+        "How do I fix vlookup errors in Excel? ",
+        "What is Power BI query syntax? ",
+        "How do I use pandas for data analysis?" ]
+    
+    print("RAG Search Interface Example")
+    print("=" * 40)
+    
+    # Initialize interface
+    try:
+        interface = RAGSearchInterface(example_config)
+        
+        # Perform example searches
+        for query in example_queries:
+            print(f"\nSearching: {query}")
+            results = interface.search(query, top_k=3)
+            formatted = interface.format_results(results, query)
+            print(formatted)
+            print("-" * 50)
+        
+        print("RAG search example completed successfully!") except Exception as e:
+        print(f"Example failed: {e}")
+```
+
+Now let me create a comprehensive installation script for all the RAG dependencies:
+
+
+```python
+"""
+Enhanced RAG Dependencies Installation Script for Chunker_v2
+Installs all required packages for RAG functionality
+"""
+
+import subprocess
+import sys
+import os
+import logging
+from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+def install_package(package: str, description: str = "") -> bool:
+    """
+    Install a Python package using pip. Args:
+        package: Package name and version
+        description: Description of the package
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        print(f"Installing {package}...")
+        if description:
+            print(f"  {description}")
+        
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install", package
+        ], capture_output=True, text=True, check=True)
+        
+        print(f"✓ Successfully installed {package}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Failed to install {package}")
+        print(f"  Error: {e.stderr}")
+        return False
+    except Exception as e:
+        print(f"✗ Unexpected error installing {package}: {e}")
+        return False
+
+def check_package_installed(package_name: str) -> bool:
+    """
+    Check if a package is already installed.

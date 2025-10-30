@@ -37,6 +37,16 @@ C:\_chunker\
 └── logs/             # 📊 LOGS: Watcher and processing logs
 ```
 
+### Consolidation Notes (2025-10-29)
+- Unified older iterations under `C:\_chunker`.
+- Legacy snapshots (latest only) per project live in:
+  - `99_doc\legacy\<Project>_<timestamp>`
+  - `06_config\legacy\<Project>_<timestamp>`
+  - `05_logs\legacy\<Project>_<timestamp>`
+  - `03_archive\legacy\<Project>_<timestamp>`
+- Historical outputs migrated to `04_output\<Project>_<timestamp>`.
+- Timestamp‑prefixed script backups: `C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\backup_scripts\<Project>\`.
+
 ### File Processing Flow
 1. **Input**: Files placed in `02_data/`
 2. **Processing**: System chunks and processes files with dynamic parallel workers

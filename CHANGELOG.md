@@ -1,6 +1,33 @@
 # Changelog
 
 All notable changes to the Enterprise Chunker system will be documented in this file.
+## Version 2.1.3 - 2025-10-29 - Project Consolidation & Legacy Snapshots
+
+### 🔄 Consolidation
+- Unified older Chunker/ClaudeExportFixer iterations under `C:\_chunker`
+- Migrated historical outputs to `C:\_chunker\04_output\<ProjectName>_<timestamp>`
+- Collected legacy docs/config/logs/db into:
+  - `99_doc\legacy\<ProjectName>_<timestamp>`
+  - `06_config\legacy\<ProjectName>_<timestamp>`
+  - `05_logs\legacy\<ProjectName>_<timestamp>`
+  - `03_archive\legacy\<ProjectName>_<timestamp>`
+
+### 📦 Script Backups
+- Backed up project scripts with timestamp-prefix to
+  `C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\backup_scripts\<ProjectName>\`
+- Excludes virtualenvs, site-packages, node_modules, and .git
+
+### 🧹 Snapshot Policy
+- Keep only the latest legacy snapshot per project (older snapshots pruned)
+- Now-empty old project folders archived then removed after verification
+
+### 📁 Updated Documentation
+- `README.md` updated with consolidation notes and locations
+- `ENTERPRISE_CHUNKER_SUMMARY.md` updated with unified structure and snapshot policy
+
+### 🧩 File Type Support
+- Added support for `.xlsm` (Excel macro-enabled) files via openpyxl
+
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

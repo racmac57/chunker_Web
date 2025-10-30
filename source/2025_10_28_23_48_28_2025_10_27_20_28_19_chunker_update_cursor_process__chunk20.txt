@@ -1,0 +1,275 @@
+Let me add them and integrate the RAG functionality:
+
+
+```python
+# 🕒 2025-06-28-01-55-30
+# chunker/watcher_splitter_enterprise.py
+# Author: R. A. Carucci  
+# Purpose: Enterprise-grade chunker with database tracking, notifications, and parallel processing
+
+import os
+import sys
+import time 
+import shutil
+import logging
+import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
+import nltk
+from nltk.tokenize import sent_tokenize
+import json
+import psutil
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from chunker_db import ChunkerDatabase
+from notification_system import NotificationSystem
+import re
+import openpyxl
+import PyPDF2
+import ast
+import docx
+import yaml
+from rag_integration import ChromaRAG, extract_keywords
+
+# Resolve config path (supports PyInstaller .exe)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(__file__)
+
+# Configure local nltk_data path
+nltk_path = os.path.join(base_path, "nltk_data")
+nltk.data.path.append(nltk_path)
+
+try:
+    nltk.download('punkt_tab', download_dir=nltk_path, quiet=True)
+except:
+    nltk.download('punkt', download_dir=nltk_path, quiet=True)
+
+# Load configuration
+with open(os.path.join(base_path, "config.json")) as f:
+    CONFIG = json.load(f)
+
+# Department-specific configurations
+DEPARTMENT_CONFIGS = {
+    "police": {
+        "chunk_size": 75,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    },
+    "admin": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal"
+    },
+    "legal": {
+        "chunk_size": 100,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    }
+}
+
+# Setup enhanced logging
+def setup_logging():
+    log_file = CONFIG.get("log_file", "logs/watcher.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    # Rotate log if it's too large
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:  # 5MB
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"logs/watcher_archive_{timestamp}.log"
+        shutil.move(log_file, archive_name)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+# Initialize database and notification systems with timeout and retry
+def init_database_with_retry():
+    """Initialize database with retry logic to handle locking issues"""
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db = ChunkerDatabase()
+            logger.info("Database initialized successfully")
+            return db
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}")
+                time.sleep(2)
+            else:
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
+                return None
+
+db = init_database_with_retry()
+notifications = NotificationSystem()
+
+# Enhanced session statistics
+session_stats = {
+    "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "files_processed": 0,
+    "chunks_created": 0,
+    "zero_byte_prevented": 0,
+    "errors": 0,
+    "total_sentences_processed": 0,
+    "total_bytes_created": 0,
+    "parallel_jobs_completed": 0,
+    "department_breakdown": {},
+    "performance_metrics": {
+        "avg_processing_time": 0,
+        "peak_memory_usage": 0,
+        "peak_cpu_usage": 0
+    }
+}
+
+def get_department_config(file_path):
+    """Determine department configuration based on file path or content"""
+    dept = CONFIG.get("default_department", "admin")
+    
+    # Check file path for department indicators
+    path_str = str(file_path).lower()
+    for department in DEPARTMENT_CONFIGS.keys():
+        if department in path_str:
+            dept = department
+            break
+    
+    # Merge default config with department-specific settings
+    dept_config = DEPARTMENT_CONFIGS.get(dept, {})
+    merged_config = CONFIG.copy()
+    merged_config.update(dept_config)
+    merged_config["department"] = dept
+    
+    return merged_config
+
+def log_system_metrics():
+    """Log comprehensive system metrics"""
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('.') # Count active processes
+        active_processes = len([p for p in psutil.process_iter() if p.is_running()])
+        
+        # Update session stats
+        session_stats["performance_metrics"]["peak_cpu_usage"] = max(
+            session_stats["performance_metrics"]["peak_cpu_usage"], cpu_percent
+        )
+        session_stats["performance_metrics"]["peak_memory_usage"] = max(
+            session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
+        )
+        
+        # Log to database with retry
+        if db:
+            try:
+                db.log_system_metrics(cpu_percent, memory.percent, 
+                                     (disk.used / disk.total) * 100, active_processes)
+            except Exception as e:
+                logger.warning(f"Failed to log system metrics to database: {e}")
+        
+        logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
+                   f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
+        
+        # Send alerts if thresholds exceeded
+        if cpu_percent > 90:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+        elif cpu_percent > 80:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+        
+        if memory.percent > 90:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+        elif memory.percent > 80:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            
+    except Exception as e:
+        logger.error(f"Failed to log system metrics: {e}")
+
+def chunk_text_enhanced(text, limit, department_config):
+    """Enhanced chunking with department-specific rules"""
+    logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
+    if not text or len(text.strip()) < 10:
+        logger.warning("Text too short for chunking - skipping")
+        return []
+    
+    try:
+        sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in text - skipping")
+            return []
+        
+        # Apply department-specific chunking rules
+        original_sentence_count = len(sentences)
+        if department_config.get("enable_redaction"):
+            sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {original_sentence_count} -> {len(sentences)} sentences")
+        
+        chunks = []
+        max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        logger.info(f"Chunking parameters - Max chars per chunk: {max_chars}, Target sentences per chunk: {limit}")
+        
+        current_chunk = []
+        current_length = 0
+        chunk_count = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
+            
+            # Check if adding this sentence would exceed limits
+            if (len(current_chunk) >= limit or 
+                current_length + sentence_length > max_chars) and current_chunk:
+                
+                chunk_text = " ".join(current_chunk)
+                if len(chunk_text.strip()) > 0:
+                    chunks.append(chunk_text)
+                    chunk_count += 1
+                    logger.debug(f"Created chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+                
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add final chunk
+        if current_chunk:
+            chunk_text = " ".join(current_chunk)
+            if len(chunk_text.strip()) > 0:
+                chunks.append(chunk_text)
+                chunk_count += 1
+                logger.debug(f"Created final chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+        
+        session_stats["total_sentences_processed"] += len(sentences)
+        logger.info(f"Chunking complete - Created {len(chunks)} chunks from {len(sentences)} sentences (avg: {len(sentences)/len(chunks):.1f} sentences/chunk)")
+        return chunks
+        
+    except Exception as e:
+        logger.error(f"Chunking failed: {e}")
+        if db:
+            try:
+                db.log_error("ChunkingError", str(e), traceback.format_exc())
+            except Exception as db_error:
+                logger.warning(f"Failed to log chunking error to database: {db_error}")
+        session_stats["errors"] += 1
+        return []
+
+def apply_redaction_rules(sentences):
+    """Apply redaction rules for sensitive departments"""
+    import re
+    
+    redaction_patterns = [
+        (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),  # SSN
+        (r'\b\d{3}-\d{3}-\d{4}\b', '[PHONE-REDACTED]'),  # Phone
+        (r'\b\d{1,5}\s+\w+\s+(? :street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)\b', '[ADDRESS-REDACTED]'),  # Address
+        (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.

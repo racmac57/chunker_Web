@@ -1,0 +1,804 @@
+**YES - Absolutely clean up the desktop directories first! ** Here's why:
+
+## 🎯 Smart Approach: Clean Desktop BEFORE Adding New System
+
+### Why Clean First? 1. **Avoid confusion** - Don't add another directory to the mess
+2. **Consolidate data** - Desktop may have unique processed files you need
+3. **Fresh start** - Clone the new unified system into a clean environment
+4. **No duplicates** - Desktop directories might conflict with new structure
+
+---
+
+## 📋 Your Desktop Directories to Address
+
+1. `C:\Dev\ClaudeExportFixer` - Older version (v1.5.x?) 2. `C:\Dev\Chunker` - Unknown version
+3. `C:\Dev\Chat_Log_Transcript` - Related project? 4. `C:\Users\carucci_r\Documents\chat_log_processor` - Another variant? 5. `C:\_chunker` (if exists) - Older version, missing scripts/folders
+
+---
+
+## 🚀 Recommended Desktop Cleanup Strategy
+
+### Step 1: Discovery on Desktop (First!) Run this on your **desktop** to see what you have:
+
+```powershell
+# Create inventory of desktop directories
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "`n========== $dir ==========" -ForegroundColor Cyan
+        
+        # Check key folders
+        @("01_input", "02_data", "02_output", "03_archive", "04_output", "03_knowledge_base") | ForEach-Object {
+            $subdir = Join-Path $dir $_
+            if (Test-Path $subdir) {
+                $count = (Get-ChildItem $subdir -Recurse -File -ErrorAction SilentlyContinue).Count
+                Write-Host "   $_ : $count files" -ForegroundColor Green
+            }
+        }
+        
+        # Check for databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        if ($dbs) {
+            Write-Host "   [DATABASES: $($dbs.Count)]" -ForegroundColor Magenta
+        }
+        
+        # Check git status
+        if (Test-Path "$dir\.git") {
+            Push-Location $dir
+            $remote = git remote get-url origin 2>$null
+            Write-Host "   [GIT: $remote]" -ForegroundColor Yellow
+            Pop-Location
+        }
+        
+        # Size
+        $size = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "   Size: $([math]::Round($size, 2)) MB" -ForegroundColor Gray
+    } else {
+        Write-Host "$dir - NOT FOUND" -ForegroundColor Gray
+    }
+}
+```
+
+### Step 2: Preserve Important Data from Desktop
+
+**Before wiping anything, copy valuable data:**
+
+```powershell
+# Create temporary preservation folder on desktop
+$preserveDir = "C:\Desktop_Chunker_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $preserveDir -Force
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = Split-Path $dir -Leaf
+        
+        # Copy processed outputs
+        if (Test-Path "$dir\04_output") {
+            Copy-Item "$dir\04_output" -Destination "$preserveDir\$dirName`_output" -Recurse -Force
+        }
+        if (Test-Path "$dir\02_output") {
+            Copy-Item "$dir\02_output" -Destination "$preserveDir\$dirName`_02output" -Recurse -Force
+        }
+        
+        # Copy databases
+        Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName -Destination "$preserveDir\databases\" -Force
+        }
+        
+        # Copy unprocessed files
+        if (Test-Path "$dir\02_data") {
+            $files = Get-ChildItem "$dir\02_data" -File -ErrorAction SilentlyContinue
+            if ($files) {
+                Copy-Item "$dir\02_data" -Destination "$preserveDir\$dirName`_unprocessed" -Recurse -Force
+            }
+        }
+    }
+}
+
+Write-Host "`n✅ Desktop data preserved to: $preserveDir" -ForegroundColor Green
+```
+
+### Step 3: Archive Old Desktop Directories
+
+```powershell
+# Move (don't delete!) old directories
+$archiveDir = "C:\Old_Desktop_Chunkers_Archive_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $archiveDir -Force
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = $dir -replace '[:\\]', '_'
+        Move-Item $dir -Destination "$archiveDir\$dirName" -Force
+        Write-Host "✅ Archived: $dir" -ForegroundColor Green
+    }
+}
+```
+
+### Step 4: Clone Fresh Unified System to Desktop
+
+**Now that desktop is clean:**
+
+```powershell
+# Clone the new v2.0.0 unified system from GitHub
+cd C:\Dev
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+
+# Verify it's v2.0.0
+cd ClaudeExportFixer
+python -c "import start_watchdog; print(f'Version: {start_watchdog.__version__}')"
+# Should show: Version: 2.0.0
+
+# Set up virtual environment
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Step 5: Integrate Preserved Desktop Data
+
+```powershell
+# Move preserved data into new unified system
+$preserveDir = "C:\Desktop_Chunker_Backup_*" # Use actual timestamp
+
+# Copy unprocessed files to input
+Get-ChildItem "$preserveDir\*_unprocessed" -Recurse -File | ForEach-Object {
+    Copy-Item $_.FullName -Destination "C:\Dev\ClaudeExportFixer\01_input\" -Force
+}
+
+# Copy databases to knowledge base
+Copy-Item "$preserveDir\databases\*.db" -Destination "C:\Dev\ClaudeExportFixer\03_knowledge_base\" -Force
+
+# Organize processed outputs in archive
+Copy-Item "$preserveDir\*_output" -Destination "C:\Dev\ClaudeExportFixer\04_archive\from_old_desktop\" -Recurse -Force
+```
+
+---
+
+## 🎯 Modified Strategy for Your Situation
+
+### Laptop (Current - already done ✅)
+- ✅ v2.0.0 committed to GitHub
+- ✅ Cleanup docs ready
+- Has multiple old chunker directories
+- **Action:** Clean up laptop after desktop
+
+### Desktop (Do this first!) - Has 5+ old chunker directories
+- Has older version of `_chunker`
+- **Action:** 
+  1. Discover what's there
+  2. Preserve important data
+  3. Archive old directories
+  4. Clone fresh v2.0.0 from GitHub
+  5. Import preserved data
+
+### Then Laptop
+- After desktop is clean and working
+- Use same process to consolidate laptop directories
+- Or just archive them since you'll work on desktop
+
+---
+
+## 📝 Updated Cleanup Prompt for Desktop
+
+Let me create a desktop-specific version:
+
+**Would you like me to:**
+
+**Option A:** Create a **Desktop-Specific Cleanup Prompt** for Claude Code that:
+- Targets your desktop directories specifically
+- Preserves data before cleaning
+- Clones v2.0.0 fresh from GitHub
+- Sets up the unified system properly
+
+**Option B:** Use the existing cleanup prompt but modify it for desktop
+
+**Option C:** Just give you the PowerShell commands to run manually on desktop
+
+Which would you prefer? I recommend **Option A** - a tailored prompt for your desktop that you can hand to Claude Code when you're at that machine. ```powershell
+# Create inventory of desktop directories
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "`n========== $dir ==========" -ForegroundColor Cyan
+        
+        # Check key folders
+        @("01_input", "02_data", "02_output", "03_archive", "04_output", "03_knowledge_base") | ForEach-Object {
+            $subdir = Join-Path $dir $_
+            if (Test-Path $subdir) {
+                $count = (Get-ChildItem $subdir -Recurse -File -ErrorAction SilentlyContinue).Count
+                Write-Host "   $_ : $count files" -ForegroundColor Green
+            }
+        }
+        
+        # Check for databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        if ($dbs) {
+            Write-Host "   [DATABASES: $($dbs.Count)]" -ForegroundColor Magenta
+        }
+        
+        # Check git status
+        if (Test-Path "$dir\.git") {
+            Push-Location $dir
+            $remote = git remote get-url origin 2>$null
+            Write-Host "   [GIT: $remote]" -ForegroundColor Yellow
+            Pop-Location
+        }
+        
+        # Size
+        $size = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "   Size: $([math]::Round($size, 2)) MB" -ForegroundColor Gray
+    } else {
+        Write-Host "$dir - NOT FOUND" -ForegroundColor Gray
+    }
+}
+```
+
+```powershell
+# Create temporary preservation folder on desktop
+$preserveDir = "C:\Desktop_Chunker_Backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $preserveDir -Force
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = Split-Path $dir -Leaf
+        
+        # Copy processed outputs
+        if (Test-Path "$dir\04_output") {
+            Copy-Item "$dir\04_output" -Destination "$preserveDir\$dirName`_output" -Recurse -Force
+        }
+        if (Test-Path "$dir\02_output") {
+            Copy-Item "$dir\02_output" -Destination "$preserveDir\$dirName`_02output" -Recurse -Force
+        }
+        
+        # Copy databases
+        Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName -Destination "$preserveDir\databases\" -Force
+        }
+        
+        # Copy unprocessed files
+        if (Test-Path "$dir\02_data") {
+            $files = Get-ChildItem "$dir\02_data" -File -ErrorAction SilentlyContinue
+            if ($files) {
+                Copy-Item "$dir\02_data" -Destination "$preserveDir\$dirName`_unprocessed" -Recurse -Force
+            }
+        }
+    }
+}
+
+Write-Host "`n✅ Desktop data preserved to: $preserveDir" -ForegroundColor Green
+```
+
+```powershell
+# Move (don't delete!) old directories
+$archiveDir = "C:\Old_Desktop_Chunkers_Archive_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+New-Item -ItemType Directory -Path $archiveDir -Force
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = $dir -replace '[:\\]', '_'
+        Move-Item $dir -Destination "$archiveDir\$dirName" -Force
+        Write-Host "✅ Archived: $dir" -ForegroundColor Green
+    }
+}
+```
+
+```powershell
+# Clone the new v2.0.0 unified system from GitHub
+cd C:\Dev
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+
+# Verify it's v2.0.0
+cd ClaudeExportFixer
+python -c "import start_watchdog; print(f'Version: {start_watchdog.__version__}')"
+# Should show: Version: 2.0.0
+
+# Set up virtual environment
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+```powershell
+# Move preserved data into new unified system
+$preserveDir = "C:\Desktop_Chunker_Backup_*" # Use actual timestamp
+
+# Copy unprocessed files to input
+Get-ChildItem "$preserveDir\*_unprocessed" -Recurse -File | ForEach-Object {
+    Copy-Item $_.FullName -Destination "C:\Dev\ClaudeExportFixer\01_input\" -Force
+}
+
+# Copy databases to knowledge base
+Copy-Item "$preserveDir\databases\*.db" -Destination "C:\Dev\ClaudeExportFixer\03_knowledge_base\" -Force
+
+# Organize processed outputs in archive
+Copy-Item "$preserveDir\*_output" -Destination "C:\Dev\ClaudeExportFixer\04_archive\from_old_desktop\" -Recurse -Force
+```
+
+---
+
+**User**
+
+I will open cursor ai on my desktop please provide a prompt for cursor ai to make the chnages and clean. save the prompt C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev
+
+---
+
+**Cursor**
+
+```markdown
+# Cursor AI: Desktop Chunker Cleanup & Setup
+
+**Machine:** Desktop PC  
+**Date:** October 29, 2025  
+**Goal:** Clean up multiple old chunker directories and set up fresh v2.0.0 unified system from GitHub
+
+---
+
+## 🎯 Current Desktop Situation
+
+I have multiple outdated chunker-related directories that need to be consolidated and cleaned up:
+
+### Directories to Clean
+1. `C:\Dev\ClaudeExportFixer` - Older version (pre-v2.0.0)
+2. `C:\Dev\Chunker` - Unknown version
+3. `C:\Dev\Chat_Log_Transcript` - Related project
+4. `C:\Users\carucci_r\Documents\chat_log_processor` - Variant
+5. `C:\_chunker` - Older version, missing scripts/folders
+
+### The New System
+**GitHub Repository:** `https://github.com/racmac57/ClaudeExportFixer.git`  
+**Version:** v2.0.0 - Unified System  
+**Features:** 13 file formats, semantic chunking, intelligent routing, knowledge bases
+
+---
+
+## 📋 Your Mission - 5 Phase Cleanup
+
+### SAFETY RULES ⚠️
+- ✅ **PRESERVE before DELETE** - Copy all important data first
+- ✅ **ARCHIVE before REMOVE** - Move directories, don't delete
+- ✅ **SHOW ME results** after each phase
+- ✅ **WAIT for approval** before Phase 3, 4, 5
+- ❌ **NEVER delete** without explicit approval
+
+---
+
+## Phase 1: DISCOVERY & INVENTORY (Start Here)
+
+**Task:** Scan all directories and create a comprehensive inventory. ```powershell
+# Discovery script
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔍 DESKTOP CHUNKER INVENTORY" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$report = @()
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "`n📁 Scanning: $dir" -ForegroundColor Yellow
+        
+        $info = [PSCustomObject]@{
+            Directory = $dir
+            Exists = $true
+            InputFiles = 0
+            DataFiles = 0
+            OutputFiles = 0
+            ArchiveFiles = 0
+            KnowledgeBases = 0
+            Databases = @()
+            HasGit = $false
+            GitRemote = ""
+            SizeMB = 0
+            LastModified = (Get-Item $dir).LastWriteTime
+        }
+        
+        # Check input folders
+        @("01_input", "02_data") | ForEach-Object {
+            $inputDir = Join-Path $dir $_
+            if (Test-Path $inputDir) {
+                $count = (Get-ChildItem $inputDir -File -ErrorAction SilentlyContinue).Count
+                $info.DataFiles += $count
+                if ($count -gt 0) {
+                    Write-Host "   ⚠️  Unprocessed files in $_\: $count" -ForegroundColor Red
+                }
+            }
+        }
+        
+        # Check output folders
+        @("02_output", "04_output") | ForEach-Object {
+            $outputDir = Join-Path $dir $_
+            if (Test-Path $outputDir) {
+                $count = (Get-ChildItem $outputDir -Recurse -File -ErrorAction SilentlyContinue).Count
+                $info.OutputFiles += $count
+                if ($count -gt 0) {
+                    Write-Host "   📦 Processed files in $_\: $count" -ForegroundColor Green
+                }
+            }
+        }
+        
+        # Check archive
+        $archiveDir = Join-Path $dir "03_archive"
+        if (Test-Path $archiveDir) {
+            $info.ArchiveFiles = (Get-ChildItem $archiveDir -Recurse -File -ErrorAction SilentlyContinue).Count
+            if ($info.ArchiveFiles -gt 0) {
+                Write-Host "   📚 Archive files: $($info.ArchiveFiles)" -ForegroundColor Cyan
+            }
+        }
+        
+        # Check for knowledge bases
+        $kbDir = Join-Path $dir "03_knowledge_base"
+        if (Test-Path $kbDir) {
+            $info.KnowledgeBases = (Get-ChildItem $kbDir -Recurse -File -ErrorAction SilentlyContinue).Count
+            if ($info.KnowledgeBases -gt 0) {
+                Write-Host "   🧠 Knowledge base files: $($info.KnowledgeBases)" -ForegroundColor Magenta
+            }
+        }
+        
+        # Find all databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        $info.Databases = $dbs | ForEach-Object { $_.FullName }
+        if ($dbs.Count -gt 0) {
+            Write-Host "   💾 Databases found: $($dbs.Count)" -ForegroundColor Magenta
+            $dbs | ForEach-Object { Write-Host "      - $($_.Name)" -ForegroundColor Gray }
+        }
+        
+        # Check git
+        if (Test-Path "$dir\.git") {
+            $info.HasGit = $true
+            Push-Location $dir
+            $info.GitRemote = (git remote get-url origin 2>$null)
+            Pop-Location
+            Write-Host "   🔗 Git repo: $($info.GitRemote)" -ForegroundColor Yellow
+        }
+        
+        # Calculate size
+        $totalSize = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $info.SizeMB = [math]::Round($totalSize / 1MB, 2)
+        Write-Host "   📊 Total size: $($info.SizeMB) MB" -ForegroundColor Gray
+        Write-Host "   📅 Last modified: $($info.LastModified)" -ForegroundColor Gray
+        
+        $report += $info
+    } else {
+        Write-Host "`n❌ NOT FOUND: $dir" -ForegroundColor Red
+        $report += [PSCustomObject]@{
+            Directory = $dir
+            Exists = $false
+        }
+    }
+}
+
+# Save report
+$reportPath = "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\DESKTOP_INVENTORY_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+$report | Export-Csv $reportPath -NoTypeInformation
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "✅ INVENTORY COMPLETE" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "📄 Report saved to: $reportPath`n" -ForegroundColor Yellow
+
+# Summary
+$report | Format-Table -AutoSize -Wrap
+
+Write-Host "`n📊 SUMMARY:" -ForegroundColor Cyan
+Write-Host "   Total directories found: $(($report | Where-Object {$_.Exists}).Count)" -ForegroundColor White
+Write-Host "   Total unprocessed files: $(($report | Measure-Object -Property DataFiles -Sum).Sum)" -ForegroundColor $(if (($report | Measure-Object -Property DataFiles -Sum).Sum -gt 0) { "Red" } else { "Green" })
+Write-Host "   Total processed files: $(($report | Measure-Object -Property OutputFiles -Sum).Sum)" -ForegroundColor Green
+Write-Host "   Total databases: $(($report.Databases | Measure-Object).Count)" -ForegroundColor Magenta
+Write-Host "   Total size: $(($report | Measure-Object -Property SizeMB -Sum).Sum) MB`n" -ForegroundColor Gray
+```
+
+**STOP HERE AND SHOW ME:**
+1. The complete inventory table
+2. The CSV report location
+3. Summary statistics
+4. Your recommendation for what to preserve
+
+---
+
+## Phase 2: PRESERVE IMPORTANT DATA (After my approval)
+
+**Task:** Copy all valuable data to a safe backup location BEFORE cleaning. ```powershell
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$preserveRoot = "C:\Desktop_Chunker_Backup_$timestamp"
+New-Item -ItemType Directory -Path $preserveRoot -Force
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "💾 PRESERVING DESKTOP DATA" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = Split-Path $dir -Leaf
+        Write-Host "📦 Processing: $dir" -ForegroundColor Yellow
+        
+        # Preserve unprocessed files
+        @("01_input", "02_data") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $files = Get-ChildItem $sourceDir -File -ErrorAction SilentlyContinue
+                if ($files) {
+                    $destDir = Join-Path $preserveRoot "unprocessed\$dirName`_$_"
+                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                    Copy-Item $sourceDir\* -Destination $destDir -Recurse -Force
+                    Write-Host "   ✅ Saved unprocessed: $_ ($($files.Count) files)" -ForegroundColor Green
+                }
+            }
+        }
+        
+        # Preserve processed outputs
+        @("02_output", "04_output") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $destDir = Join-Path $preserveRoot "processed\$dirName`_$_"
+                Copy-Item $sourceDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+                $fileCount = (Get-ChildItem $destDir -Recurse -File -ErrorAction SilentlyContinue).Count
+                if ($fileCount -gt 0) {
+                    Write-Host "   ✅ Saved processed: $_ ($fileCount files)" -ForegroundColor Green
+                }
+            }
+        }
+        
+        # Preserve knowledge bases
+        $kbDir = Join-Path $dir "03_knowledge_base"
+        if (Test-Path $kbDir) {
+            $destDir = Join-Path $preserveRoot "knowledge_bases\$dirName"
+            Copy-Item $kbDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Saved knowledge base" -ForegroundColor Magenta
+        }
+        
+        # Preserve all databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        foreach ($db in $dbs) {
+            $destPath = Join-Path $preserveRoot "databases\$dirName`_$($db.Name)"
+            New-Item -ItemType Directory -Path (Split-Path $destPath) -Force | Out-Null
+            Copy-Item $db.FullName -Destination $destPath -Force
+            Write-Host "   ✅ Saved database: $($db.Name)" -ForegroundColor Magenta
+        }
+        
+        # Preserve documentation
+        $docs = Get-ChildItem $dir -Filter "*.md" -File -ErrorAction SilentlyContinue
+        if ($docs) {
+            $destDir = Join-Path $preserveRoot "docs\$dirName"
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item $docs -Destination $destDir -Force
+            Write-Host "   ✅ Saved documentation: $($docs.Count) files" -ForegroundColor Cyan
+        }
+        
+        # Preserve config files
+        if (Test-Path "$dir\config.json") {
+            $destDir = Join-Path $preserveRoot "configs"
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item "$dir\config.json" -Destination "$destDir\$dirName`_config.json" -Force
+            Write-Host "   ✅ Saved config.json" -ForegroundColor Cyan
+        }
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "✅ DATA PRESERVATION COMPLETE" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "📁 Backup location: $preserveRoot`n" -ForegroundColor Yellow
+
+# Show backup summary
+$backupSize = (Get-ChildItem $preserveRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+$backupFiles = (Get-ChildItem $preserveRoot -Recurse -File).Count
+Write-Host "📊 Backup stats:" -ForegroundColor Cyan
+Write-Host "   Files: $backupFiles" -ForegroundColor White
+Write-Host "   Size: $([math]::Round($backupSize, 2)) MB`n" -ForegroundColor White
+```
+
+**STOP HERE AND SHOW ME:**
+1. Backup location
+2. What was preserved
+3. Total size and file counts
+4. Wait for my approval to proceed
+
+---
+
+## Phase 3: ARCHIVE OLD DIRECTORIES (After my approval)
+
+**Task:** Move (not delete) all old directories to an archive. ```powershell
+$archiveRoot = "C:\Old_Desktop_Chunkers_Archive_$timestamp"
+New-Item -ItemType Directory -Path $archiveRoot -Force
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "📦 ARCHIVING OLD DIRECTORIES" -ForegroundColor Yellow
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        # Create safe archive name (replace problematic chars)
+        $safeName = $dir -replace '[:\\]', '_'
+        $archivePath = Join-Path $archiveRoot $safeName
+        
+        Write-Host "📦 Archiving: $dir" -ForegroundColor Yellow
+        Move-Item -Path $dir -Destination $archivePath -Force -ErrorAction SilentlyContinue
+        
+        if (Test-Path $archivePath) {
+            Write-Host "   ✅ Moved to: $archivePath" -ForegroundColor Green
+        } else {
+            Write-Host "   ⚠️  Failed to move (may be in use)" -ForegroundColor Red
+        }
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "✅ ARCHIVING COMPLETE" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "📁 Archive location: $archiveRoot" -ForegroundColor Yellow
+Write-Host "⚠️  KEEP THIS ARCHIVE FOR 60 DAYS BEFORE DELETING`n" -ForegroundColor Red
+
+# Verify what's left
+Write-Host "🔍 Verifying cleanup:" -ForegroundColor Cyan
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "   ⚠️  Still exists: $dir" -ForegroundColor Red
+    } else {
+        Write-Host "   ✅ Removed: $dir" -ForegroundColor Green
+    }
+}
+```
+
+**STOP HERE AND SHOW ME:**
+1. Archive location
+2. Which directories were successfully moved
+3. Any directories that couldn't be moved
+4. Wait for approval to proceed
+
+---
+
+## Phase 4: CLONE FRESH v2.0.0 FROM GITHUB (After my approval)
+
+**Task:** Set up the new unified system. ```powershell
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🚀 INSTALLING v2.0.0 UNIFIED SYSTEM" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+# Ensure C:\Dev exists
+if (! (Test-Path "C:\Dev")) {
+    New-Item -ItemType Directory -Path "C:\Dev" -Force
+    Write-Host "✅ Created C:\Dev directory" -ForegroundColor Green
+}
+
+# Clone the repository
+Push-Location "C:\Dev"
+Write-Host "📥 Cloning from GitHub..." -ForegroundColor Yellow
+
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+
+if (Test-Path "C:\Dev\ClaudeExportFixer") {
+    Write-Host "✅ Repository cloned successfully" -ForegroundColor Green
+    
+    # Verify version
+    Push-Location "C:\Dev\ClaudeExportFixer"
+    
+    Write-Host "`n📋 Verifying installation..." -ForegroundColor Cyan
+    
+    # Check for key files
+    $keyFiles = @(
+        "config.json",
+        "chunker_engine.py",
+        "file_processors.py",
+        "start_watchdog.py",
+        "requirements.txt",
+        "README.md"
+    )
+    
+    foreach ($file in $keyFiles) {
+        if (Test-Path $file) {
+            Write-Host "   ✅ $file" -ForegroundColor Green
+        } else {
+            Write-Host "   ❌ Missing: $file" -ForegroundColor Red
+        }
+    }
+    
+    # Check version
+    Write-Host "`n🔢 Checking version..." -ForegroundColor Cyan
+    python -c "import start_watchdog; print(f'   ✅ Version: {start_watchdog.__version__}')" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   ⚠️  Need to install dependencies first" -ForegroundColor Yellow
+    }
+    
+    # Set up virtual environment
+    Write-Host "`n🐍 Setting up Python virtual environment..." -ForegroundColor Cyan
+    python -m venv venv
+    
+    if (Test-Path "venv\Scripts\activate.ps1") {
+        Write-Host "   ✅ Virtual environment created" -ForegroundColor Green
+        
+        # Activate and install
+        Write-Host "`n📦 Installing dependencies..." -ForegroundColor Cyan
+        .\venv\Scripts\Activate.ps1
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        
+        Write-Host "`n✅ Dependencies installed" -ForegroundColor Green
+        
+        # Verify installation
+        Write-Host "`n🔍 Verifying installation..." -ForegroundColor Cyan
+        python -c "import start_watchdog; print(f'   ✅ ClaudeExportFixer v{start_watchdog.__version__} ready!')" python -c "import chunker_engine; print('   ✅ Chunker engine loaded')"
+        python -c "import file_processors; print('   ✅ File processors loaded')"
+    }
+    
+    Pop-Location
+} else {
+    Write-Host "❌ Failed to clone repository" -ForegroundColor Red
+}
+
+Pop-Location
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "✅ v2.0.0 INSTALLATION COMPLETE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+```
+
+**STOP HERE AND SHOW ME:**
+1. Clone success/failure
+2. Version verification
+3. Dependency installation status
+4. Wait for approval to proceed
+
+---
+
+## Phase 5: INTEGRATE PRESERVED DATA (After my approval)
+
+**Task:** Move preserved data into the new unified system. ```powershell
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔄 INTEGRATING PRESERVED DATA" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$newSystemPath = "C:\Dev\ClaudeExportFixer"
+
+# 1. Move unprocessed files to input
+Write-Host "📥 Moving unprocessed files..." -ForegroundColor Yellow
+$unprocessedSource = Join-Path $preserveRoot "unprocessed"
+if (Test-Path $unprocessedSource) {
+    $inputDest = Join-Path $newSystemPath "01_input"
+    Get-ChildItem $unprocessedSource -Recurse -File | ForEach-Object {
+        $destPath = Join-Path $inputDest $_.Name
+        
+        # Handle duplicates
+        if (Test-Path $destPath) {
+            $destPath = Join-Path $inputDest "$timestamp`_$($_.Name)"
+        }
+        
+        Copy-Item $_.FullName -Destination $destPath -Force
+        Write-Host "   ✅ $($_.Name)" -ForegroundColor Green
+    }
+}
+
+# 2. Move databases to knowledge base
+Write-Host "`n💾 Moving databases..." -ForegroundColor Yellow
+$dbSource = Join-Path $preserveRoot "databases"
+if (Test-Path $dbSource) {
+    $kbDest = Join-Path $newSystemPath "03_knowledge_base"
+    New-Item -ItemType Directory -Path $kbDest -Force | Out-Null
+    
+    Get-ChildItem $dbSource -Filter "*.db" -Recurse | ForEach-Object {
+        Copy-Item $_.FullName -Destination (Join-Path $kbDest $_.Name) -Force
+        Write-Host "   ✅ $($_.Name)" -ForegroundColor Magenta
+    }
+}
+
+# 3.

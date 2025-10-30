@@ -1,0 +1,343 @@
+*   **Code**:
+        
+        ```text
+        TIME_OF_DAY = Table.AddColumn(BLOCK, "TIME_OF_DAY", each if [Start of Hour] >= #time(0, 0, 0) and [Start of Hour] < #time(4, 0, 0) then "Early Morning (00:00-03:59)" else if [Start of Hour] >= #time(4, 0, 0) and [Start of Hour] < #time(8, 0, 0) then "Morning (04:00-07:59)" else if [Start of Hour] >= #time(8, 0, 0) and [Start of Hour] < #time(12, 0, 0) then "Morning Peak (08:00-11:59)" else if [Start of Hour] >= #time(12, 0, 0) and [Start of Hour] < #time(16, 0, 0) then "Afternoon (12:00-15:59)" else if [Start of Hour] >= #time(16, 0, 0) and [Start of Hour] < #time(20, 0, 0) then "Evening Peak (16:00-19:59)" else "Night (20:00-23:59)")
+        ```
+        
+41. **Trimmed Text1**
+    *   **Description**: Trims whitespace from the "Narrative" column. *   **Code**:
+        
+        ```text
+        #"Trimmed Text1" = Table.TransformColumns(TIME_OF_DAY,{{"Narrative", Text.Trim, type text}})
+        ```
+        
+42. **Cleaned Text1**
+    *   **Description**: Cleans the "Narrative" column to remove non-printable characters. *   **Code**:
+        
+        ```text
+        #"Cleaned Text1" = Table.TransformColumns(#"Trimmed Text1",{{"Narrative", Text.Clean, type text}})
+        ```
+        
+43. **Changed Type4**
+    *   **Description**: Converts "Total Value Stolen" and "Total Value Recover" to Currency type. *   **Code**:
+        
+        ```text
+        #"Changed Type4" = Table.TransformColumnTypes(#"Cleaned Text1",{{"Total Value Stolen", Currency.Type}, {"Total Value Recover", Currency.Type}})
+        ```
+        
+44. **Trimmed Text2**
+    *   **Description**: Trims whitespace from vehicle-related columns and sets types. *   **Code**:
+        
+        ```text
+        #"Trimmed Text2" = Table.TransformColumns(Table.TransformColumnTypes(#"Changed Type4", {{"Model2", type text}, {"Make2", type text}, {"Reg State 2", type text}, {"Registration 2", type text}}, "en-US"),{{"Reg State 1", Text.Trim, type text}, {"Model1", Text.Trim, type text}, {"Registration 1", Text.Trim, type text}, {"Make1", Text.Trim, type text}})
+        ```
+        
+45. **Cleaned Text2**
+    *   **Description**: Cleans vehicle-related columns to remove non-printable characters. *   **Code**:
+        
+        ```text
+        #"Cleaned Text2" = Table.TransformColumns(#"Trimmed Text2",{{"Reg State 1", Text.Clean, type text}, {"Model1", Text.Clean, type text}, {"Registration 1", Text.Clean, type text}, {"Make1", Text.Clean, type text}, {"Registration 2", Text.Clean, type text}, {"Reg State 2", Text.Clean, type text}, {"Model2", Text.Clean, type text}, {"Make2", Text.Clean, type text}})
+        ```
+        
+46. **Uppercased Text**
+    *   **Description**: Converts vehicle-related columns to uppercase. *   **Code**:
+        
+        ```text
+        #"Uppercased Text" = Table.TransformColumns(#"Cleaned Text2",{{"Reg State 1", Text.Upper, type text}, {"Model1", Text.Upper, type text}, {"Registration 1", Text.Upper, type text}, {"Make1", Text.Upper, type text}, {"Registration 2", Text.Upper, type text}, {"Reg State 2", Text.Upper, type text}, {"Model2", Text.Upper, type text}, {"Make2", Text.Upper, type text}})
+        ```
+        
+47. **Capitalized Each Word**
+    *   **Description**: Capitalizes each word in the "Reviewed By" column. *   **Code**:
+        
+        ```text
+        #"Capitalized Each Word" = Table.TransformColumns(#"Uppercased Text",{{"Reviewed By", Text.Proper, type text}})
+        ```
+        
+48. **Added Custom6**
+    *   **Description**: Adds a "VEHICLE1" column combining vehicle details for the first vehicle. *   **Code**:
+        
+        ```text
+        #"Added Custom6" = Table.AddColumn(#"Capitalized Each Word", "VEHICLE1", each if [Reg State 1] <> null and [Registration 1] <> null and [Make1] <> null and [Model1] <> null then [Reg State 1] & "-" & [Registration 1] & " " & [Make1] & ", " & [Model1] else if [Reg State 1] <> null and [Registration 1] <> null then [Reg State 1] & "-" & [Registration 1] else if [Make1] <> null and [Model1] <> null then [Make1] & ", " & [Model1] else null)
+        ```
+        
+49. **Added Custom7**
+    *   **Description**: Adds a "VEHICLE2" column combining details for both vehicles. *   **Code**:
+        
+        ```text
+        #"Added Custom7" = Table.AddColumn(#"Added Custom6", "VEHICLE2", each let Combined1 = if [Reg State 1] <> null and [Registration 1] <> null and [Make1] <> null and [Model1] <> null then "Vehicle 1: " & [Reg State 1] & "-" & [Registration 1] & " " & [Make1] & ", " & [Model1] else if [Reg State 1] <> null and [Registration 1] <> null then "Vehicle 1: " & [Reg State 1] & "-" & [Registration 1] else if [Make1] <> null and [Model1] <> null then "Vehicle 1: " & [Make1] & ", " & [Model1] else null,
+        Combined2 = if [Reg State 2] <> null and [Registration 2] <> null and [Make2] <> null and [Model2] <> null then "Vehicle 2: " & [Reg State 2] & "-" & [Registration 2] & " " & [Make2] & ", " & [Model2] else if [Reg State 2] <> null and [Registration 2] <> null then "Vehicle 2: " & [Reg State 2] & "-" & [Registration 2] else if [Make2] <> null and [Model2] <> null then "Vehicle 2: " & [Make2] & ", " & [Model2] else null,
+        Result = if Combined1 <> null and Combined2 <> null then Combined1 & " | " & Combined2 else if Combined1 <> null then Combined1 else Combined2
+        in Result)
+        ```
+        
+50. **Removed Columns2**
+    *   **Description**: Removes the "VEHICLE1" column. *   **Code**:
+        
+        ```text
+        #"Removed Columns2" = Table.RemoveColumns(#"Added Custom7",{"VEHICLE1"})
+        ```
+        
+51. **Renamed Columns2**
+    *   **Description**: Renames "VEHICLE2" to "VEHICLE". *   **Code**:
+        
+        ```text
+        #"Renamed Columns2" = Table.RenameColumns(#"Removed Columns2",{{"VEHICLE2", "VEHICLE"}})
+        ```
+        
+52. **Duplicated Column**
+    *   **Description**: Duplicates the "Narrative" column as "Narrative - Copy". *   **Code**:
+        
+        ```text
+        #"Duplicated Column" = Table.DuplicateColumn(#"Renamed Columns2", "Narrative", "Narrative - Copy")
+        ```
+        
+53. **Added Custom8**
+    *   **Description**: Adds a "Custom" column extracting suspect-related text from "Narrative". *   **Code**:
+        
+        ```text
+        #"Added Custom8" = Table.AddColumn(#"Duplicated Column", "Custom", each let text = [Narrative], lowerText = Text.Lower(text), splitBySuspect = Text.Split(lowerText, "suspect"), extractList = List.Transform(List.RemoveFirstN(splitBySuspect, 1), each "suspect" & Text.BeforeDelimiter(_, ". ")), combinedText = Text.Combine(extractList, " ") in combinedText)
+        ```
+        
+54. **Renamed Columns3**
+    *   **Description**: Renames "Custom" to "Suspect". *   **Code**:
+        
+        ```text
+        #"Renamed Columns3" = Table.RenameColumns(#"Added Custom8",{{"Custom", "Suspect"}})
+        ```
+        
+55. **Reordered Columns5**
+    *   **Description**: Reorders columns to include "Suspect" and "Narrative - Copy". *   **Code**:
+        
+        ```text
+        #"Reordered Columns5" = Table.ReorderColumns(#"Renamed Columns3",{"Case Number", "INC_DATE", "Month Name", "Day Name", "INC_TIME", "Start of Hour", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "Location", "St#", "BLOCK", "TIME_OF_DAY", "VEHICLE", "Suspect", "Narrative - Copy"})
+        ```
+        
+56. **Added Custom9**
+    *   **Description**: Adds a column extracting dollar amounts from "Narrative". *   **Code**:
+        
+        ```text
+        #"Added Custom9" = Table.AddColumn(#"Reordered Columns5", "Amount Taken", each let text = [Narrative], splitByDollar = Text.Split(text, "$"), extractList = List.Transform(List.RemoveFirstN(splitByDollar, 1), each try "$" & Text.BeforeDelimiter(_, ". ", 2) otherwise ""), combinedText = Text.Combine(List.Select(extractList, each _ <> ""), " ") in combinedText)
+        ```
+        
+57. **Reordered Columns6**
+    *   **Description**: Reorders columns to include "Amount Taken". *   **Code**:
+        
+        ```text
+        #"Reordered Columns6" = Table.ReorderColumns(#"Added Custom9",{"Case Number", "INC_DATE", "Month Name", "Day Name", "INC_TIME", "Start of Hour", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "Location", "St#", "BLOCK", "TIME_OF_DAY", "VEHICLE", "Suspect", "Amount Taken", "Narrative - Copy"})
+        ```
+        
+58. **Renamed Columns4**
+    *   **Description**: Renames "Amount Taken" to "TOTAL\_STOLEN\_AMOUNT". *   **Code**:
+        
+        ```text
+        #"Renamed Columns4" = Table.RenameColumns(#"Reordered Columns6",{{"Amount Taken", "TOTAL_STOLEN_AMOUNT"}})
+        ```
+        
+59. **Trimmed Text3**
+    *   **Description**: Trims whitespace from the "Suspect" column. *   **Code**:
+        
+        ```text
+        #"Trimmed Text3" = Table.TransformColumns(#"Renamed Columns4",{{"Suspect", Text.Trim, type text}})
+        ```
+        
+60. **Cleaned Text3**
+    *   **Description**: Cleans the "Suspect" column to remove non-printable characters. *   **Code**:
+        
+        ```text
+        #"Cleaned Text3" = Table.TransformColumns(#"Trimmed Text3",{{"Suspect", Text.Clean, type text}})
+        ```
+        
+61. **Reordered Columns7**
+    *   **Description**: Reorders columns to adjust placement of key fields. *   **Code**:
+        
+        ```text
+        #"Reordered Columns7" = Table.ReorderColumns(#"Cleaned Text3",{"Case Number", "Start of Hour", "INC_TIME", "Day Name", "Month Name", "INC_DATE", "Location", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "St#", "BLOCK", "TIME_OF_DAY", "Narrative - Copy", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT"})
+        ```
+        
+62. **Replaced Value**
+    *   **Description**: Replaces "June" with "February" in "Month Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value" = Table.ReplaceValue(#"Reordered Columns7","June","February",Replacer.ReplaceText,{"Month Name"})
+        ```
+        
+63. **Replaced Value1**
+    *   **Description**: Replaces date 2017-06-20 with 2025-02-20 in "INC\_DATE". *   **Code**:
+        
+        ```text
+        #"Replaced Value1" = Table.ReplaceValue(#"Replaced Value",#date(2017, 6, 20),#date(2025, 2, 20),Replacer.ReplaceValue,{"INC_DATE"})
+        ```
+        
+64. **Removed Duplicates**
+    *   **Description**: Removes duplicate rows based on "Case Number". *   **Code**:
+        
+        ```text
+        #"Removed Duplicates" = Table.Distinct(#"Replaced Value1", {"Case Number"})
+        ```
+        
+65. **REPORT\_CYCLE**
+    *   **Description**: Adds a "REPORT\_CYCLE" column assigning cycle and week based on "INC\_DATE". *   **Code**:
+        
+        ```text
+        REPORT_CYCLE = Table.AddColumn(#"Removed Duplicates", "REPORT_CYCLE", each let
+            Cycle = if [INC_DATE] >= #date(2024, 12, 31) and [INC_DATE] <= #date(2025, 1, 27) then "C01"
+                    else if [INC_DATE] >= #date(2025, 1, 28) and [INC_DATE] <= #date(2025, 2, 24) then "C02"
+                    else if [INC_DATE] >= #date(2025, 2, 25) and [INC_DATE] <= #date(2025, 3, 24) then "C03"
+                    else if [INC_DATE] >= #date(2025, 3, 25) and [INC_DATE] <= #date(2025, 4, 21) then "C04"
+                    else if [INC_DATE] >= #date(2025, 4, 22) and [INC_DATE] <= #date(2025, 5, 19) then "C05"
+                    else if [INC_DATE] >= #date(2025, 5, 20) and [INC_DATE] <= #date(2025, 6, 16) then "C06"
+                    else if [INC_DATE] >= #date(2025, 6, 17) and [INC_DATE] <= #date(2025, 7, 14) then "C07"
+                    else if [INC_DATE] >= #date(2025, 7, 15) and [INC_DATE] <= #date(2025, 8, 11) then "C08"
+                    else if [INC_DATE] >= #date(2025, 8, 12) and [INC_DATE] <= #date(2025, 9, 8) then "C09"
+                    else if [INC_DATE] >= #date(2025, 9, 9) and [INC_DATE] <= #date(2025, 10, 6) then "C10"
+                    else if [INC_DATE] >= #date(2025, 10, 7) and [INC_DATE] <= #date(2025, 11, 3) then "C11"
+                    else if [INC_DATE] >= #date(2025, 11, 4) and [INC_DATE] <= #date(2025, 12, 1) then "C12"
+                    else if [INC_DATE] >= #date(2025, 12, 2) and [INC_DATE] <= #date(2025, 12, 29) then "C13"
+                    else if [INC_DATE] >= #date(2025, 12, 30) and [INC_DATE] <= #date(2026, 1, 26) then "C14" else null,
+            Week = let
+                WeekNumber = if [INC_DATE] >= #date(2024, 12, 31) and [INC_DATE] <= #date(2025, 1, 6) then 1
+                             else if [INC_DATE] >= #date(2025, 1, 7) and [INC_DATE] <= #date(2025, 1, 13) then 2
+                             else if [INC_DATE] >= #date(2025, 1, 14) and [INC_DATE] <= #date(2025, 1, 20) then 3
+                             else if [INC_DATE] >= #date(2025, 1, 21) and [INC_DATE] <= #date(2025, 1, 27) then 4
+                             else if [INC_DATE] >= #date(2025, 1, 28) and [INC_DATE] <= #date(2025, 2, 3) then 5
+                             else if [INC_DATE] >= #date(2025, 2, 4) and [INC_DATE] <= #date(2025, 2, 10) then 6
+                             else if [INC_DATE] >= #date(2025, 2, 11) and [INC_DATE] <= #date(2025, 2, 17) then 7
+                             else if [INC_DATE] >= #date(2025, 2, 18) and [INC_DATE] <= #date(2025, 2, 24) then 8
+                             else if [INC_DATE] >= #date(2025, 2, 25) and [INC_DATE] <= #date(2025, 3, 3) then 9
+                             else if [INC_DATE] >= #date(2025, 3, 4) and [INC_DATE] <= #date(2025, 3, 10) then 10
+                             else if [INC_DATE] >= #date(2025, 3, 11) and [INC_DATE] <= #date(2025, 3, 17) then 11
+                             else if [INC_DATE] >= #date(2025, 3, 18) and [INC_DATE] <= #date(2025, 3, 24) then 12
+                             else if [INC_DATE] >= #date(2025, 3, 25) and [INC_DATE] <= #date(2025, 3, 31) then 13
+                             else if [INC_DATE] >= #date(2025, 4, 1) and [INC_DATE] <= #date(2025, 4, 7) then 14
+                             else if [INC_DATE] >= #date(2025, 4, 8) and [INC_DATE] <= #date(2025, 4, 14) then 15
+                             else if [INC_DATE] >= #date(2025, 4, 15) and [INC_DATE] <= #date(2025, 4, 21) then 16
+                             else if [INC_DATE] >= #date(2025, 4, 22) and [INC_DATE] <= #date(2025, 4, 28) then 17
+                             else if [INC_DATE] >= #date(2025, 4, 29) and [INC_DATE] <= #date(2025, 5, 5) then 18
+                             else if [INC_DATE] >= #date(2025, 5, 6) and [INC_DATE] <= #date(2025, 5, 12) then 19
+                             else if [INC_DATE] >= #date(2025, 5, 13) and [INC_DATE] <= #date(2025, 5, 19) then 20
+                             else if [INC_DATE] >= #date(2025, 5, 20) and [INC_DATE] <= #date(2025, 5, 26) then 21
+                             else if [INC_DATE] >= #date(2025, 5, 27) and [INC_DATE] <= #date(2025, 6, 2) then 22
+                             else if [INC_DATE] >= #date(2025, 6, 3) and [INC_DATE] <= #date(2025, 6, 9) then 23
+                             else if [INC_DATE] >= #date(2025, 6, 10) and [INC_DATE] <= #date(2025, 6, 16) then 24
+                             else if [INC_DATE] >= #date(2025, 6, 17) and [INC_DATE] <= #date(2025, 6, 23) then 25
+                             else if [INC_DATE] >= #date(2025, 6, 24) and [INC_DATE] <= #date(2025, 6, 30) then 26
+                             else null,
+                WeekFormatted = if WeekNumber <> null then "W" & Text.PadStart(Text.From(WeekNumber), 2, "0") else null
+            in WeekFormatted,
+            Result = if Cycle <> null and Week <> null then Cycle & Week else null
+        in Result)
+        ```
+        
+66. **Reordered Columns8**
+    *   **Description**: Reorders columns to include "REPORT\_CYCLE". *   **Code**:
+        
+        ```text
+        #"Reordered Columns8" = Table.ReorderColumns(REPORT_CYCLE,{"Case Number", "INC_DATE", "Start of Hour", "TIME_OF_DAY", "INC_TIME", "Day Name", "Month Name", "BLOCK", "Location", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "St#", "Narrative - Copy", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "REPORT_CYCLE"})
+        ```
+        
+67. **Added Custom11**
+    *   **Description**: Adds a column categorizing "Start of Hour" into time-of-day labels. *   **Code**:
+        
+        ```text
+        #"Added Custom11" = Table.AddColumn(#"Reordered Columns8", "Custom", each if [Start of Hour] >= #time(0, 0, 0) and [Start of Hour] < #time(4, 0, 0) then "00:00-03:59 Early Morning" else if [Start of Hour] >= #time(4, 0, 0) and [Start of Hour] < #time(8, 0, 0) then "04:00-07:59 Morning" else if [Start of Hour] >= #time(8, 0, 0) and [Start of Hour] < #time(12, 0, 0) then "08:00-11:59 Morning Peak" else if [Start of Hour] >= #time(12, 0, 0) and [Start of Hour] < #time(16, 0, 0) then "12:00-15:59 Afternoon" else if [Start of Hour] >= #time(16, 0, 0) and [Start of Hour] < #time(20, 0, 0) then "16:00-19:59 Evening Peak" else "20:00-23:59 Night")
+        ```
+        
+68. **Renamed Columns5**
+    *   **Description**: Renames "Custom" to "TOD". *   **Code**:
+        
+        ```text
+        #"Renamed Columns5" = Table.RenameColumns(#"Added Custom11",{{"Custom", "TOD"}})
+        ```
+        
+69. **Reordered Columns9**
+    *   **Description**: Reorders columns to prioritize "TOD". *   **Code**:
+        
+        ```text
+        #"Reordered Columns9" = Table.ReorderColumns(#"Renamed Columns5",{"Case Number", "INC_DATE", "TOD", "Start of Hour", "INC_TIME", "Day Name", "Month Name", "BLOCK", "Location", "Incident Type_1", "ALL_INCIDENTS", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "St#", "Narrative - Copy", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "REPORT_CYCLE", "TIME_OF_DAY"})
+        ```
+        
+70. **Sorted Rows**
+    *   **Description**: Sorts by "INC\_DATE" in descending order. *   **Code**:
+        
+        ```text
+        #"Sorted Rows" = Table.Sort(#"Reordered Columns9",{{"INC_DATE", Order.Descending}})
+        ```
+        
+71. **Renamed Columns6**
+    *   **Description**: Renames "Narrative - Copy" to "Notes". *   **Code**:
+        
+        ```text
+        #"Renamed Columns6" = Table.RenameColumns(#"Sorted Rows",{{"Narrative - Copy", "Notes"}})
+        ```
+        
+72. **Sorted Rows1**
+    *   **Description**: Sorts by "INC\_DATE" in ascending order. *   **Code**:
+        
+        ```text
+        #"Sorted Rows1" = Table.Sort(#"Renamed Columns6",{{"INC_DATE", Order.Ascending}})
+        ```
+        
+73. **Replaced Value2**
+    *   **Description**: Replaces "Friday" with "Fri" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value2" = Table.ReplaceValue(#"Sorted Rows1","Friday","Fri",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+74. **Replaced Value3**
+    *   **Description**: Replaces "Monday" with "Mon" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value3" = Table.ReplaceValue(#"Replaced Value2","Monday","Mon",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+75. **Replaced Value4**
+    *   **Description**: Replaces "Tuesday" with "Tue" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value4" = Table.ReplaceValue(#"Replaced Value3","Tuesday","Tue",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+76. **Replaced Value5**
+    *   **Description**: Replaces "Wednesday" with "Wed" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value5" = Table.ReplaceValue(#"Replaced Value4","Wednesday","Wed",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+77. **Replaced Value6**
+    *   **Description**: Replaces "Thursday" with "Thur" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value6" = Table.ReplaceValue(#"Replaced Value5","Thursday","Thur",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+78. **Replaced Value7**
+    *   **Description**: Replaces "Sunday" with "Sun" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value7" = Table.ReplaceValue(#"Replaced Value6","Sunday","Sun",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+79. **Replaced Value8**
+    *   **Description**: Replaces "Saturday" with "Sat" in "Day Name". *   **Code**:
+        
+        ```text
+        #"Replaced Value8" = Table.ReplaceValue(#"Replaced Value7","Saturday","Sat",Replacer.ReplaceText,{"Day Name"})
+        ```
+        
+80. **Reordered Columns10**
+    *   **Description**: Final reordering of columns to prioritize key fields. *   **Code**:
+        
+        ```text
+        #"Reordered Columns10" = Table.ReorderColumns(#"Replaced Value8",{"Case Number", "BLOCK", "Location", "ALL_INCIDENTS", "Incident Type_1", "Incident Type_2", "Incident Type_3", "FullAddress", "Grid", "Zone", "Narrative", "Total Value Stolen", "Total Value Recover", "Registration 1", "Make1", "Model1", "Reg State 1", "Registration 2", "Reg State 2", "Make2", "Model2", "Reviewed By", "CompleteCalc", "Officer of Record", "Squad", "Det_Assigned", "Case_Status", "NIBRS Classification", "CASE_NUMBER_LENGTH", "Incident Date", "Incident Time", "Incident Date_Between", "Incident Time_Between", "Report Date", "Report Time", "Year", "St#", "Notes", "VEHICLE", "Suspect", "TOTAL_STOLEN_AMOUNT", "INC_DATE", "TOD", "Start of Hour", "INC_TIME", "Day Name", "Month Name", "Week of Year", "Week of Month", "Day", "Day of Year", "INC_DATE_AND_TIME", "TIME_OF_DAY", "REPORT_CYCLE"})
+        ```
+        
+
+* * *
+
+### Notes
+
+*   The code is written in Power Query (M language) for data transformation in Excel or Power BI. *   Each step is modular, focusing on data cleaning, type conversion, column derivation, and formatting. *   Some steps (e.g., "Added Custom4", "Added Custom5") are redundant as their results are removed, suggesting iterative development. *   The final output is a transformed table with enhanced columns for reporting, such as "REPORT\_CYCLE", "TOD", and "VEHICLE". *   **Formatting Instructions for Word**:
+    *   When pasting into Microsoft Word, select the entire text and set the font for descriptions to a standard font like "Calibri" or "Times New Roman" (11 or 12 pt). *   For the **Code** sections, highlight each code block and set the font to "Courier New" (10 or 11 pt) to maintain monospaced alignment, typical for code. *   Optionally, apply a light gray background (e.g., Shading: 10% Gray) to code blocks for visual distinction. *   Ensure "Keep Source Formatting" is selected when pasting to preserve line breaks and indentation. *   Adjust paragraph spacing (e.g., 6 pt after) for readability between steps. ## Prompt:
+does this old code need to be modified to account for the new data?

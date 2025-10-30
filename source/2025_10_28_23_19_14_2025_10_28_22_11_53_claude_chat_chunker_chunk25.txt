@@ -1,0 +1,711 @@
+Args:
+        input_file: Input file path
+        
+    Returns:
+        Path to projects.json if found, None otherwise
+    """
+    projects_path = input_file.parent / 'projects.json'
+    if projects_path.exists():
+        logging.debug(f"Found projects file: {projects_path}")
+        return projects_path
+    return None
+
+
+def load_projects(projects_path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """
+    Load projects.json if path provided and exists. Args:
+        projects_path: Path to projects.json
+        
+    Returns:
+        Projects data dictionary or None
+    """
+    if projects_path and projects_path.exists():
+        logging.info(f"Loading projects from {projects_path}")
+        with open(projects_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def generate_report(
+    input_file: Path,
+    output_file: Path,
+    report_path: Path,
+    success: bool,
+    error: Optional[str] = None
+) -> None:
+    """
+    Generate a CSV report of the processing. Args:
+        input_file: Input file path
+        output_file: Output file path
+        report_path: Report output path
+        success: Whether processing succeeded
+        error: Error message if failed
+    """
+    import csv
+    from datetime import datetime
+    
+    with open(report_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'input', 'output', 'success', 'error'])
+        writer.writerow([
+            datetime.now().isoformat(),
+            str(input_file),
+            str(output_file) if success else '',
+            'yes' if success else 'no',
+            error or ''
+        ])
+    
+    logging.info(f"Report written to {report_path}")
+
+
+def process_file(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    projects_path: Optional[Union[str, Path]] = None,
+    zip_output: bool = False,
+    stream: bool = False,
+    pretty: bool = False,
+    strict: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+    no_backup: bool = False,
+    no_merge_to_files: bool = False,
+    keep_invalid: bool = False
+) -> int:
+    """
+    Main processing function. Args:
+        input_path: Input file path (JSON or ZIP)
+        output_path: Output file path
+        projects_path: Optional projects.json path
+        zip_output: Force ZIP output
+        stream: Use streaming mode
+        pretty: Pretty-print JSON
+        strict: Strict mode (fail on any error)
+        verbose: Verbose logging
+        quiet: Quiet mode (errors only)
+        no_backup: Don't create backup of ZIP files
+        no_merge_to_files: Don't merge file/attachment references
+        keep_invalid: Keep invalid messages instead of skipping
+        
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    setup_logging(verbose, quiet)
+    
+    input_file = Path(input_path)
+    output_file = Path(output_path)
+    
+    if not input_file.exists():
+        logging.error(f"Input file not found: {input_file}")
+        return 1
+    
+    # Auto-detect projects.json if not provided
+    if projects_path:
+        projects_file = Path(projects_path)
+    else:
+        projects_file = find_projects_file(input_file)
+    
+    projects_data = load_projects(projects_file)
+    
+    # Determine report path
+    report_path = output_file.with_name(output_file.stem + '_report.csv')
+    
+    try:
+        # Process based on input type
+        if input_file.suffix.lower() == '.zip':
+            if zip_output or output_file.suffix.lower() == '.zip':
+                # ZIP to ZIP
+                process_zip_file(
+                    input_file, output_file, projects_data,
+                    pretty, stream, not no_merge_to_files, keep_invalid, no_backup
+                )
+            else:
+                # ZIP to JSON (extract conversations.json)
+                with zipfile.ZipFile(input_file, 'r') as zin:
+                    if 'conversations.json' not in zin.namelist():
+                        raise ValueError("No conversations.json in ZIP")
+                    
+                    with zin.open('conversations.json') as f:
+                        data = json.load(f)
+                    
+                    # Check for projects in ZIP
+                    if 'projects.json' in zin.namelist() and not projects_data:
+                        with zin.open('projects.json') as f:
+                            projects_data = json.load(f)
+                
+                data = process_conversation_data(data, projects_data, not no_merge_to_files, keep_invalid)
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    if pretty:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                    else:
+                        json.dump(data, f, ensure_ascii=False)
+        else:
+            # JSON input
+            if zip_output or output_file.suffix.lower() == '.zip':
+                # JSON to ZIP
+                process_json_file(
+                    input_file, output_file.with_suffix('.json'),
+                    projects_data, pretty, stream, not no_merge_to_files, keep_invalid
+                )
+                # Create ZIP with the processed JSON
+                with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+                    with open(output_file.with_suffix('.json'), 'r') as f:
+                        zout.writestr('conversations.json', f.read())
+                    if projects_data:
+                        projects_json = json.dumps(projects_data, indent=2 if pretty else None)
+                        zout.writestr('projects.json', projects_json)
+                # Clean up temp JSON
+                output_file.with_suffix('.json').unlink()
+            else:
+                # JSON to JSON
+                process_json_file(
+                    input_file, output_file, projects_data,
+                    pretty, stream, not no_merge_to_files, keep_invalid
+                )
+        
+        logging.info("Processing complete!") generate_report(input_file, output_file, report_path, True)
+        return 0
+        
+    except Exception as e:
+        logging.error(f"Processing failed: {e}")
+        if strict:
+            raise
+        generate_report(input_file, output_file, report_path, False, str(e))
+        return 1
+
+
+def main() -> int:
+    """Main CLI entry point.""" parser = argparse.ArgumentParser(
+        description='Normalize Claude.ai conversation exports for compatibility. ',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s conversations.json -o fixed.json --pretty
+  %(prog)s export.zip -o patched.zip --zip-output --stream
+  %(prog)s --gui
+        """
+    )
+    
+    parser.add_argument('input', nargs='? ', help='Input file (JSON or ZIP)')
+    parser.add_argument('-o', '--output', help='Output file path')
+    parser.add_argument('-p', '--projects', help='Path to projects.json (auto-detected if not specified)')
+    parser.add_argument('--zip-output', action='store_true', help='Force ZIP output')
+    parser.add_argument('--stream', action='store_true', help='Use streaming mode for large files (requires ijson)')
+    parser.add_argument('--pretty', action='store_true', help='Pretty-print JSON output')
+    parser.add_argument('--strict', action='store_true', help='Strict mode: fail on any error')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('-q', '--quiet', action='store_true', help='Quiet mode (errors only)')
+    parser.add_argument('--no-backup', action='store_true', help='Do not create backup of ZIP files')
+    parser.add_argument('--no-merge-to-files', action='store_true', help='Do not merge file/attachment references')
+    parser.add_argument('--keep-invalid', action='store_true', help='Keep invalid messages instead of skipping')
+    parser.add_argument('--gui', action='store_true', help='Launch a simple Tkinter UI (optional)')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    
+    args = parser.parse_args()
+    
+    # GUI mode
+    if args.gui:
+        try:
+            from gui import launch_gui
+            launch_gui()
+            return 0
+        except ImportError as e:
+            print(f"ERROR: GUI not available: {e}", file=sys.stderr)
+            print("Tkinter is required for GUI mode (usually included with Python)", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"ERROR: GUI failed to launch: {e}", file=sys.stderr)
+            return 1
+    
+    # CLI mode - require input and output
+    if not args.input:
+        parser.error("the following arguments are required: input (or use --gui)")
+    
+    if not args.output:
+        parser.error("the following arguments are required: -o/--output (or use --gui)")
+    
+    return process_file(
+        args.input,
+        args.output,
+        args.projects,
+        args.zip_output,
+        args.stream,
+        args.pretty,
+        args.strict,
+        args.verbose,
+        args.quiet,
+        args.no_backup,
+        args.no_merge_to_files,
+        args.keep_invalid
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+```
+
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). ## [Unreleased]
+
+## [1.1.1] - 2025-10-27
+
+### Fixed
+- **CRITICAL**: Enhanced `merge_file_references()` to properly handle Claude's rich attachment format
+  - Now supports objects with `file_name`, `file_size`, `file_type`, `extracted_content` fields
+  - Deduplicates by file identifier (file_name, uuid, or file_uuid)
+  - Prioritizes richer attachment data over simpler file data when merging
+  - Maps `file_name` and `uuid` to `file_uuid` for osteele viewer compatibility
+  - Filters out empty file names
+  - Maintains backward compatibility with simple UUID format
+- **CRITICAL**: Fixed `process_conversation_data()` to handle Claude's list format (conversations as top-level array)
+  - Now supports both `{"conversations": [...]}` and `[...]` formats
+  - Ensures merge_file_references() is called for all Claude export formats
+- **CRITICAL**: Fixed `link_projects()` to handle list format conversations
+
+### Added
+- `tests/test_merge_rich_attachments.py` - Comprehensive test suite for rich attachment merging (10 tests)
+  - Tests backward compatibility with UUID format
+  - Tests Claude's rich attachment format
+  - Tests deduplication by file_name
+  - Tests empty file_name handling
+  - Tests mixed format support
+  - Tests extracted_content preservation
+- `LICENSE` - MIT License for open-source distribution
+- `.gitattributes` - Line ending enforcement (LF default, CRLF for .bat files)
+- `SECURITY.md` - Security policy and vulnerability reporting guidelines
+- `utils/` folder - Analysis and troubleshooting utilities
+  - `PROMPT_FOR_GROK.md` - Troubleshooting documentation
+  - `GROK_TROUBLESHOOTING_REPORT.md` - Detailed issue analysis
+  - `current_merge_function.py` - Code reference with test scenarios
+  - `claude_export_sample_structure.json` - Sample Claude export format
+  - `analyze_output.py` - Output validation tool
+  - `check_merging.py` - Attachment merging verification tool
+  - `detailed_analysis.py` - Detailed statistics analysis tool
+  - `verify_fix.py` - Fix verification tool
+  - `verify_rich_data.py` - Rich data preservation verification tool
+
+### Changed
+- `README.md` - Added License, Contributing sections, and utils/ folder documentation
+- `SUMMARY.md` - Updated status and added utils/ folder
+- Git repository initialized and configured
+- Version bumped to 1.1.1
+
+### Tested
+- ✅ 23/23 tests passing (13 original + 10 new rich attachment tests)
+- ✅ Successfully processed real Claude export with 401 conversations, 10,369 messages
+- ✅ 0 messages with both files and attachments (100% merge success rate)
+- ✅ Rich attachment data preserved (extracted_content, file_size, file_type)
+
+## [1.1.0] - 2025-10-26
+
+### Added
+- Optional Tkinter GUI interface in `gui.py`
+  - Browse input/output files with file dialogs
+  - Visual checkboxes for all CLI options
+  - Real-time log streaming in text area
+  - Progress bar during processing
+  - Auto-detection of projects.json
+  - "Open Output" button to view results
+  - Background threading for responsive UI
+  - Headless safety with graceful error handling
+- `--gui` flag in CLI to launch graphical interface
+- GUI test suite:
+  - `tests/test_gui_import.py` - GUI module import tests
+  - `tests/test_gui_utils.py` - GUI helper function tests (`_suggest_output_path`)
+  - `tests/test_gui_open_output.py` - GUI open output functionality tests (5 tests: Windows, macOS/Linux, error handling, edge cases)
+  - `tests/test_print_logging_bridge.py` - Logging completeness tests
+- Windows batch scripts:
+  - `run_gui.bat` - Launch GUI directly
+  - `build_exe_gui.bat` - Build windowed executable
+- PyInstaller instructions in README for both CLI and GUI builds
+- `*.log` pattern to .gitignore
+- Comprehensive project structure documentation in README
+
+### Changed
+- Version bumped to 1.1.0
+- README.md reorganized with GUI Mode, Building Executables, and Project Structure sections
+- CLI `input` argument now optional (required only if not using --gui)
+- CLI `-o/--output` argument now optional (required only if not using --gui)
+
+## [1.0.0] - 2025-10-26
+
+### Added
+- Full implementation of patch_conversations.py
+- Support for JSON and ZIP file processing
+- File/attachment reference merging
+- Project linking from projects.json
+- ZIP metadata preservation
+- Streaming support with ijson (optional)
+- Comprehensive CLI with argparse
+- CSV report generation
+- Backup creation for ZIP files
+- Typed Python code with type hints
+- Multiple processing modes (streaming, strict, verbose, quiet)
+- Auto-detection of projects.json
+- Initial project structure
+- README.md with quick start guide
+- .gitignore for Python projects
+- requirements.txt with ijson and pytest dependencies
+- requirements-build.txt for build-specific dependencies (pyinstaller)
+- Sample JSON files (conversations.example.json, projects.example.json)
+- Smoke tests in tests/test_smoke.py
+- Windows batch scripts for setup and execution
+  - create_venv.bat - Virtual environment setup
+  - run_tests.bat - Test runner
+  - run_example_json.bat - JSON processing example
+  - run_example_zip_stream.bat - ZIP streaming example
+  - build_exe.bat - PyInstaller build script
+- CHANGELOG.md for tracking project changes
+- SUMMARY.md for project overview
+- GitHub integration:
+  - .github/workflows/ci.yml - Continuous integration workflow
+  - .github/workflows/release.yml - Release automation workflow
+  - .github/ISSUE_TEMPLATE/bug_report.yml - Bug report template
+  - .github/ISSUE_TEMPLATE/feature_request.yml - Feature request template
+  - .github/PULL_REQUEST_TEMPLATE.md - Pull request template
+  - .github/CONTRIBUTING.md - Contributing guidelines
+
+## [0.1.0] - 2025-10-26
+
+### Added
+- Initial project scaffold created
+
+
+```
+
+Perfect! Now let me run all tests one more time to confirm everything works:
+
+I need to update the test to check for the new version:
+
+```python
+import json
+import os
+import subprocess
+import sys
+
+def test_repo_layout_exists():
+    assert os.path.exists("patch_conversations.py")
+    assert os.path.exists("sample/conversations.example.json")
+    assert os.path.exists("gui.py")
+
+def test_script_shows_help():
+    """Test that the script shows help and version information.""" result = subprocess.run([sys.executable, "patch_conversations.py", "--help"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "usage:" in result.stdout
+    assert "--gui" in result.stdout
+
+def test_script_shows_version():
+    """Test that the script shows version information.""" result = subprocess.run([sys.executable, "patch_conversations.py", "--version"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "1.1." in result.stdout or "1.1." in result.stderr  # Accept any 1.1.x version
+
+```
+
+Perfect! All 23 tests pass! Now let me create a final summary document:
+
+---
+
+# 🎉 **ISSUE RESOLVED! ClaudeExportFixer v1.1.1**
+
+## ✅ **Fix Successfully Implemented**
+
+Based on Grok's recommendations, I've successfully fixed the attachment merging issue! ### **What Was Fixed:**
+
+1. **Enhanced `merge_file_references()` function:**
+   - ✅ Now handles Claude's rich attachment format (file_name, file_size, file_type, extracted_content)
+   - ✅ Deduplicates by file identifier
+   - ✅ Prioritizes attachment data (richer) over file data
+   - ✅ Maps file_name/uuid to file_uuid for osteele viewer
+   - ✅ Filters empty file names
+   - ✅ Maintains backward compatibility
+
+2. **Fixed `process_conversation_data()` and `link_projects()`:**
+   - ✅ Now supports Claude's list format `[conversations...]`
+   - ✅ Also supports dict format `{"conversations": [...]}`
+   - ✅ Ensures all messages are processed
+
+### **Test Results:**
+
+```
+23 passed in 2.08s ✅
+```
+
+**Breakdown:**
+- 2 GUI import tests
+- 2 GUI utils tests  
+- 5 GUI open output tests
+- **10 rich attachment tests** ⭐ NEW
+- 1 logging bridge test
+- 3 smoke tests
+
+### **Real Data Verification:**
+
+**Your Claude Export (401 conversations, 10,369 messages):**
+- ✅ **0 messages** with both files and attachments (was 172)
+- ✅ **100% merge success rate**
+- ✅ Rich data preserved (76 files with extracted_content)
+- ✅ file_uuid properly mapped
+- ✅ Ready for osteele chat viewer
+
+---
+
+## 📄 **Files for Grok (Updated)**
+
+**You can now tell Grok:**
+
+> "**UPDATE**: Issue has been resolved! Based on your recommendations, I implemented the enhanced merge_file_references() function with smart deduplication and support for both formats. All 23 tests pass and real Claude export data (401 conversations) now processes perfectly with 100% merge success rate and rich data preserved." **Files to share if Grok wants to see the solution:**
+
+1. **Enhanced Function:**
+   ```
+   C:\Dev\ClaudeExportFixer\patch_conversations.py (lines 45-115)
+   ```
+
+2. **New Tests:**
+   ```
+   C:\Dev\ClaudeExportFixer\tests\test_merge_rich_attachments.py
+   ```
+
+3. **Verification Results:**
+   ```
+   C:\Dev\ClaudeExportFixer\utils\verify_fix.py
+   C:\Dev\ClaudeExportFixer\utils\verify_rich_data.py
+   ```
+
+---
+
+## 🚀 **Ready to Release v1.1.1**
+
+### **Version Information:**
+- **Version:** 1.1.1
+- **Release Date:** 2025-10-27  
+- **Status:** Production-ready with critical fix
+
+### **Next Steps:**
+
+1. **Commit the fix:**
+   ```bash
+   cd C:\Dev\ClaudeExportFixer
+   git add . git commit -m "Fix v1.1.1: Resolve Claude rich attachment merging issue"
+   git tag -a v1.1.1 -m "ClaudeExportFixer v1.1.1 - Fix rich attachment merging"
+   ```
+
+2. **Push to GitHub:**
+   ```bash
+   git push origin main
+   git push origin v1.1.1
+   ```
+
+3. **Your fixed Claude export is ready:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\06_Documentation\chat_logs\claude\data-FIXED-v2.zip
+   ```
+
+---
+
+## 📊 **Success Metrics**
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Tests passing | 13/13 | 23/23 ✅ |
+| Messages with both fields | 172 (1.7%) | 0 (0%) ✅ |
+| Rich data preserved | ❌ Lost | ✅ Preserved |
+| Backward compatible | ✅ Yes | ✅ Yes |
+
+---
+
+**The ClaudeExportFixer now properly handles real Claude exports! ** 🎊
+
+```plaintext
+23 passed in 2.08s ✅
+```
+
+```plaintext
+   C:\Dev\ClaudeExportFixer\patch_conversations.py (lines 45-115)
+```
+
+```plaintext
+   C:\Dev\ClaudeExportFixer\tests\test_merge_rich_attachments.py
+```
+
+```plaintext
+   C:\Dev\ClaudeExportFixer\utils\verify_fix.py
+   C:\Dev\ClaudeExportFixer\utils\verify_rich_data.py
+```
+
+```shellscript
+   cd C:\Dev\ClaudeExportFixer
+   git add . git commit -m "Fix v1.1.1: Resolve Claude rich attachment merging issue"
+   git tag -a v1.1.1 -m "ClaudeExportFixer v1.1.1 - Fix rich attachment merging"
+```
+
+```shellscript
+   git push origin main
+   git push origin v1.1.1
+```
+
+```plaintext
+   C:\Users\carucci_r\OneDrive - City of Hackensack\06_Documentation\chat_logs\claude\data-FIXED-v2.zip
+```
+
+---
+
+**User**
+
+Congratulations on resolving the attachment merging issue in ClaudeExportFixer v1.1.1! Your detailed updates confirm that the enhanced `merge_file_references()`, `process_conversation_data()`, and `link_projects()` functions now handle Claude's rich attachment format correctly, support both list and dict conversation formats, and pass all 23 tests, including new tests for rich attachments. The real-world data verification (401 conversations, 10,369 messages) shows 0 messages with both `files` and `attachments` fields, with rich data preserved and `file_uuid` mapped correctly. The project is ready for release as v1.1.1. Below, I'll provide a concise prompt for Cursor AI to finalize the release preparation by updating `CHANGELOG.md` and `README.md` to document the fix, ensuring no modifications to code or test files, and reiterating the manual release steps you need to execute. ---
+
+**Prompt for Cursor AI**
+
+The ClaudeExportFixer v1.1.1 codebase is production-ready, with the attachment merging issue fixed in `patch_conversations.py` (lines 45-115), new tests added in `tests/test_merge_rich_attachments.py`, and all 23 tests passing. The real Claude export (401 conversations, 10,369 messages) processes perfectly with 0 messages having both `files` and `attachments` fields, rich data preserved, and `file_uuid` mapped. Update `CHANGELOG.md` to document the v1.1.1 fix under a new `[1.1.1]` section and update `README.md` to mention the fix in the "Known Issues" or "Updates" section. Do not modify `patch_conversations.py`, `gui.py`, `tests/test_gui_import.py`, `tests/test_gui_utils.py`, `tests/test_print_logging_bridge.py`, `tests/test_gui_open_output.py`, `tests/test_merge_rich_attachments.py`, or BAT files (`build_exe.bat`, `run_gui.bat`, `build_exe_gui.bat`). Ensure no new dependencies (stdlib + optional `ijson`) and Windows compatibility (CRLF line endings in updated files). Provide manual release steps for the user to execute, as Cursor AI cannot perform Git or GitHub operations. ## Objectives
+
+1. **Update CHANGELOG.md**:
+   - Add a new `[1.1.1]` section with date `2025-10-27`:
+     ```
+     ## [1.1.1] - 2025-10-27
+     ### Fixed
+     - Resolved attachment merging issue for Claude's rich attachment format (`file_name`, `file_size`, `file_type`, `extracted_content`). - Updated `merge_file_references()` to deduplicate by `file_name` or `uuid`, map to `file_uuid`, and preserve rich data. - Fixed `process_conversation_data()` and `link_projects()` to handle top-level list format `[conversations...]`. - Added 10 new tests in `test_merge_rich_attachments.py` for rich attachments, deduplication, and edge cases. ```
+   - Move any `[Unreleased]` content to `[1.1.1]` if applicable. - Keep an empty `[Unreleased]` section for future changes. - Use CRLF line endings. 2. **Update README.md**:
+   - In the "Known Issues" or "Updates" section (or add a new "Updates" section if none exists), add:
+     ```
+     ### Updates
+     - **v1.1.1 (2025-10-27)**: Fixed attachment merging for Claude's rich attachment format, ensuring all messages have a single `files` array with `file_uuid` and preserved metadata. Added 10 new tests. ```
+   - Confirm existing sections (GUI Mode, Building Executables, Project Structure) are unchanged. - Use CRLF line endings. 3. **Confirm Codebase Status**:
+   - Verify `__version__ = "1.1.1"` in `patch_conversations.py`. - Confirm `pytest -q` passes (23/23 tests). - Ensure no stray debug prints or new dependencies. 4. **Manual Release Steps (for User)**:
+   - **Git Operations**:
+     ```bash
+     cd C:\Dev\ClaudeExportFixer
+     git add CHANGELOG.md README.md
+     git commit -m "Release v1.1.1: Document attachment merging fix"
+     git tag -a v1.1.1 -m "ClaudeExportFixer v1.1.1 - Fix rich attachment merging"
+     git push https://racmac57:<TOKEN>@github.com/racmac57/ClaudeExportFixer.git main
+     git push https://racmac57:<TOKEN>@github.com/racmac57/ClaudeExportFixer.git v1.1.1
+     ```
+     - Generate token: `https://github.com/settings/tokens` (scopes: `repo`). - Alternative: SSH keys (`ssh-keygen -t ed25519`, add to `https://github.com/settings/keys`). - **Build Executables (Optional)**:
+     - CLI: `scripts\windows\build_exe.bat`
+     - GUI: `scripts\windows\build_exe_gui.bat`
+     - Output: `dist\patch_conversations.exe`
+   - **Generate Checksums**:
+     ```powershell
+     Get-FileHash dist\patch_conversations.exe -Algorithm SHA256 | Out-File v1.1.1-checksums.txt
+     ```
+   - **Create GitHub Release**:
+     1. Go to `https://github.com/racmac57/ClaudeExportFixer/releases/new`. 2. Tag: `v1.1.1`. 3. Title: `ClaudeExportFixer v1.1.1`. 4. Description (update `YOUR_USERNAME` to `racmac57`):
+        ```markdown
+        ## ClaudeExportFixer v1.1.1
+
+        Python CLI/GUI tool to normalize Claude/Claude.ai conversation exports for the osteele chat viewer. ### 🎯 Highlights (v1.1.1 Update)
+        * Fixed attachment merging issue for Claude's rich attachment format (`file_name`, `file_size`, `file_type`, `extracted_content`). * Updated `merge_file_references()` to deduplicate by `file_name` or `uuid`, map to `file_uuid`, and preserve rich data. * Fixed `process_conversation_data()` and `link_projects()` to handle top-level list format `[conversations...]`. * Added 10 new tests in `test_merge_rich_attachments.py` for rich attachments, deduplication, and edge cases. ### Previous Features (v1.1.0)
+        * **Optional Tkinter GUI** (`--gui` flag or `py gui.py`)
+          - File browser dialogs for input/output selection
+          - Visual checkboxes for all CLI options
+          - Real-time log streaming with progress bar
+          - Cross-platform "Open Output" button (Windows/macOS/Linux)
+          - Headless-safe: graceful fallback with clear error message
+        * **Production-Ready CLI**
+          - JSON and ZIP file processing
+          - File/attachment reference merging
+          - Project linking from projects.json
+          - ZIP metadata preservation
+          - Optional streaming mode (requires `ijson`)
+        * **Comprehensive Test Suite**
+          - 23 passing tests (13 from v1.1.0 + 10 new for v1.1.1)
+          - GUI functionality fully tested
+          - Platform-specific behavior verified
+          - No test failures
+
+        ### 📚 Documentation
+        * Complete README with:
+          - Quick start guide
+          - GUI mode instructions
+          - CLI usage examples
+          - PyInstaller build instructions
+          - Troubleshooting section
+          - Complete project structure
+        * Updated CHANGELOG with full feature list
+
+        ### 🛠️ Installation & Usage
+        **Quick Start (Windows):**
+        ```bat
+        cd C:\Dev\ClaudeExportFixer
+        scripts\windows\create_venv.bat
+        ```
+
+        **CLI Mode:**
+        ```bat
+        py patch_conversations.py input.json -o output.json --pretty
+        ```
+
+        **GUI Mode:**
+        ```bat
+        py patch_conversations.py --gui
+        ```
+        or
+        ```bat
+        py gui.py
+        ```
+
+        ### 🔨 Building Standalone Executables
+        **CLI (with console):**
+        ```bat
+        scripts\windows\build_exe.bat
+        ```
+
+        **GUI (windowed, no console):**
+        ```bat
+        scripts\windows\build_exe_gui.bat
+        ```
+
+        Then run:
+        ```bat
+        dist\patch_conversations.exe --gui
+        ```
+
+        ### 📦 Dependencies
+        - **Runtime**: Python 3.8+ (stdlib only)
+        - **Optional**: `ijson>=3.2` (for streaming mode)
+        - **Build**: `pyinstaller>=6.0` (for executable creation)
+
+        ### ✅ What's Included
+        - `patch_conversations.py` - Main CLI script
+        - `gui.py` - Optional Tkinter GUI
+        - `tests/` - Complete test suite (23 tests)
+        - `sample/` - Example JSON files
+        - `scripts/windows/` - Windows automation scripts
+        - Complete documentation (README, CHANGELOG, CONTRIBUTING)
+
+        ### 🔍 Checksums
+        See attached `v1.1.1-checksums.txt`
+
+        ### 📊 Test Coverage
+        ```
+        23 passed in 2.08s
+        ```
+        - GUI import safety: 2 tests
+        - GUI helper functions: 2 tests
+        - GUI open output: 5 tests
+        - Rich attachment merging: 10 tests
+        - Logging bridge: 1 test
+        - Smoke tests: 3 tests
+
+        **Full changelog**: https://github.com/racmac57/ClaudeExportFixer/blob/v1.1.1/CHANGELOG.md
+        ```
+     6. Attach: `dist/patch_conversations.exe`, `v1.1.1-checksums.txt`. 7. Click "Publish release". - **Post-Release**:
+     - Publish to PyPI:
+       - Create `pyproject.toml`:
+         ```toml
+         [project]
+         name = "claudeexportfixer"
+         version = "1.1.1"
+         description = "Normalize Claude/Claude.ai conversation exports for osteele chat viewer"
+         authors = [{name = "racmac57", email = "racmac57@users.noreply.github.com"}]
+         license = {text = "MIT"}
+         requires-python = ">=3.8"
+         dependencies = []
+         optional-dependencies.stream = ["ijson>=3.2"]
+         ```
+       - Build: `python -m build`. - Upload: `twine upload dist/*` (requires PyPI account). - Add demo GIF to `README.md` (use ScreenToGif for GUI demo). - Submit to `awesome-python` (`https://github.com/vinta/awesome-python`). ## Acceptance Criteria
+- `CHANGELOG.md` updated with `[1.1.1]` section documenting the fix (CRLF line endings). - `README.md` updated with v1.1.1 fix in "Updates" section (CRLF line endings). - No modifications to `patch_conversations.py`, `gui.py`, test files, or BAT files. - `pytest -q` passes with 23/23 tests. - Codebase status confirmed: `__version__ = "1.1.1"`, no new dependencies. - Manual release steps provided for user execution. - Windows compatibility maintained (CRLF in updated files).

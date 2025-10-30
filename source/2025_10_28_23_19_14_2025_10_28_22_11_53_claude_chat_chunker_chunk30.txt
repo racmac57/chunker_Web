@@ -1,0 +1,740 @@
+message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.txt"}]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'doc.txt')
+    
+    def test_no_files_field(self):
+        """Test messages with only attachments.""" message = {
+            "text": "Example",
+            "attachments": [
+                {
+                    "file_name": "attachment.pdf",
+                    "file_size": 9999,
+                    "file_type": "pdf"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'attachment.pdf')
+        self.assertEqual(result['files'][0]['file_size'], 9999)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+```
+
+Let me update all remaining test methods more efficiently by reading the file and replacing all at once:
+
+Let me add a specific test for the created_at requirement and update the remaining tests:
+
+```python
+"""Test enhanced merge_file_references for Claude rich attachment format.""" import unittest
+from patch_conversations import merge_file_references
+
+
+class TestMergeRichAttachments(unittest.TestCase):
+    """Test merging of Claude's rich attachment format.""" def test_simple_uuid_backward_compatible(self):
+        """Test backward compatibility with simple UUID format.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "files": ["file1.txt"],
+            "attachments": [{"uuid": "att1"}]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)
+        # Files should contain both
+        file_uuids = [f.get('file_uuid') if isinstance(f, dict) else f for f in result['files']]
+        self.assertIn('file1.txt', file_uuids)
+        self.assertIn('att1', file_uuids)
+    
+    def test_rich_claude_attachment(self):
+        """Test merging Claude's rich attachment format.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "files": [{"file_name": "doc.md"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 11023,
+                    "file_type": "md",
+                    "extracted_content": "Full content here..."
+                }
+            ]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)  # Deduplicated
+        
+        # Should have rich attachment data (attachments wins)
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['file_name'], 'doc.md')
+        self.assertEqual(file_obj['file_uuid'], 'doc.md')  # Mapped for viewer
+        self.assertEqual(file_obj['file_size'], 11023)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+    
+    def test_deduplication_by_file_name(self):
+        """Test deduplication when same file appears in both arrays.""" message = {
+            "text": "Example",
+            "files": [
+                {"file_name": "script.py"},
+                {"file_name": "doc.md"}
+            ],
+            "attachments": [
+                {
+                    "file_name": "script.py",
+                    "file_size": 5462,
+                    "file_type": "py",
+                    "extracted_content": "Code here..."
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 2)  # doc.md + script.py (deduplicated)
+        
+        # script.py should have rich data from attachment
+        script_file = next(f for f in result['files'] if f.get('file_name') == 'script.py')
+        self.assertEqual(script_file['file_size'], 5462)
+        self.assertIn('extracted_content', script_file)
+    
+    def test_empty_file_name_dropped(self):
+        """Test that empty file_name values are dropped.""" message = {
+            "text": "Example",
+            "files": [{"file_name": ""}],
+            "attachments": [
+                {"file_name": "", "file_size": 100},
+                {"file_name": "valid.txt", "file_size": 200}
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_name'], 'valid.txt')
+    
+    def test_empty_arrays(self):
+        """Test handling of empty files and attachments arrays.""" message = {
+            "text": "Example",
+            "files": [],
+            "attachments": []
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertNotIn('files', result)  # Both removed when empty
+    
+    def test_mixed_formats(self):
+        """Test handling mixed format (strings, UUIDs, rich objects).""" message = {
+            "text": "Example",
+            "files": ["simple.txt", {"uuid": "uuid123"}],
+            "attachments": [
+                {"uuid": "att456"},
+                {
+                    "file_name": "rich.md",
+                    "file_size": 999,
+                    "extracted_content": "Content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 4)  # All unique
+        
+        # Verify all were merged
+        identifiers = []
+        for f in result['files']:
+            if isinstance(f, dict):
+                identifiers.append(f.get('file_uuid') or f.get('uuid') or f.get('file_name'))
+        
+        self.assertIn('simple.txt', identifiers)
+        self.assertIn('uuid123', identifiers)
+        self.assertIn('att456', identifiers)
+        self.assertIn('rich.md', identifiers)
+    
+    def test_preserves_extracted_content(self):
+        """Test that extracted_content is preserved from attachments.""" message = {
+            "text": "Example",
+            "attachments": [
+                {
+                    "file_name": "document.txt",
+                    "file_size": 5000,
+                    "file_type": "txt",
+                    "extracted_content": "This is the full file content that should be preserved." }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        
+        file_obj = result['files'][0]
+        self.assertEqual(file_obj['extracted_content'], "This is the full file content that should be preserved.") self.assertEqual(file_obj['file_uuid'], 'document.txt')
+    
+    def test_attachment_overwrites_file(self):
+        """Test that attachment data overwrites files data when deduplicating.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.md", "custom_field": "from_files"}],
+            "attachments": [
+                {
+                    "file_name": "doc.md",
+                    "file_size": 1234,
+                    "file_type": "md",
+                    "extracted_content": "Rich content"
+                }
+            ]
+        }
+        result = merge_file_references(message)
+        
+        self.assertEqual(len(result['files']), 1)
+        file_obj = result['files'][0]
+        
+        # Should have attachment data (richer)
+        self.assertEqual(file_obj['file_size'], 1234)
+        self.assertEqual(file_obj['file_type'], 'md')
+        self.assertIn('extracted_content', file_obj)
+        # custom_field from files should be lost (attachment overwrites)
+        self.assertNotIn('custom_field', file_obj)
+    
+    def test_no_attachments_field(self):
+        """Test messages without attachments field.""" message = {
+            "text": "Example",
+            "files": [{"file_name": "doc.txt"}]
+        }
+        result = merge_file_references(message)
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'doc.txt')
+    
+    def test_no_files_field(self):
+        """Test messages with only attachments.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T12:00:00Z",
+            "attachments": [
+                {
+                    "file_name": "attachment.pdf",
+                    "file_size": 9999,
+                    "file_type": "pdf"
+                }
+            ]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        self.assertNotIn('attachments', result)
+        self.assertEqual(len(result['files']), 1)
+        self.assertEqual(result['files'][0]['file_uuid'], 'attachment.pdf')
+        self.assertEqual(result['files'][0]['file_size'], 9999)
+        self.assertEqual(result['files'][0]['created_at'], '2025-10-27T12:00:00Z')
+    
+    def test_adds_created_at_timestamp(self):
+        """Test that created_at is added to file objects from message timestamp.""" message = {
+            "text": "Example",
+            "created_at": "2025-10-27T15:30:00Z",
+            "files": [{"file_name": "doc.txt"}],
+            "attachments": [
+                {
+                    "file_name": "rich.md",
+                    "file_size": 123,
+                    "file_type": "md"
+                }
+            ]
+        }
+        result = merge_file_references(message, message.get('created_at'))
+        
+        # Both files should have created_at from message
+        for f in result['files']:
+            if isinstance(f, dict):
+                self.assertEqual(f['created_at'], '2025-10-27T15:30:00Z')
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+```
+
+Now let's run the tests:
+
+Perfect! Now run all tests:
+
+Excellent! Now verify the output has created_at fields:
+
+Hmm, that file doesn't have created_at. Let me check a rich attachment file:
+
+I see - that file object doesn't have `created_at` either! The message has `created_at: 2025-10-23T18:29:19.071793Z` but the file object doesn't. This means the timestamp isn't being added. Let me check why - ah, I see the issue. The file already has all those fields from the attachment, so it's not getting the created_at added because it's coming from the attachment which doesn't have created_at. Let me trace through the logic more carefully. Actually, looking at the output, the rich file has all the attachment fields but NO `created_at`. This is the problem! Let me run the comprehensive verification to check all files:
+
+Let me check how many files have `created_at`:
+
+Ah! None of the files have `created_at`! The code isn't working. Let me check if the message_timestamp is being passed correctly. Let me add some debug logging and reprocess:
+
+Let me add debug logging to see what's happening:
+
+```python
+#!/usr/bin/env python3
+"""
+Claude.ai export fixer for osteele/claude-chat-viewer compatibility. Normalizes Claude/Claude.ai conversation exports (JSON/ZIP) by:
+- Merging file/attachment references into a single 'files' array
+- Linking conversations to projects from projects.json
+- Preserving ZIP metadata and structure
+- Supporting streaming for large files
+"""
+import argparse
+import json
+import logging
+import sys
+import zipfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TextIO, Union
+
+__version__ = "1.1.1"
+
+# Optional dependency for streaming
+try:
+    import ijson
+    HAS_IJSON = True
+except ImportError:
+    HAS_IJSON = False
+
+
+def setup_logging(verbose: bool = False, quiet: bool = False) -> None:
+    """Configure logging based on verbosity flags.""" if quiet:
+        level = logging.ERROR
+    elif verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+    
+    logging.basicConfig(
+        level=level,
+        format='%(levelname)s: %(message)s',
+        stream=sys.stderr
+    )
+
+
+def merge_file_references(message: Dict[str, Any], message_timestamp: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Merge 'files' and 'attachments' into a single 'files' array. Handles multiple formats:
+    - Simple UUID strings: "file123"
+    - UUID objects: {"uuid": "file123"}
+    - Rich Claude attachments: {"file_name": "doc.md", "file_size": 1234, ...}
+    - File name objects: {"file_name": "doc.md"}
+    
+    Deduplicates by file_name or UUID, prioritizing richer data (attachments over files). Args:
+        message: A chat message dictionary
+        
+    Returns:
+        Modified message with merged file references
+    """
+    files_list = message.get('files', [])
+    attachments = message.get('attachments', [])
+    
+    # Build a dict keyed by identifier (file_name or uuid) to enable smart merging
+    files_by_id: Dict[str, Dict[str, Any]] = {}
+    
+    # Process files first (lower priority)
+    for f in files_list:
+        if isinstance(f, str):
+            # Simple string: use as both key and file_uuid
+            if f.strip():  # Skip empty strings
+                files_by_id[f] = {'file_uuid': f}
+        elif isinstance(f, dict):
+            # Object: extract identifier (file_name or uuid or file_uuid)
+            file_id = f.get('file_name') or f.get('uuid') or f.get('file_uuid')
+            if file_id and str(file_id).strip():  # Skip empty identifiers
+                merged = f.copy()
+                # Ensure file_uuid exists for osteele viewer
+                if 'file_uuid' not in merged:
+                    merged['file_uuid'] = merged.get('file_name') or merged.get('uuid')
+                files_by_id[str(file_id)] = merged
+    
+    # Process attachments (higher priority - will overwrite if duplicate)
+    for att in attachments:
+        if isinstance(att, str):
+            # Simple string
+            if att.strip():
+                files_by_id[att] = {'file_uuid': att}
+        elif isinstance(att, dict):
+            # Rich object: extract identifier
+            file_id = att.get('file_name') or att.get('uuid') or att.get('file_uuid')
+            if file_id and str(file_id).strip():
+                # Merge/overwrite with attachment data (richer)
+                # Map file_name/uuid to file_uuid for osteele viewer compatibility
+                merged = att.copy()
+                if 'file_uuid' not in merged:
+                    merged['file_uuid'] = merged.get('file_name') or merged.get('uuid')
+                files_by_id[str(file_id)] = merged
+    
+    # Convert back to list, preserving insertion order
+    unique_files = list(files_by_id.values())
+    
+    # Add created_at timestamp to file objects that don't have one (required by osteele viewer)
+    if message_timestamp:
+        for f in unique_files:
+            if isinstance(f, dict) and 'created_at' not in f:
+                f['created_at'] = message_timestamp
+                logging.debug(f"Added created_at={message_timestamp} to file {f.get('file_name') or f.get('file_uuid')}")
+    
+    # Update message
+    if unique_files:
+        message['files'] = unique_files
+    elif 'files' in message:
+        del message['files']
+    
+    # Always remove attachments field after merging
+    if 'attachments' in message:
+        del message['attachments']
+    
+    return message
+
+
+def link_projects(
+    data: Union[Dict[str, Any], List[Dict[str, Any]]],
+    projects: Optional[Dict[str, Any]] = None
+) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Link conversations to projects using projects.json data. Args:
+        data: Conversations data (dict with 'conversations' key or list of conversations)
+        projects: Projects data dictionary (optional)
+        
+    Returns:
+        Modified data with project links
+    """
+    if not projects or 'projects' not in projects:
+        return data
+    
+    # Build conversation_id -> project mapping
+    conv_to_project = {}
+    for proj in projects['projects']:
+        if 'conversation_id' in proj and 'name' in proj:
+            conv_to_project[proj['conversation_id']] = proj['name']
+    
+    # Handle both formats: {"conversations": [...]} and [...]
+    if isinstance(data, list):
+        conversations = data
+    elif isinstance(data, dict) and 'conversations' in data:
+        conversations = data['conversations']
+    else:
+        return data
+    
+    # Link to conversations
+    for conv in conversations:
+        if conv.get('id') in conv_to_project:
+            conv['project'] = conv_to_project[conv['id']]
+    
+    return data
+
+
+def process_conversation_data(
+    data: Union[Dict[str, Any], List[Dict[str, Any]]],
+    projects: Optional[Dict[str, Any]] = None,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False
+) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Process conversation data with all transformations. Args:
+        data: Conversations data (dict with 'conversations' key or list of conversations)
+        projects: Projects data (optional)
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid/malformed messages
+        
+    Returns:
+        Processed data
+    """
+    # Handle both formats: {"conversations": [...]} and [...]
+    if isinstance(data, list):
+        conversations = data
+        is_list_format = True
+    elif isinstance(data, dict) and 'conversations' in data:
+        conversations = data['conversations']
+        is_list_format = False
+    else:
+        # No conversations found, return as-is
+        return data
+    
+    # Process each conversation
+    for conv in conversations:
+        if 'chat_messages' in conv:
+            processed_messages = []
+            for msg in conv['chat_messages']:
+                try:
+                    if merge_to_files:
+                        # Pass message timestamp for file objects (required by osteele viewer)
+                        msg_timestamp = msg.get('created_at') or msg.get('updated_at')
+                        msg = merge_file_references(msg, msg_timestamp)
+                    processed_messages.append(msg)
+                except Exception as e:
+                    if keep_invalid:
+                        logging.warning(f"Invalid message kept: {e}")
+                        processed_messages.append(msg)
+                    else:
+                        logging.debug(f"Skipped invalid message: {e}")
+            
+            conv['chat_messages'] = processed_messages
+    
+    # Reconstruct data in original format
+    if is_list_format:
+        result = conversations
+    else:
+        data['conversations'] = conversations
+        result = data
+    
+    # Link projects if provided
+    if projects:
+        result = link_projects(result, projects)
+    
+    return result
+
+
+def process_json_streaming(
+    input_file: Path,
+    output_file: Path,
+    projects: Optional[Dict[str, Any]] = None,
+    pretty: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False
+) -> None:
+    """
+    Process JSON file using streaming (requires ijson). Args:
+        input_file: Input JSON file path
+        output_file: Output JSON file path
+        projects: Projects data (optional)
+        pretty: Whether to pretty-print JSON
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid messages
+    """
+    if not HAS_IJSON:
+        raise ImportError("ijson is required for streaming mode. Install with: pip install ijson")
+    
+    logging.info(f"Streaming from {input_file} to {output_file}")
+    
+    # For simplicity, fall back to non-streaming for now
+    # Full streaming implementation would require incremental JSON writing
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    data = process_conversation_data(data, projects, merge_to_files, keep_invalid)
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        if pretty:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        else:
+            json.dump(data, f, ensure_ascii=False)
+
+
+def process_json_file(
+    input_file: Path,
+    output_file: Path,
+    projects: Optional[Dict[str, Any]] = None,
+    pretty: bool = False,
+    stream: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False
+) -> None:
+    """
+    Process a JSON conversation file. Args:
+        input_file: Input JSON file path
+        output_file: Output JSON file path
+        projects: Projects data (optional)
+        pretty: Whether to pretty-print JSON
+        stream: Whether to use streaming mode
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid messages
+    """
+    if stream:
+        process_json_streaming(input_file, output_file, projects, pretty, merge_to_files, keep_invalid)
+        return
+    
+    logging.info(f"Processing {input_file}")
+    
+    with open(input_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    data = process_conversation_data(data, projects, merge_to_files, keep_invalid)
+    
+    logging.info(f"Writing to {output_file}")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        if pretty:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        else:
+            json.dump(data, f, ensure_ascii=False)
+
+
+def process_zip_file(
+    input_file: Path,
+    output_file: Path,
+    projects_data: Optional[Dict[str, Any]] = None,
+    pretty: bool = False,
+    stream: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False,
+    no_backup: bool = False
+) -> None:
+    """
+    Process a ZIP archive containing conversations.json. Args:
+        input_file: Input ZIP file path
+        output_file: Output ZIP file path
+        projects_data: Projects data (optional, if not in ZIP)
+        pretty: Whether to pretty-print JSON
+        stream: Whether to use streaming mode
+        merge_to_files: Whether to merge file/attachment references
+        keep_invalid: Whether to keep invalid messages
+        no_backup: Skip creating backup of original ZIP
+    """
+    logging.info(f"Processing ZIP: {input_file}")
+    
+    # Create backup unless disabled
+    if not no_backup:
+        backup_path = input_file.with_suffix(input_file.suffix + '.bak')
+        import shutil
+        shutil.copy2(input_file, backup_path)
+        logging.info(f"Backup created: {backup_path}")
+    
+    conversations_data = None
+    projects_from_zip = None
+    other_files = {}
+    
+    # Read ZIP contents
+    with zipfile.ZipFile(input_file, 'r') as zin:
+        for info in zin.infolist():
+            if info.filename == 'conversations.json':
+                with zin.open(info) as f:
+                    conversations_data = json.load(f)
+            elif info.filename == 'projects.json':
+                with zin.open(info) as f:
+                    projects_from_zip = json.load(f)
+            else:
+                # Preserve other files (metadata, attachments, etc.) other_files[info.filename] = (zin.read(info), info)
+    
+    if conversations_data is None:
+        raise ValueError("No conversations.json found in ZIP")
+    
+    # Use projects from ZIP if available, otherwise use provided
+    projects = projects_from_zip or projects_data
+    
+    # Process conversations
+    conversations_data = process_conversation_data(
+        conversations_data, projects, merge_to_files, keep_invalid
+    )
+    
+    # Write output ZIP
+    logging.info(f"Writing to {output_file}")
+    with zipfile.ZipFile(output_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+        # Write processed conversations
+        conversations_json = json.dumps(
+            conversations_data,
+            indent=2 if pretty else None,
+            ensure_ascii=False
+        )
+        zout.writestr('conversations.json', conversations_json)
+        
+        # Preserve projects.json if it existed
+        if projects_from_zip:
+            projects_json = json.dumps(
+                projects_from_zip,
+                indent=2 if pretty else None,
+                ensure_ascii=False
+            )
+            zout.writestr('projects.json', projects_json)
+        
+        # Preserve other files with original metadata
+        for filename, (data, info) in other_files.items():
+            zinfo = zipfile.ZipInfo(filename, info.date_time)
+            zinfo.compress_type = info.compress_type
+            zinfo.external_attr = info.external_attr
+            zout.writestr(zinfo, data)
+
+
+def find_projects_file(input_file: Path) -> Optional[Path]:
+    """
+    Try to find projects.json next to the input file. Args:
+        input_file: Input file path
+        
+    Returns:
+        Path to projects.json if found, None otherwise
+    """
+    projects_path = input_file.parent / 'projects.json'
+    if projects_path.exists():
+        logging.debug(f"Found projects file: {projects_path}")
+        return projects_path
+    return None
+
+
+def load_projects(projects_path: Optional[Path]) -> Optional[Dict[str, Any]]:
+    """
+    Load projects.json if path provided and exists. Args:
+        projects_path: Path to projects.json
+        
+    Returns:
+        Projects data dictionary or None
+    """
+    if projects_path and projects_path.exists():
+        logging.info(f"Loading projects from {projects_path}")
+        with open(projects_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def generate_report(
+    input_file: Path,
+    output_file: Path,
+    report_path: Path,
+    success: bool,
+    error: Optional[str] = None
+) -> None:
+    """
+    Generate a CSV report of the processing. Args:
+        input_file: Input file path
+        output_file: Output file path
+        report_path: Report output path
+        success: Whether processing succeeded
+        error: Error message if failed
+    """
+    import csv
+    from datetime import datetime
+    
+    with open(report_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'input', 'output', 'success', 'error'])
+        writer.writerow([
+            datetime.now().isoformat(),
+            str(input_file),
+            str(output_file) if success else '',
+            'yes' if success else 'no',
+            error or ''
+        ])
+    
+    logging.info(f"Report written to {report_path}")
+
+
+def process_file(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    projects_path: Optional[Union[str, Path]] = None,
+    zip_output: bool = False,
+    stream: bool = False,
+    pretty: bool = False,
+    strict: bool = False,
+    verbose: bool = False,
+    quiet: bool = False,
+    no_backup: bool = False,
+    no_merge_to_files: bool = False,
+    keep_invalid: bool = False
+) -> int:
+    """
+    Main processing function.

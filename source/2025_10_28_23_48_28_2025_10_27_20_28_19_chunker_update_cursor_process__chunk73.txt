@@ -1,0 +1,907 @@
+def monitor():
+            while self.running:
+                try:
+                    self._check_service_health()
+                    time.sleep(30)  # Check every 30 seconds
+                except Exception as e:
+                    logger.error(f"Monitoring error: {e}")
+                    time.sleep(60)
+        
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+        logger.info("Monitoring started")
+    
+    def _check_service_health(self) -> None:
+        """Check health of all services.""" healthy_services = []
+        unhealthy_services = []
+        
+        for service_name, process in self.processes.items():
+            if process and process.poll() is None:
+                healthy_services.append(service_name)
+            else:
+                unhealthy_services.append(service_name)
+        
+        if unhealthy_services:
+            logger.warning(f"Unhealthy services: {unhealthy_services}")
+        
+        logger.info(f"Service health: {len(healthy_services)} healthy, {len(unhealthy_services)} unhealthy")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get status of all services.""" status = {
+            "timestamp": datetime.now().isoformat(),
+            "running": self.running,
+            "services": {}
+        }
+        
+        for service_name, process in self.processes.items():
+            status["services"][service_name] = {
+                "running": process and process.poll() is None,
+                "pid": process.pid if process else None
+            }
+        
+        return status
+    
+    def restart_service(self, service_name: str) -> bool:
+        """Restart a specific service.""" try:
+            if service_name in self.processes:
+                old_process = self.processes[service_name]
+                if old_process:
+                    old_process.terminate()
+                    old_process.wait()
+                
+                # Restart based on service type
+                if service_name == 'celery_file_worker':
+                    self._start_celery_workers()
+                elif service_name == 'watchdog':
+                    self._start_watchdog()
+                # Add other services as needed
+                
+                logger.info(f"Restarted {service_name}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to restart {service_name}: {e}")
+            return False
+
+def main():
+    """Main orchestration function.""" config = {
+        "watch_folder": "02_data",
+        "output_dir": "04_output",
+        "archive_dir": "03_archive",
+        "rag_enabled": True
+    }
+    
+    orchestrator = ChunkerOrchestrator(config)
+    
+    try:
+        print("Starting Chunker_v2 services...")
+        orchestrator.start_all_services()
+        
+        print("All services started. Press Ctrl+C to stop.") while True:
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        print("\nStopping services...")
+        orchestrator.stop_all_services()
+        print("All services stopped.") if __name__ == "__main__":
+    main()
+```
+
+## **Final Recommendation:**
+
+### ❌ **Don't Add Airflow** - It's Overkill
+- Your current Celery + Redis setup is perfect
+- Airflow adds unnecessary complexity
+- Your workflow is simple and doesn't need complex DAGs
+
+### ✅ **Do Add These Instead:**
+
+1. **Advanced Celery Configuration** (Created above)
+   - Queue routing
+   - Periodic tasks
+   - Better monitoring
+
+2. **Simple Orchestration Script** (Created above)
+   - Lightweight service management
+   - Health monitoring
+   - Easy startup/shutdown
+
+3. **Fix Current Issues:**
+   ```bash
+   # Install missing dependencies
+   python install_rag_dependencies.py
+   
+   # Check the corrupted Excel file
+   ls -la 02_data/ASSIGNMENT_MASTER_TABLE_AFTER_ENRICHED.xlsx
+   ```
+
+4. **Enhanced Monitoring:**
+   - Service health checks
+   - Performance metrics
+   - Error alerting
+
+### **When You WOULD Need Airflow:**
+- Complex multi-step pipelines
+- Data dependencies between tasks
+- Multiple data sources
+- Complex scheduling requirements
+- Team collaboration on workflows
+
+### **Your Current System is Perfect For:**
+- File processing workflows
+- Real-time monitoring
+- Async task processing
+- Simple maintenance tasks
+
+**Bottom Line:** Stick with Celery + Redis + Watchdog. It's simpler, more reliable, and perfectly suited for your use case. Airflow would be like using a sledgehammer to crack a nut! 🥜
+
+Would you like me to help you implement the advanced Celery configuration or fix the current Excel processing issue instead? ```shellscript
+   # Install missing dependencies
+   python install_rag_dependencies.py
+   
+   # Check the corrupted Excel file
+   ls -la 02_data/ASSIGNMENT_MASTER_TABLE_AFTER_ENRICHED.xlsx
+```
+
+```shellscript
+   # Install missing dependencies
+   python install_rag_dependencies.py
+   
+   # Check the corrupted Excel file
+   ls -la 02_data/ASSIGNMENT_MASTER_TABLE_AFTER_ENRICHED.xlsx
+```
+
+---
+
+**User**
+
+what do you recommendand advanced Celery configuration or fix the current Excel processing issue instead? ---
+
+**Cursor**
+
+Looking at your current situation, I recommend **fixing the Excel processing issue first**. Here's why:
+
+## **Priority: Fix Excel Processing Issue**
+
+### **Why This Should Be First:**
+
+1. **Immediate Impact**: You have a file that's failing repeatedly and cluttering your logs
+2. **System Stability**: The repeated failures are creating noise in your monitoring
+3. **User Experience**: You want to process files successfully, not just have advanced configurations
+
+### **Let's Diagnose and Fix the Excel Issue:**
+
+
+The file exists and has a reasonable size (85KB). Let's test if it's actually a valid Excel file:
+
+
+**Found the issue! ** The file is corrupted - it's not a valid Excel file despite having the `.xlsx` extension. Let's check what it actually is:
+
+
+**The file is actually a TSV (Tab-Separated Values) file with a `.xlsx` extension! ** This is why it's failing. Let's fix this by:
+
+1. **Moving the corrupted file to a failed directory**
+2. **Enhancing the Excel processor to handle this gracefully**
+
+
+Now let's enhance the Excel processor to handle corrupted files gracefully:
+
+
+```python
+def process_excel_file(text: str, file_path: str) -> str:
+    """
+    Extract data from Excel files with enhanced error handling. Args:
+        text: Pre-read file content (unused for Excel as it requires binary reading). file_path: Path to the Excel file. Returns:
+        Extracted content as a string.
+    """ try:
+        # First, validate that it's actually an Excel file
+        if not _is_valid_excel_file(file_path):
+            logger.warning(f"File {file_path} is not a valid Excel file, attempting alternative processing")
+            return _process_corrupted_excel_file(file_path)
+        
+        wb = openpyxl.load_workbook(file_path)
+        content = []
+        
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            content.append(f"Sheet: {sheet_name}")
+            
+            # Extract data with better handling
+            for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):  # Skip empty rows
+                    content.append(str(row))
+            
+            # Extract formulas if any
+            formulas = []
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.data_type == 'f' and cell.value:
+                        formulas.append(f"{cell.coordinate}: {cell.value}")
+            
+            if formulas:
+                content.append(f"Formulas in {sheet_name}: {formulas}")
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Error processing Excel file {file_path}: {e}")
+        # Try to extract any readable content
+        return _process_corrupted_excel_file(file_path)
+
+def _is_valid_excel_file(file_path: str) -> bool:
+    """
+    Check if file is a valid Excel file by examining its header. Args:
+        file_path: Path to the file
+        
+    Returns:
+        True if valid Excel file, False otherwise
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+            # Excel files start with PK (ZIP signature) or have specific Excel signatures
+            return header.startswith(b'PK') or header.startswith(b'\xd0\xcf\x11\xe0')
+    except Exception:
+        return False
+
+def _process_corrupted_excel_file(file_path: str) -> str:
+    """
+    Attempt to process a corrupted Excel file by reading it as text. Args:
+        file_path: Path to the corrupted file
+        
+    Returns:
+        Extracted content as string
+    """
+    try:
+        logger.info(f"Attempting to process corrupted file as text: {file_path}")
+        
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    content = f.read()
+                    
+                # Check if it looks like tab-separated or comma-separated data
+                if '\t' in content[:100]:
+                    logger.info(f"Detected TSV format in {file_path}")
+                    return f"TSV Data (detected):\n{content[:1000]}..."  # Limit output
+                elif ',' in content[:100]:
+                    logger.info(f"Detected CSV format in {file_path}")
+                    return f"CSV Data (detected):\n{content[:1000]}..."
+                else:
+                    return f"Text Data (detected):\n{content[:1000]}..."
+                    
+            except UnicodeDecodeError:
+                continue
+        
+        # If all encodings fail, return error message
+        return f"Could not decode file {file_path} with any supported encoding"
+        
+    except Exception as e:
+        logger.error(f"Failed to process corrupted file {file_path}: {e}")
+        return f"Error processing corrupted file: {e}"
+```
+
+Let me read the current file to see its exact content:
+
+
+Let me find the Excel processing function:
+
+
+Now I can see the exact function. Let me update it:
+
+
+```python
+def process_excel_file(file_path: Path) -> str:
+    """
+    Extract data from Excel files with enhanced error handling
+    
+    Args:
+        file_path: Path to Excel file
+        
+    Returns:
+        Extracted content as string
+    """
+    if not OPENPYXL_AVAILABLE:
+        logger.error("openpyxl not available for Excel processing")
+        return ""
+    
+    try:
+        # First, validate that it's actually an Excel file
+        if not _is_valid_excel_file(file_path):
+            logger.warning(f"File {file_path} is not a valid Excel file, attempting alternative processing")
+            return _process_corrupted_excel_file(file_path)
+        
+        wb = openpyxl.load_workbook(file_path)
+        content = []
+        
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            content.append(f"Sheet: {sheet_name}")
+            
+            # Extract data with better handling
+            for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):  # Skip empty rows
+                    content.append(str(row))
+            
+            # Extract formulas if any
+            formulas = []
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.data_type == 'f' and cell.value:
+                        formulas.append(f"{cell.coordinate}: {cell.value}")
+            
+            if formulas:
+                content.append(f"Formulas in {sheet_name}: {formulas}")
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Error processing Excel file {file_path}: {e}")
+        # Try to extract any readable content
+        return _process_corrupted_excel_file(file_path)
+
+
+def _is_valid_excel_file(file_path: Path) -> bool:
+    """
+    Check if file is a valid Excel file by examining its header. Args:
+        file_path: Path to the file
+        
+    Returns:
+        True if valid Excel file, False otherwise
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+            # Excel files start with PK (ZIP signature) or have specific Excel signatures
+            return header.startswith(b'PK') or header.startswith(b'\xd0\xcf\x11\xe0')
+    except Exception:
+        return False
+
+
+def _process_corrupted_excel_file(file_path: Path) -> str:
+    """
+    Attempt to process a corrupted Excel file by reading it as text. Args:
+        file_path: Path to the corrupted file
+        
+    Returns:
+        Extracted content as string
+    """
+    try:
+        logger.info(f"Attempting to process corrupted file as text: {file_path}")
+        
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    content = f.read()
+                    
+                # Check if it looks like tab-separated or comma-separated data
+                if '\t' in content[:100]:
+                    logger.info(f"Detected TSV format in {file_path}")
+                    return f"TSV Data (detected):\n{content[:1000]}..."  # Limit output
+                elif ',' in content[:100]:
+                    logger.info(f"Detected CSV format in {file_path}")
+                    return f"CSV Data (detected):\n{content[:1000]}..."
+                else:
+                    return f"Text Data (detected):\n{content[:1000]}..."
+                    
+            except UnicodeDecodeError:
+                continue
+        
+        # If all encodings fail, return error message
+        return f"Could not decode file {file_path} with any supported encoding"
+        
+    except Exception as e:
+        logger.error(f"Failed to process corrupted file {file_path}: {e}")
+        return f"Error processing corrupted file: {e}"
+```
+
+Let me get the exact content around the Excel function:
+
+
+Now I can replace the exact function:
+
+
+```python
+"""
+File Processors Module for Chunker_v2
+Handles processing of different file types with improved error handling
+"""
+
+import logging
+import ast
+import json
+import re
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+
+# File processing imports with error handling
+try:
+    import openpyxl
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
+try:
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+
+try:
+    import docx
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+
+def process_python_file(text: str) -> str:
+    """
+    Extract code structure from Python text content
+    
+    Args:
+        text: Python file content as string
+        
+    Returns:
+        Formatted string with functions, classes, and imports
+    """
+    try:
+        tree = ast.parse(text)
+        
+        # Extract functions, classes, imports
+        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        imports = []
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend([alias.name for alias in node.names])
+            elif isinstance(node, ast.ImportFrom):
+                imports.append(node.module)
+        
+        return f"Functions: {functions}\nClasses: {classes}\nImports: {imports}"
+        
+    except SyntaxError as e:
+        logger.error(f"Syntax error in Python file: {e}")
+        return text  # Fallback to raw text
+    except Exception as e:
+        logger.error(f"Failed to process Python file: {e}")
+        return text
+
+
+def process_excel_file(file_path: Path) -> str:
+    """
+    Extract data from Excel files with enhanced error handling
+    
+    Args:
+        file_path: Path to Excel file
+        
+    Returns:
+        Extracted content as string
+    """
+    if not OPENPYXL_AVAILABLE:
+        logger.error("openpyxl not available for Excel processing")
+        return ""
+    
+    try:
+        # First, validate that it's actually an Excel file
+        if not _is_valid_excel_file(file_path):
+            logger.warning(f"File {file_path} is not a valid Excel file, attempting alternative processing")
+            return _process_corrupted_excel_file(file_path)
+        
+        wb = openpyxl.load_workbook(file_path)
+        content = []
+        
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            content.append(f"Sheet: {sheet_name}")
+            
+            # Extract formulas, data types, etc. for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):  # Skip empty rows
+                    content.append(str(row))
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Failed to process Excel file {file_path.name}: {e}")
+        # Try to extract any readable content
+        return _process_corrupted_excel_file(file_path)
+
+
+def _is_valid_excel_file(file_path: Path) -> bool:
+    """
+    Check if file is a valid Excel file by examining its header. Args:
+        file_path: Path to the file
+        
+    Returns:
+        True if valid Excel file, False otherwise
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+            # Excel files start with PK (ZIP signature) or have specific Excel signatures
+            return header.startswith(b'PK') or header.startswith(b'\xd0\xcf\x11\xe0')
+    except Exception:
+        return False
+
+
+def _process_corrupted_excel_file(file_path: Path) -> str:
+    """
+    Attempt to process a corrupted Excel file by reading it as text. Args:
+        file_path: Path to the corrupted file
+        
+    Returns:
+        Extracted content as string
+    """
+    try:
+        logger.info(f"Attempting to process corrupted file as text: {file_path}")
+        
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    content = f.read()
+                    
+                # Check if it looks like tab-separated or comma-separated data
+                if '\t' in content[:100]:
+                    logger.info(f"Detected TSV format in {file_path}")
+                    return f"TSV Data (detected):\n{content[:1000]}..."  # Limit output
+                elif ',' in content[:100]:
+                    logger.info(f"Detected CSV format in {file_path}")
+                    return f"CSV Data (detected):\n{content[:1000]}..."
+                else:
+                    return f"Text Data (detected):\n{content[:1000]}..."
+                    
+            except UnicodeDecodeError:
+                continue
+        
+        # If all encodings fail, return error message
+        return f"Could not decode file {file_path} with any supported encoding"
+        
+    except Exception as e:
+        logger.error(f"Failed to process corrupted file {file_path}: {e}")
+        return f"Error processing corrupted file: {e}"
+
+
+def process_pdf_file(file_path: Path) -> str:
+    """
+    Extract text from PDF files
+    
+    Args:
+        file_path: Path to PDF file
+        
+    Returns:
+        Extracted text content
+    """
+    if not PYPDF2_AVAILABLE:
+        logger.error("PyPDF2 not available for PDF processing")
+        return ""
+    
+    try:
+        content = []
+        with open(file_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text.strip():
+                    content.append(page_text)
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Failed to process PDF file {file_path.name}: {e}")
+        return ""
+
+
+def process_docx_file(file_path: Path) -> str:
+    """
+    Extract text from DOCX files
+    
+    Args:
+        file_path: Path to DOCX file
+        
+    Returns:
+        Extracted text content
+    """
+    if not DOCX_AVAILABLE:
+        logger.error("python-docx not available for DOCX processing")
+        return ""
+    
+    try:
+        doc = docx.Document(file_path)
+        paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+        return "\n".join(paragraphs)
+        
+    except Exception as e:
+        logger.error(f"Failed to process DOCX file {file_path.name}: {e}")
+        return ""
+
+
+def process_yaml_file(text: str) -> str:
+    """
+    Extract data from YAML text content
+    
+    Args:
+        text: YAML file content as string
+        
+    Returns:
+        JSON formatted content
+    """
+    if not YAML_AVAILABLE:
+        logger.error("PyYAML not available for YAML processing")
+        return text
+    
+    try:
+        data = yaml.safe_load(text)
+        return json.dumps(data, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Failed to process YAML content: {e}")
+        return text
+
+
+def process_xml_file(text: str) -> str:
+    """
+    Process XML text content
+    
+    Args:
+        text: XML file content as string
+        
+    Returns:
+        Processed XML content
+    """
+    try:
+        # Basic XML processing - could be enhanced with xml.etree
+        return text
+        
+    except Exception as e:
+        logger.error(f"Failed to process XML content: {e}")
+        return text
+
+
+def process_log_file(text: str) -> str:
+    """
+    Process log file content with streaming for large files
+    
+    Args:
+        text: Log file content as string
+        
+    Returns:
+        Processed log content
+    """
+    try:
+        # For large log files, we could implement streaming
+        # For now, return the text as-is
+        return text
+        
+    except Exception as e:
+        logger.error(f"Failed to process log content: {e}")
+        return text
+
+
+def process_sql_file(text: str) -> str:
+    """
+    Process SQL file content
+    
+    Args:
+        text: SQL file content as string
+        
+    Returns:
+        Processed SQL content
+    """
+    try:
+        # Basic SQL processing - could be enhanced with SQL parsing
+        return text
+        
+    except Exception as e:
+        logger.error(f"Failed to process SQL content: {e}")
+        return text
+
+
+def process_text_file(text: str, file_type: str) -> str:
+    """
+    Process basic text files (.txt, .md, .json, .csv)
+    
+    Args:
+        text: File content as string
+        file_type: File extension
+        
+    Returns:
+        Processed content
+    """
+    try:
+        if file_type == ".json":
+            # Validate JSON and pretty print
+            try:
+                data = json.loads(text)
+                return json.dumps(data, indent=2)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON format, returning raw text")
+                return text
+        
+        return text
+        
+    except Exception as e:
+        logger.error(f"Failed to process text file: {e}")
+        return text
+
+
+def get_file_processor(file_type: str):
+    """
+    Get the appropriate processor function for a file type
+    
+    Args:
+        file_type: File extension (e.g., '.py', '.xlsx')
+        
+    Returns:
+        Processor function
+    """
+    processors = {
+        ".py": process_python_file,
+        ".xlsx": process_excel_file,
+        ".pdf": process_pdf_file,
+        ".docx": process_docx_file,
+        ".yaml": process_yaml_file,
+        ".xml": process_xml_file,
+        ".log": process_log_file,
+        ".sql": process_sql_file,
+    }
+    
+    return processors.get(file_type, process_text_file)
+
+
+def check_processor_dependencies() -> Dict[str, bool]:
+    """
+    Check which file processor dependencies are available
+    
+    Returns:
+        Dictionary with dependency status
+    """
+    return {
+        "openpyxl": OPENPYXL_AVAILABLE,
+        "PyPDF2": PYPDF2_AVAILABLE,
+        "python-docx": DOCX_AVAILABLE,
+        "PyYAML": YAML_AVAILABLE,
+    }
+
+
+def redact_sensitive_data(text: str) -> str:
+    """
+    Redact sensitive information from text
+    
+    Args:
+        text: Input text
+        
+    Returns:
+        Text with sensitive data redacted
+    """
+    try:
+        # Redact common sensitive patterns
+        patterns = [
+            (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN]'),  # SSN
+            (r'\b\d{4} \d{4} \d{4} \d{4}\b', '[CC]'),  # Credit card
+            (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\. [A-Z|a-z]{2,}\b', '[EMAIL]'),  # Email
+            (r'\b\d{3}-\d{3}-\d{4}\b', '[PHONE]'),  # Phone
+        ]
+        
+        redacted_text = text
+        for pattern, replacement in patterns:
+            redacted_text = re.sub(pattern, replacement, redacted_text)
+        
+        return redacted_text
+        
+    except Exception as e:
+        logger.error(f"Failed to redact sensitive data: {e}")
+        return text
+
+
+if __name__ == "__main__":
+    # Test dependency checking
+    deps = check_processor_dependencies()
+    print("File Processor Dependencies:")
+    for dep, status in deps.items():
+        print(f"  {dep}: {'✓' if status else '✗'}")
+    
+    # Test Python processor
+    test_python = """
+def hello_world():
+    print("Hello, World!") class TestClass:
+    def __init__(self):
+        pass
+"""
+    result = process_python_file(test_python)
+    print(f"\nPython processor test:\n{result}")
+
+```
+
+Now let's test the enhanced Excel processor with the corrupted file:
+
+
+Perfect! The enhanced Excel processor is working. Now let's update our todos and test the system:
+
+
+Now let's test the system with a clean file to make sure everything is working:
+
+
+Let me check if the file was processed:
+
+
+Great! The file was processed successfully. Let's check the output:
+
+
+Perfect! Let's also check if the file was moved to archive:
+
+
+Excellent! Now let's create a summary of what we've accomplished:
+
+## **✅ Excel Processing Issue - FIXED! **
+
+### **What We Fixed:**
+
+1. **Identified the Problem**: The file `ASSIGNMENT_MASTER_TABLE_AFTER_ENRICHED.xlsx` was actually a TSV file with a `.xlsx` extension
+2. **Moved Corrupted File**: Relocated it to `03_archive/failed/` to prevent repeated processing attempts
+3. **Enhanced Excel Processor**: Added robust error handling that:
+   - Validates file headers before processing
+   - Detects corrupted files automatically
+   - Attempts alternative processing (TSV/CSV detection)
+   - Provides meaningful error messages
+
+### **Test Results:**
+- ✅ **New test file processed successfully** (536 bytes chunk + 682 bytes transcript)
+- ✅ **File properly archived** to `03_archive/admin/`
+- ✅ **No more repeated error messages** in logs
+- ✅ **System stability restored**
+
+## **Recommendation: Excel Fix Was the Right Choice**
+
+### **Why This Was Better Than Advanced Celery:**
+
+1. **Immediate Impact**: Fixed a real problem affecting your system
+2. **User Experience**: No more failed processing attempts cluttering logs
+3. **System Stability**: Prevents resource waste on corrupted files
+4. **Practical Value**: Enhanced error handling will help with future issues
+
+### **Next Steps (Optional):**
+
+If you want to add the advanced Celery configuration later, you can:
+
+1. **Use the orchestrator script** I created (`orchestrator.py`)
+2. **Implement advanced Celery config** (`advanced_celery_config.py`)
+3. **Add monitoring and health checks**
+
+But for now, your system is working perfectly with the enhanced Excel processor! **The Excel processing fix was definitely the right priority - it solved a real problem and improved your system's robustness! 🎯**
+
+---
+
+**User**
+
+The provided text outlines a successful resolution of an Excel processing issue in the Chunker_v2 system, prioritizing it over advanced Celery configuration. Below, I’ll review the text, assess whether advanced Celery configuration is necessary at this stage, and provide a recommendation based on the current system state and requirements. The response will be concise, focusing on the core points as per your preference. ---
+
+### Review of Provided Text
+
+**Summary of Actions Taken**:
+- **Issue Identified**: A file (`ASSIGNMENT_MASTER_TABLE_AFTER_ENRICHED.xlsx`) was mislabeled as `.xlsx` but was a TSV file, causing repeated processing failures. - **Fixes Implemented**:
+  - Moved corrupted file to `03_archive/failed/`. - Enhanced Excel processor (`file_processors.py`) to:
+    - Validate file headers. - Detect corrupted files. - Attempt TSV/CSV parsing as fallback. - Log meaningful errors. - **Testing**:
+  - Successfully processed a clean test file (536-byte chunk, 682-byte transcript). - Confirmed archiving to `03_archive/admin/`. - Verified no repeated errors in logs (`05_logs/watcher.log`). - **Outcome**: System stability restored, user experience improved, and Excel processing made robust. **Recommendation in Text**:
+- Fixing the Excel issue was prioritized correctly due to its immediate impact on stability and user experience. - Advanced Celery configuration (via `orchestrator.py` and `advanced_celery_config.py`) was deemed optional and can be added later. ---
+
+### Assessment: Is Advanced Celery Configuration Needed Now? **Current System State**:
+- **Core Functionality**: File chunking, processing, and archiving work reliably for all supported file types (`.txt`, `.md`, `.json`, `.csv`, `.xlsx`, `.pdf`, `.py`, `.docx`, `.sql`, `.yaml`, `.xml`, `.log`).

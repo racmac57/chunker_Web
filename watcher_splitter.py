@@ -471,7 +471,7 @@ def process_file_enhanced(file_path, config):
                 if file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log", ".py"]:
                     with open(file_path, "r", encoding="utf-8", errors='replace') as f:
                         text = f.read()
-                elif file_type in [".xlsx", ".pdf", ".docx"]:
+                elif file_type in [".xlsx", ".xlsm", ".pdf", ".docx"]:
                     # Binary files - use processors directly
                     processor = get_file_processor(file_type)
                     text = processor(file_path)

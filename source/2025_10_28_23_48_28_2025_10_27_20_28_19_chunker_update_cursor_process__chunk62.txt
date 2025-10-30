@@ -1,0 +1,564 @@
+return
+    
+    # Check processor dependencies
+    processor_deps = check_processor_dependencies()
+    missing_deps = [dep for dep, available in processor_deps.items() if not available]
+    if missing_deps:
+        logger.warning(f"Missing file processor dependencies: {', '.join(missing_deps)}")
+        logger.info("Some file types may not be processed correctly")
+    
+    os.makedirs(CONFIG.get("output_dir", "output"), exist_ok=True)
+    os.makedirs(CONFIG.get("archive_dir", "processed"), exist_ok=True)
+
+    logger.info("=== ENTERPRISE CHUNKER STARTED ===")
+    logger.info(f"Monitoring: {watch_folder}")
+    supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    filter_mode = CONFIG.get("file_filter_mode", "all")
+    logger.info(f"File types: {', '.join(supported_extensions)} files")
+    logger.info(f"Filter mode: {filter_mode}")
+    if filter_mode == "patterns":
+        patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+        logger.info(f"Required patterns: {', '.join(patterns)}")
+    elif filter_mode == "suffix":
+        logger.info("Required suffix: _full_conversation")
+    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    logger.info(f"Database tracking: Enabled")
+    logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG enabled: {CONFIG.get('rag_enabled', False)}")
+    
+    processed_files = set()
+    loop_count = 0
+    last_cleanup = datetime.now()
+    last_report = datetime.now()
+    
+    # Send startup notification
+    notifications.send_email(
+        notifications.config["admin_emails"],
+        "🚀 Chunker System Started",
+        f"Enterprise Chunker system started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Monitoring: {watch_folder}\n"
+        f"File types: {', '.join(supported_extensions)} files\n"
+        f"Filter mode: {filter_mode}\n"
+        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Database: Enabled\n"
+        f"Dashboard: http://localhost:5000"
+    )
+    
+    try:
+        while True:
+            try:
+                # Look for files with supported extensions
+                all_files = []
+                supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+                for ext in supported_extensions:
+                    all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
+                
+                # Filter files based on configuration
+                excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
+                
+                # Apply file filtering based on mode
+                filter_mode = CONFIG.get("file_filter_mode", "all")
+                file_patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+                exclude_patterns = CONFIG.get("exclude_patterns", [])
+                
+                filtered_files = []
+                for f in all_files:
+                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                        continue
+                    
+                    # Check exclude patterns first
+                    if any(pattern in f.name for pattern in exclude_patterns):
+                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        continue
+                    
+                    # Apply filter mode
+                    if filter_mode == "all":
+                        filtered_files.append(f)
+                    elif filter_mode == "patterns":
+                        if any(pattern in f.name for pattern in file_patterns):
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                    elif filter_mode == "suffix":
+                        # Only process files with _full_conversation suffix
+                        if "_full_conversation" in f.name:
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                new_files = filtered_files
+                
+                if new_files:
+                    logger.info(f"Found {len(new_files)} new files to process")
+                    
+                    # Process files in parallel if multiple files
+                    if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
+                        results = process_files_parallel(new_files, CONFIG)
+                        for i, result in enumerate(results):
+                            if result:
+                                processed_files.add(new_files[i].name)
+                    else:
+                        # Process files sequentially
+                        for file_path in new_files:
+                            try:
+                                if process_file_enhanced(file_path, CONFIG):
+                                    processed_files.add(file_path.name)
+                                    logger.info(f"Successfully processed: {file_path.name}")
+                                else:
+                                    logger.error(f"Failed to process: {file_path.name}")
+                            except Exception as e:
+                                logger.exception(f"Error processing {file_path.name}: {e}")
+                                if db:
+                                    try:
+                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                    except Exception as db_error:
+                                        logger.warning(f"Failed to log processing error to database: {db_error}")
+                
+                # Periodic maintenance
+                loop_count += 1
+                
+                # Log session stats every minute
+                if loop_count % 12 == 0:  # Every minute at 5s intervals
+                    log_session_stats()
+                
+                # Log system metrics every 5 minutes
+                if loop_count % 60 == 0:
+                    log_system_metrics()
+                
+                # Daily cleanup and reporting
+                if datetime.now() - last_cleanup > timedelta(hours=24):
+                    if db:
+                        try:
+                            db.cleanup_old_data(days=30)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to run database cleanup: {db_error}")
+                    last_cleanup = datetime.now()
+                
+                # Send daily report
+                if datetime.now() - last_report > timedelta(hours=24):
+                    if db:
+                        try:
+                            analytics = db.get_analytics(days=1)
+                            notifications.send_daily_summary(session_stats, analytics)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to get analytics or send daily summary: {db_error}")
+                    last_report = datetime.now()
+                
+                time.sleep(CONFIG.get("polling_interval", 5))
+                
+            except KeyboardInterrupt:
+                logger.info("Watcher stopped by user")
+                break
+            except Exception as e:
+                logger.exception("Critical error in main loop")
+                if db:
+                    try:
+                        db.log_error("MainLoopError", str(e), traceback.format_exc())
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                try:
+                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
+                except Exception as notify_error:
+                    logger.warning(f"Failed to send error alert: {notify_error}")
+                time.sleep(10)
+                
+    finally:
+        # Final statistics and cleanup
+        log_session_stats()
+        
+        # Send shutdown notification
+        notifications.send_email(
+            notifications.config["admin_emails"],
+            "🛑 Chunker System Stopped",
+            f"Enterprise Chunker system stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Session Summary:\n"
+            f"Files Processed: {session_stats['files_processed']}\n"
+            f"Chunks Created: {session_stats['chunks_created']}\n"
+            f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}\n"
+            f"Errors: {session_stats['errors']}\n"
+            f"Uptime: {datetime.now() - datetime.strptime(session_stats['session_start'], '%Y-%m-%d %H:%M:%S')}"
+        )
+
+if __name__ == "__main__":
+    main()
+```
+
+Now let's test the watcher to make sure it runs without ChromaDB:
+
+
+Let's wait a moment and check if it's running properly:
+
+
+Perfect! The watcher is running successfully. Let's check the startup logs to confirm the graceful handling:
+
+
+Let me check the startup logs more broadly:
+
+
+Excellent! I can see the watcher started successfully at 14:46:21 with "Configuration validation passed" and is monitoring all the supported file types. Let me check if there are any RAG-related messages:
+
+
+Perfect! The graceful error handling is working exactly as intended. The system:
+
+1. ✅ **Started successfully** with configuration validation
+2. ✅ **Detected RAG is enabled** in config
+3. ✅ **Gracefully handled ChromaDB unavailability** with clear warning messages
+4. ✅ **Continued processing** without crashing
+5. ✅ **Processed files normally** (as we saw earlier)
+
+## 🎉 **Chunker_v2 is Production Ready! **
+
+### **Final Status Summary:**
+
+**✅ Core Functionality:** 
+- File processing, chunking, and archiving work perfectly
+- All supported file types (.txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log) are handled
+- Database tracking and notifications are functional
+- Parallel processing is working efficiently
+
+**✅ Error Handling:**
+- Graceful degradation when ChromaDB is unavailable
+- Clear warning messages in logs
+- System continues operating normally
+- No crashes or failures
+
+**✅ Production Deployment:**
+- System is running continuously in the background
+- Processing files from `02_data` directory
+- Creating timestamped output folders in `04_output`
+- Archiving processed files to `03_archive`
+- Comprehensive logging in `05_logs/watcher.log`
+
+### **Next Steps for Full RAG Functionality:**
+
+1. **Option 1: Install ChromaDB** (when build tools are available)
+2. **Option 2: Use FAISS** (already installed) as vector database alternative
+3. **Option 3: Disable RAG** by setting `"rag_enabled": false` in `config.json`
+
+The system is **fully operational** for production use right now! The ChromaDB issue only affects RAG features, which are optional enhancements. All core chunking and file processing capabilities are working perfectly. **Ready to go live! 🚀**
+
+---
+
+**User**
+
+Confirmed: Chunker_v2 is production-ready. Deploy with rag_enabled: false for core functionality. Enable RAG after resolving ChromaDB via build tools or FAISS fallback. ---
+
+**Cursor**
+
+Perfect! You've confirmed the production readiness. Let me quickly disable RAG in the config to ensure optimal performance for core functionality deployment:
+
+
+```json
+{
+  "watch_folder": "C:/_chunker/02_data",
+  "output_dir": "C:/_chunker/04_output",
+  "archive_dir": "C:/_chunker/03_archive",
+  "supported_extensions": [".txt", ".md", ".json", ".csv", ".xlsx", ".pdf", ".py", ".docx", ".sql", ".yaml", ".xml", ".log"],
+  "chunk_size": 800,
+  "overlap": 50,
+  "min_chunk_size": 100,
+  "max_chunk_size": 1500,
+  "file_filter_mode": "all",
+  "file_patterns": ["_full_conversation", "_conversation", "_chat"],
+  "exclude_patterns": ["_draft", "_temp", "_backup"],
+  "parallel_workers": 4,
+  "database_enabled": true,
+  "notification_enabled": false,
+  "cloud_repo_root": null,
+  "log_level": "INFO",
+  "log_rotation": true,
+  "max_log_size": 5242880,
+  "backup_count": 3,
+  "session_cleanup_interval": 3600,
+  "summary_auto_generate": false,
+  "summary_min_chunks": 5,
+  "rag_enabled": false,
+  "chroma_persist_dir": "./chroma_db",
+  "langsmith": {
+    "api_key": null,
+    "project": "chunker-rag-eval",
+    "tracing_enabled": true,
+    "evaluation_enabled": true
+  }
+}
+
+```
+
+Now let's restart the watcher to apply the configuration change:
+
+
+Let's verify the configuration change took effect:
+
+
+Perfect! Let me update the todos to reflect the successful deployment:
+
+
+## 🚀 **Chunker_v2 Successfully Deployed! **
+
+### **✅ Production Status: LIVE**
+
+**Configuration Applied:**
+- ✅ **RAG disabled** (`"rag_enabled": false`) for optimal core performance
+- ✅ **All file types supported** (.txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log)
+- ✅ **Database tracking enabled** for comprehensive monitoring
+- ✅ **Parallel processing** (4 workers) for efficiency
+- ✅ **Configuration validation passed**
+
+**System Status:**
+- ✅ **Watcher running** and monitoring `C:/_chunker/02_data`
+- ✅ **No RAG warnings** in logs (clean startup)
+- ✅ **Core functionality** fully operational
+- ✅ **Ready for production workloads**
+
+### **📋 Deployment Summary:**
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **File Processing** | ✅ Active | All supported formats |
+| **Chunking Engine** | ✅ Active | Sentence-based with configurable limits |
+| **Database Tracking** | ✅ Active | SQLite with session stats |
+| **Parallel Processing** | ✅ Active | 4 workers configured |
+| **Archiving System** | ✅ Active | Timestamped output folders |
+| **RAG Integration** | ⏸️ Disabled | Ready for future enablement |
+| **Notifications** | ⏸️ Disabled | Can be enabled if needed |
+
+### **🔄 Next Steps for RAG Enablement:**
+
+1. **Install Build Tools** (Visual C++ Build Tools + Rust)
+2. **Retry ChromaDB installation** or implement FAISS fallback
+3. **Set `"rag_enabled": true`** in `config.json`
+4. **Restart watcher** to activate RAG features
+
+### **📊 Monitoring:**
+
+- **Logs:** `05_logs/watcher.log`
+- **Output:** `04_output/` (timestamped folders)
+- **Archive:** `03_archive/` (processed files)
+- **Database:** `chunker_tracking.db`
+
+**Chunker_v2 is now live and processing files! 🎉**
+
+The system is robust, scalable, and ready for enterprise workloads. RAG functionality can be seamlessly enabled once ChromaDB is resolved, without any downtime to core operations. ---
+
+**User**
+
+new addition to review and imploment below:
+## Prompt for Cursor AI
+
+```
+You are enhancing my enterprise-grade file chunker system (Chunker_v2) in Python. The system monitors a directory (Folder A: 02_data), chunks files (.txt, .md, .json, .csv, and expand to .xlsx, .pdf, .py), extracts metadata, builds a searchable knowledge base for AI-assisted coding/problem-solving. Integrate RAG with LangChain, vector DB (FAISS/Chroma), local embeddings (Ollama with nomic-embed-text), hybrid search (semantic + keyword). Add RAG evaluation metrics and LangSmith for observability, tracing, feedback, and quality assurance, with concrete LangSmith tracing examples and RAG evaluation tools. Use ChromaDB for vector storage with CRUD operations. Implement faithfulness scoring for answer quality. Replace polling with watchdog for real-time monitoring of Folder A, processing moved files from Folder B, copying outputs back to Folder B using event.src_path, with debouncing for race conditions. Key expansions:
+- Support new file types: .xlsx (use openpyxl: sheets, formulas, data types, charts, pivots), .pdf (PyPDF2/PDFMiner: text, images, tables, metadata), .py (ast: functions, classes, imports, docstrings, comments), plus .docx, .sql, .yaml, .xml, .log. - Extract max metadata: file_info (name, type, size, created/modified, encoding), content_metadata (per type specifics), extracted_data (samples, summaries), tags/keywords (NLTK/auto-extract), ai_context (summary). - Output structure: JSON with above sections for AI optimization. - Knowledge base: Vector DB for semantic search, tags/indexes by problem/tech, versioned/timestamped. - Blind spots: Handle large files (streaming), encoding/errors, performance (batch), security (redact sensitive), updates (re-embed on changes), context loss (overlap chunks). - Integration: LangChain RAG for queries, hybrid search (vectors + BM25), AI tools (VS Code ext for queries). - RAG evaluation metrics: Retrieval (Precision@K, Recall@K, MRR, nDCG); Generation (ROUGE-1/2/L, BLEU, BERTScore); End-to-end (Faithfulness, Answer Relevancy, Context Precision/Relevancy); Relevance (semantic similarity, keyword overlap); Latency (query/embedding/generation time); Cost tracking. - LangSmith integration: Tracing for RAG pipeline; Feedback collection; A/B testing; Evaluation datasets; Dashboards; Automated evaluations; Regression detection; Performance thresholds; Quality alerts. - Watchdog enhancement: Use watchdog to monitor Folder A; on_moved, process file and copy outputs to Folder B via event.src_path; debounce (1s window) for race conditions; queue events; handle move vs copy (on_created fallback with DB/default source); check permissions; error handling (failed folder); naming conflicts (timestamp append); additional blind spots (multiple events, OS differences, network drives, large files, symlinks, deletions). Why LangSmith + RAG metrics:
+1. LangSmith benefits: Tracing (query flow through retrieval/generation); Feedback loops (user ratings/corrections); A/B testing (retrieval strategies); Cost tracking (embedding/LLM usage); Debugging (step-by-step traces). 2. RAG metrics: Retrieval (Precision@K, Recall@K, MRR); Relevance (semantic similarity, keyword overlap); Answer quality (Faithfulness, relevance, context utilization); Latency (query time, embedding time, generation time). Implementation phases:
+1. Enhanced chunking: In watcher_splitter.py, add embeddings during chunking, store in FAISS/Chroma. 2. RAG search: New rag_search.py for semantic/hybrid queries with citations. 3. Ollama integration: Local embeddings, no API costs. 4. Core metrics: New eval_rag.py - Implement retrieval metrics (precision@k, recall@k, MRR); Add semantic similarity scoring; Track latency and token usage; Export to CSV/JSON. 5. LangSmith integration: New langsmith_integration.py - Add tracing to RAG pipeline; Implement feedback collection; Set up evaluation datasets; Create dashboards. 6. Automated evaluation: New automated_eval.py - Run evaluations on schedule; Compare baselines; Alert regressions; Generate reports. 7. Faithfulness scoring: Implement FaithfulnessScorer class for answer quality. 8. ChromaDB: Use ChromaRAG class for vector DB with add/search/update/delete/stats. 9. Watchdog: Replace polling with watchdog; on_moved/on_created handlers; debounce with 1s window and queue; handle blind spots (move/copy, race, permissions, errors, naming, multiple events, OS diffs, network, large files, symlinks, deletions). Recommended setup:
+1. LangSmith configuration: Add to config.json - {"langsmith": {"api_key": "your_key", "project": "chunker-rag-eval", "tracing_enabled": true, "evaluation_enabled": true}}. 2. Evaluation datasets: test_queries.json - [{"query": "How do I fix vlookup errors in Excel? ", "expected_answer": "Check data types and table references", "expected_sources": ["excel_troubleshooting.md", "vlookup_guide.xlsx"], "category": "excel"}]. 3. Metrics tracking: In database - Query performance, retrieval quality, user feedback, cost per query. 4. Watchdog config: Add debounce_window (1s), max_workers (4), failed_dir (03_archive/failed), default_source_folder. What to implement:
+1. RAG evaluation framework: Retrieval metrics (precision@k, recall@k, MRR); Answer quality metrics (faithfulness, relevance); Latency and cost tracking; Automated evaluation pipeline. 2. LangSmith integration: Tracing decorators for RAG pipeline; Custom evaluation functions; Feedback collection system; Evaluation dataset management; Performance dashboards. 3. Monitoring and alerting: Regression detection; Performance thresholds; Cost monitoring; Quality alerts. 4. Watchdog: on_moved (use src_path for copy back); on_created fallback; debounce/queue; permissions check; failed folder; timestamped names; symlinks skip; retry network; OS handling. LangSmith tracing examples:
+1. Basic RAG tracing:
+from langsmith import traceable
+from langchain.schema import Document
+
+@traceable
+def rag_query(query: str, vector_store, llm):
+    # Trace retrieval
+    docs = vector_store.similarity_search(query, k=5)
+    
+    # Trace generation
+    context = "\n".join([doc.page_content for doc in docs])
+    response = llm.invoke(f"Context: {context}\nQuery: {query}")
+    
+    return response
+
+2. Custom evaluation metrics:
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Run, Example
+
+def evaluate_retrieval(run: Run, example: Example):
+    # Check if retrieved docs are relevant
+    retrieved_docs = run.outputs.get("retrieved_docs", [])
+    expected_sources = example.outputs.get("expected_sources", [])
+    
+    # Calculate precision@k
+    relevant_docs = [doc for doc in retrieved_docs 
+                    if doc.metadata.get("source") in expected_sources]
+    precision = len(relevant_docs) / len(retrieved_docs) if retrieved_docs else 0
+    
+    return {"precision": precision}
+
+# Run evaluation
+evaluate(
+    lambda x: rag_query(x["query"], vector_store, llm),
+    data=test_dataset,
+    evaluators=[evaluate_retrieval]
+)
+
+3. Feedback collection:
+from langsmith import Client
+
+client = Client()
+
+# Collect user feedback
+def collect_feedback(run_id: str, rating: int, comment: str):
+    client.create_feedback(
+        run_id=run_id,
+        key="user_rating",
+        score=rating,
+        comment=comment
+    )
+
+RAG evaluation tools:
+1. Retrieval metrics:
+def calculate_retrieval_metrics(retrieved_docs, relevant_docs, k=5):
+    # Precision@K
+    precision_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / k
+    
+    # Recall@K
+    recall_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / len(relevant_docs)
+    
+    # MRR (Mean Reciprocal Rank)
+    mrr = 0
+    for i, doc in enumerate(retrieved_docs):
+        if doc in relevant_docs:
+            mrr = 1 / (i + 1)
+            break
+    
+    return {
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+        "mrr": mrr
+    }
+
+2. Answer quality metrics:
+def evaluate_answer_quality(generated_answer, expected_answer, context):
+    # Faithfulness (answer grounded in context)
+    faithfulness_score = calculate_faithfulness(generated_answer, context)
+    
+    # Answer relevance (answer matches query)
+    relevance_score = calculate_relevance(generated_answer, expected_answer)
+    
+    # Context utilization (how much context was used)
+    context_utilization = calculate_context_utilization(generated_answer, context)
+    
+    return {
+        "faithfulness": faithfulness_score,
+        "relevance": relevance_score,
+        "context_utilization": context_utilization
+    }
+
+3. Automated evaluation pipeline:
+def run_evaluation_pipeline(test_queries, vector_store, llm):
+    results = []
+    
+    for query in test_queries:
+        # Run RAG query
+        response = rag_query(query["text"], vector_store, llm)
+        
+        # Calculate metrics
+        retrieval_metrics = calculate_retrieval_metrics(
+            response["retrieved_docs"], 
+            query["relevant_docs"]
+        )
+        
+        answer_metrics = evaluate_answer_quality(
+            response["answer"], 
+            query["expected_answer"], 
+            response["context"]
+        )
+        
+        results.append({
+            "query": query["text"],
+            "retrieval_metrics": retrieval_metrics,
+            "answer_metrics": answer_metrics,
+            "latency": response["latency"]
+        })
+    
+    return results
+
+Faithfulness Scoring Implementation:
+import re
+import nltk
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+class FaithfulnessScorer:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.stop_words = set(nltk.corpus.stopwords.words('english'))
+    
+    def extract_claims(self, answer):
+        """Extract factual claims from the answer"""
+        # Split into sentences and filter out questions/opinions
+        sentences = nltk.sent_tokenize(answer)
+        claims = []
+        
+        for sentence in sentences:
+            # Remove questions and opinion indicators
+            if not re.search(r'\?|I think|I believe|in my opinion', sentence, re.IGNORECASE):
+                # Extract factual statements
+                if re.search(r'\b(is|are|was|were|has|have|will|can|should)\b', sentence, re.IGNORECASE):
+                    claims.append(sentence.strip())
+        
+        return claims
+    
+    def calculate_faithfulness(self, answer, context, threshold=0.7):
+        """
+        Calculate faithfulness score (0-1) based on how well answer claims
+        are supported by the context
+        """
+        claims = self.extract_claims(answer)
+        if not claims:
+            return 1.0  # No claims to verify
+        
+        # Get embeddings for claims and context
+        claim_embeddings = self.model.encode(claims)
+        context_embeddings = self.model.encode([context])
+        
+        faithfulness_scores = []
+        
+        for claim_emb in claim_embeddings:
+            # Find best matching context sentence
+            similarities = cosine_similarity([claim_emb], context_embeddings)[0]
+            max_similarity = np.max(similarities)
+            
+            # Check if claim is supported by context
+            if max_similarity >= threshold:
+                faithfulness_scores.append(1.0)
+            else:
+                # Check for partial support
+                faithfulness_scores.append(max_similarity)
+        
+        return np.mean(faithfulness_scores)
+    
+    def detailed_faithfulness_analysis(self, answer, context):
+        """Provide detailed analysis of faithfulness"""
+        claims = self.extract_claims(answer)
+        analysis = {
+            "total_claims": len(claims),
+            "supported_claims": 0,
+            "unsupported_claims": 0,
+            "claim_details": []
+        }
+        
+        for claim in claims:
+            claim_emb = self.model.encode([claim])
+            context_emb = self.model.encode([context])
+            similarity = cosine_similarity(claim_emb, context_emb)[0][0]
+            
+            is_supported = similarity >= 0.7
+            if is_supported:
+                analysis["supported_claims"] += 1
+            else:
+                analysis["unsupported_claims"] += 1
+            
+            analysis["claim_details"].append({
+                "claim": claim,
+                "similarity": float(similarity),
+                "supported": is_supported
+            })
+        
+        analysis["faithfulness_score"] = analysis["supported_claims"] / analysis["total_claims"] if analysis["total_claims"] > 0 else 1.0
+        
+        return analysis
+
+# Usage example
+scorer = FaithfulnessScorer()
+answer = "The vlookup function requires exact matches. You should use FALSE for exact matching." context = "VLOOKUP syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches, TRUE for approximate matches."

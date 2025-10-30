@@ -1,0 +1,578 @@
+if logger is None:
+        logger = setup_logging()
+    conv_id = conv.get("id", conv.get("uuid", "unknown"))
+    logger.info(f"Processing conversation {conv_id}")
+    conv_ts = first_valid_timestamp(CONV_TS_FIELDS, conv, logger)
+    logger.debug(f"Conversation {conv_id} timestamp: {conv_ts}")
+    
+    # Normalize messages to chat_messages
+    messages = next((conv.get(k) for k in ["chat_messages", "messages"] if k in conv), [])
+    if not isinstance(messages, list):
+        logger.error(f"Invalid messages array in conv {conv_id}")
+        return 0, 0, 0, 0, 0, 1, f"Invalid messages in conv {conv_id}"
+    if "messages" in conv and "chat_messages" not in conv:
+        logger.info(f"Copying messages to chat_messages in conv {conv_id}")
+        conv["chat_messages"] = conv["messages"]
+    
+    patched, missing, merged, dedup_removed, invalid_dropped, errors = 0, 0, 0, 0, 0, 0
+    for msg in messages:
+        msg_id = msg.get("id", "unknown")
+        logger.debug(f"Processing message {msg_id} in conv {conv_id}")
+        msg_ts = first_valid_timestamp(MSG_TS_FIELDS, msg, logger) or conv_ts
+        logger.debug(f"Message {msg_id} timestamp: {msg_ts}")
+        
+        # Collect and normalize file entries (deterministic order via FILE_KEYS)
+        normalized_files: List[Dict[str, Any]] = []
+        seen_ids: set = set()
+        sources = [(key, msg.get(key)) for key in FILE_KEYS if isinstance(msg.get(key), list)] if merge_to_files else [("files", msg.get("files"))] if isinstance(msg.get("files"), list) else []
+        
+        logger.info(f"Found {len(sources)} file sources for message {msg_id}: {[s[0] for s in sources]}")
+        for key, files in sources:
+            for idx, f in enumerate(files):
+                logger.debug(f"Processing {key}[{idx}] in msg {msg_id}: {f}")
+                f_new: Dict[str, Any] = {}
+                if isinstance(f, str):
+                    logger.info(f"Converting string file {f} to dict in msg {msg_id}")
+                    f_new = {"file_uuid": f}
+                    if msg_ts:
+                        f_new["created_at"] = msg_ts
+                        patched += 1
+                    else:
+                        logger.warning(f"Missing timestamp for string file {f} in conv {conv_id}, msg {msg_id}")
+                        missing += 1
+                        if strict:
+                            errors += 1
+                            logger.error(f"Strict mode: Failing due to missing timestamp in conv {conv_id}, msg {msg_id}")
+                            return patched, missing, merged, dedup_removed, invalid_dropped, errors, f"Missing timestamp in conv {conv_id}, msg {msg_id}"
+                elif isinstance(f, dict):
+                    f_new = f.copy()
+                    if "file_uuid" not in f_new or not isinstance(f_new["file_uuid"], str) or not f_new["file_uuid"].strip():
+                        cand = get_first_id(f_new)
+                        if cand:
+                            logger.info(f"Extracted nested id {cand} to file_uuid in msg {msg_id}")
+                            f_new["file_uuid"] = cand
+                            patched += 1
+                    if "created_at" not in f_new or not f_new["created_at"]:
+                        if msg_ts:
+                            logger.info(f"Setting created_at={msg_ts} for file in msg {msg_id}")
+                            f_new["created_at"] = msg_ts
+                            patched += 1
+                        else:
+                            logger.warning(f"Missing timestamp for file dict in conv {conv_id}, msg {msg_id}")
+                            missing += 1
+                            if strict:
+                                errors += 1
+                                logger.error(f"Strict mode: Failing due to missing timestamp in conv {conv_id}, msg {msg_id}")
+                                return patched, missing, merged, dedup_removed, invalid_dropped, errors, f"Missing timestamp in conv {conv_id}, msg {msg_id}"
+                else:
+                    logger.warning(f"Invalid file entry type {type(f)} in {key} for conv {conv_id}, msg {msg_id}: {f}")
+                    if keep_invalid:
+                        logger.info(f"Keeping invalid entry {f} due to --keep-invalid")
+                        normalized_files.append(f)
+                    else:
+                        invalid_dropped += 1
+                    continue
+                
+                # Enforce file_uuid presence
+                fu = f_new.get("file_uuid")
+                if not (isinstance(fu, str) and fu.strip()):
+                    if keep_invalid:
+                        logger.warning(f"Keeping entry without file_uuid due to --keep-invalid in msg {msg_id}")
+                        normalized_files.append(f_new)
+                    else:
+                        invalid_dropped += 1
+                    continue
+                fu = fu.strip()
+                # Dedupe check
+                if fu in seen_ids:
+                    logger.info(f"Dropping duplicate file_uuid {fu} in msg {msg_id}")
+                    dedup_removed += 1
+                    continue
+                seen_ids.add(fu)
+                normalized_files.append(f_new)
+                if key != "files":
+                    merged += 1
+        
+        # Update files key only if sources exist or files key was present
+        if not merge_to_files:
+            if "files" in msg:
+                if normalized_files:
+                    msg["files"] = normalized_files
+                else:
+                    logger.debug(f"Leaving original files untouched in msg {msg_id} due to --no-merge-to-files")
+            continue
+        if (merge_to_files or "files" in msg) and (normalized_files or "files" in msg):
+            msg["files"] = normalized_files
+            logger.debug(f"Updated files for msg {msg_id}: {normalized_files}")
+    
+    logger.info(f"Conversation {conv_id} complete: {patched} patched, {missing} missing, {merged} merged, {dedup_removed} duplicates removed, {invalid_dropped} invalid dropped, {errors} errors")
+    return patched, missing, merged, dedup_removed, invalid_dropped, errors, None
+
+# -------------------------
+# I/O Helpers
+# -------------------------
+def read_conversations_from_zip(zip_path: str, logger: logging.Logger, stream: bool = False) -> Tuple[Optional[dict], Optional[str], Optional[dict], Optional[Iterable[dict]]]:
+    """Read conversations.json and projects.json from ZIP, optionally streaming. Returns (data, conv_name, projects, conversations_iterator_or_list).""" try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            conv_name = next((n for n in zf.namelist() if n.endswith("conversations.json")), None)
+            if not conv_name:
+                logger.error("No conversations.json in ZIP")
+                return None, None, None, None
+            logger.info(f"Loading {conv_name} from ZIP")
+            if stream and IJSON_AVAILABLE:
+                logger.info("Using streaming mode with ijson")
+                with zf.open(conv_name) as f:
+                    conversations = ijson.items(f, "conversations.item")
+                    data = {"conversations": []}  # Placeholder
+            else:
+                with zf.open(conv_name) as f:
+                    data = json.load(f)
+                conversations = data.get("conversations", [])
+            proj_name = next((n for n in zf.namelist() if n.endswith("projects.json")), None)
+            projects = None
+            if proj_name:
+                logger.info(f"Loading {proj_name} from ZIP")
+                with zf.open(proj_name) as f:
+                    projects = json.load(f)
+            return data, conv_name, projects, conversations
+    except zipfile.BadZipFile as e:
+        logger.error(f"Invalid ZIP file {zip_path}: {e}")
+        return None, None, None, None
+
+def write_zip_with_conversations(src_zip: str, out_zip: str, conv_name_in_zip: str, payload: Union[bytes, str]) -> None:
+    """Write patched conversations to a new ZIP, accepting bytes or file path for payload, preserving metadata and streaming copies.""" try:
+        with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(out_zip, "w") as zout:
+            for item in zin.infolist():
+                zi = zipfile.ZipInfo(filename=item.filename, date_time=item.date_time)
+                zi.compress_type = item.compress_type
+                zi.comment = item.comment
+                zi.extra = item.extra
+                zi.create_system = item.create_system
+                if item.filename == conv_name_in_zip:
+                    if isinstance(payload, (bytes, bytearray)):
+                        zout.writestr(zi, payload)
+                    else:
+                        with open(payload, "rb") as fsrc, zout.open(zi, "w") as fdst:
+                            copyfileobj(fsrc, fdst, length=1024 * 1024)
+                else:
+                    with zin.open(item.filename, "r") as fsrc, zout.open(zi, "w") as fdst:
+                        copyfileobj(fsrc, fdst, length=1024 * 1024)
+        logging.info(f"Wrote patched ZIP to {out_zip}")
+    except Exception as e:
+        logging.error(f"Failed to write ZIP {out_zip}: {e}")
+        raise
+
+# -------------------------
+# Processing
+# -------------------------
+def process_file(
+    input_path: str,
+    output_path: str,
+    dry_run: bool = False,
+    strict: bool = False,
+    pretty: bool = False,
+    quiet: bool = False,
+    verbose: bool = False,
+    zip_output: bool = False,
+    no_backup: bool = False,
+    stream: bool = False,
+    merge_to_files: bool = True,
+    keep_invalid: bool = False
+) -> int:
+    """Process input JSON or ZIP, write output, and generate report. Returns exit code.""" logger = setup_logging(quiet, verbose)
+    logger.info(f"Starting processing of input: {input_path}")
+    if stream and not IJSON_AVAILABLE:
+        logger.error("Streaming requires ijson. Install with 'pip install ijson' or run without --stream.") print("Error: Streaming requires ijson. Install with 'pip install ijson' or run without --stream. ", file=sys.stderr)
+        return 1
+    
+    report_rows: List[List[Any]] = []
+    total_patched, total_missing, total_merged, total_dedup, total_invalid, total_errors = 0, 0, 0, 0, 0, 0
+    total_convs, linked = 0, 0
+    
+    # Load input
+    projects_data: Optional[dict] = None
+    conv_name_in_zip: Optional[str] = None
+    conversations: Optional[Iterable[dict]] = None
+    proj_by_id: Dict[str, dict] = {}
+    
+    if input_path.lower().endswith(".zip"):
+        data, conv_name_in_zip, projects_data, conversations = read_conversations_from_zip(input_path, logger, stream)
+        if data is None:
+            print("Error: No conversations.json in ZIP or invalid ZIP", file=sys.stderr)
+            return 1
+        if isinstance(projects_data, dict):
+            proj_by_id = {p.get("conversation_id"): p for p in projects_data.get("projects", [])}
+            logger.debug(f"Loaded {len(proj_by_id)} projects")
+        if not stream:
+            conversations = data.get("conversations", [])
+    else:
+        try:
+            if not no_backup:
+                bak = f"{input_path}.bak"
+                if not os.path.exists(bak):
+                    logger.info(f"Creating backup: {bak}")
+                    shutil.copy2(input_path, bak)
+            sib = Path(input_path).with_name("projects.json")
+            if sib.exists():
+                try:
+                    with open(sib, "r", encoding="utf-8") as pf:
+                        projects_data = json.load(pf)
+                    if isinstance(projects_data, dict):
+                        proj_by_id = {p.get("conversation_id"): p for p in projects_data.get("projects", [])}
+                    logger.info(f"Loaded {len(proj_by_id)} projects from sibling projects.json")
+                except Exception as e:
+                    logger.warning(f"Failed to load sibling projects.json: {e}")
+            if stream and IJSON_AVAILABLE:
+                logger.info("Using streaming mode with ijson")
+                with open(input_path, "rb") as f:
+                    conversations = ijson.items(f, "conversations.item")
+            else:
+                with open(input_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and "conversations" in data:
+                    conversations = data["conversations"]
+                else:
+                    conversations = [data]
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in {input_path}: {e}")
+            print(f"Error: Invalid JSON in {input_path}", file=sys.stderr)
+            return 1
+        except FileNotFoundError as e:
+            logger.error(f"Input file not found: {input_path}")
+            print(f"Error: Input file not found: {input_path}", file=sys.stderr)
+            return 1
+    
+    if not conversations:
+        logger.error("No conversations array found in input")
+        print("Error: No conversations array found in input", file=sys.stderr)
+        return 1
+    
+    # Prepare output for streaming
+    temp_file: Optional[tempfile._TemporaryFileWrapper] = None
+    out_f: Optional[io.TextIOWrapper] = None
+    wrote_first = False
+    if stream and (zip_output or output_path.lower().endswith(".zip")):
+        temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+        logger.info(f"Using temp file {temp_file.name} for streaming ZIP output")
+        temp_file.write('{"conversations":[')
+        wrote_first = False
+    elif stream:
+        out_f = open(output_path, "w", encoding="utf-8")
+        logger.info(f"Streaming JSON output to {output_path}")
+        out_f.write('{"conversations":[')
+        wrote_first = False
+    
+    # Process conversations
+    for conv in conversations:
+        total_convs += 1
+        patched, missing, merged, dedup_removed, invalid_dropped, errors, error_msg = patch_conversation(
+            conv, strict, merge_to_files, keep_invalid, logger
+        )
+        total_patched += patched
+        total_missing += missing
+        total_merged += merged
+        total_dedup += dedup_removed
+        total_invalid += invalid_dropped
+        total_errors += errors
+        status = "error" if errors else "patched" if patched or merged else "unchanged"
+        if errors and strict:
+            logger.warning(f"Skipping conversation {conv.get('id', 'unknown')} due to errors: {error_msg}")
+        report_rows.append([conv.get("id", "unknown"), status, error_msg or "", merged, dedup_removed, invalid_dropped, missing])
+        
+        # Link projects
+        cid = conv.get("id")
+        if cid and cid in proj_by_id:
+            logger.info(f"Linking project {proj_by_id[cid].get('name', 'unknown')} to conversation {cid}")
+            conv["project_info"] = proj_by_id[cid]
+            linked += 1
+        
+        # Stream output
+        if stream and temp_file:
+            if wrote_first:
+                temp_file.write(",")
+            json.dump(conv, temp_file, ensure_ascii=False, indent=2 if pretty else None)
+            wrote_first = True
+        elif stream and out_f:
+            if wrote_first:
+                out_f.write(",")
+            json.dump(conv, out_f, ensure_ascii=False, indent=2 if pretty else None)
+            wrote_first = True
+    
+    if temp_file:
+        temp_file.write("]}")
+        temp_file.close()
+    if out_f:
+        out_f.write("]}")
+        out_f.close()
+    
+    # Write output
+    if not dry_run:
+        logger.info(f"Writing output to {output_path}")
+        try:
+            if input_path.lower().endswith(".zip") and (zip_output or output_path.lower().endswith(".zip")):
+                if stream:
+                    write_zip_with_conversations(input_path, output_path, conv_name_in_zip, temp_file.name)
+                else:
+                    buf = io.BytesIO()
+                    json.dump({"conversations": list(conversations)}, io.TextIOWrapper(buf, "utf-8", write_through=True), ensure_ascii=False, indent=2 if pretty else None)
+                    write_zip_with_conversations(input_path, output_path, conv_name_in_zip, buf.getvalue())
+            else:
+                if not stream:  # Streaming already wrote to out_f
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        json.dump({"conversations": list(conversations)}, f, ensure_ascii=False, indent=2 if pretty else None)
+        except Exception as e:
+            logger.error(f"Failed to write output {output_path}: {e}")
+            print(f"Error: Failed to write output {output_path}", file=sys.stderr)
+            return 1
+        finally:
+            if temp_file and os.path.exists(temp_file.name):
+                logger.debug(f"Cleaning up temp file {temp_file.name}")
+                os.unlink(temp_file.name)
+        
+        # Write report
+        report_path = Path(output_path).with_name(Path(output_path).stem + "_report.csv")
+        logger.info(f"Writing report to {report_path}")
+        try:
+            with open(report_path, "w", encoding="utf-8", newline="") as rf:
+                writer = csv.writer(rf)
+                writer.writerow(["ConversationID", "Status", "ErrorMessage", "FilesMerged", "DuplicatesRemoved", "InvalidDropped", "MissingTimestamps"])
+                writer.writerows(report_rows)
+        except Exception as e:
+            logger.error(f"Failed to write report {report_path}: {e}")
+            print(f"Error: Failed to write report {report_path}", file=sys.stderr)
+            return 1
+    
+    logger.info(f"Processed {total_convs} conversations")
+    print(f"Processed {total_convs} conversations")
+    logger.info(f"Patched fields: {total_patched}")
+    print(f"Patched fields: {total_patched}")
+    logger.info(f"Files merged: {total_merged}")
+    print(f"Files merged: {total_merged}")
+    logger.info(f"Duplicates removed: {total_dedup}")
+    print(f"Duplicates removed: {total_dedup}")
+    logger.info(f"Invalid entries dropped: {total_invalid}")
+    print(f"Invalid entries dropped: {total_invalid}")
+    logger.info(f"Files missing timestamps: {total_missing}")
+    print(f"Files missing timestamps: {total_missing}")
+    logger.info(f"Errors: {total_errors}")
+    print(f"Errors: {total_errors}")
+    logger.info(f"Projects linked: {linked}")
+    print(f"Projects linked: {linked}")
+    if not dry_run:
+        if output_path.lower().endswith(".zip"):
+            logger.info(f"Patched ZIP: {output_path}")
+            print(f"Patched ZIP: {output_path}")
+        else:
+            logger.info(f"Patched JSON: {output_path}")
+            print(f"Patched JSON: {output_path}")
+        logger.info(f"Report: {report_path}")
+        print(f"Report: {report_path}")
+    
+    logger.info(f"Processing complete: {total_patched} patched, {total_merged} merged, {total_dedup} deduped, {total_invalid} invalid dropped, {total_missing} missing, {total_errors} errors, {linked} projects linked")
+    return 1 if (total_errors > 0 and strict) else 0
+
+# -------------------------
+# Tests
+# -------------------------
+class TestPatchConversation(unittest.TestCase):
+    def setUp(self):
+        self.logger = setup_logging(quiet=True, verbose=True)
+    
+    def test_string_file(self):
+        """Test patching a string file entry.""" conv = {
+            "id": "c1",
+            "created_at": "2023-01-01T12:00:00Z",
+            "chat_messages": [{"id": "m1", "created_at": "2023-01-01T12:01:00Z", "files": ["file1.txt"]}]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e, msg), (1, 0, 0, 0, 0, 0, None))
+        self.assertEqual(conv["chat_messages"][0]["files"], [{"file_uuid": "file1.txt", "created_at": "2023-01-01T12:01:00Z"}])
+    
+    def test_file_id_mapping(self):
+        """Test mapping file_id to file_uuid.""" conv = {
+            "id": "c2",
+            "created_at": "2023-01-02T00:00:00Z",
+            "messages": [{"id": "m2", "created_at": "2023-01-02T00:01:00Z", "fileIds": [{"file_id": "FID"}]}]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (2, 0, 1, 0, 0, 0))
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["file_uuid"], "FID")
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["created_at"], "2023-01-02T00:01:00Z")
+    
+    def test_messages_to_chat_messages(self):
+        """Test copying messages to chat_messages.""" conv = {
+            "id": "c3",
+            "created_at": "2023-02-01T00:00:00Z",
+            "messages": [{"id": "m3", "file_refs": [{"id": "f3"}]}]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (2, 0, 1, 0, 0, 0))
+        self.assertEqual(conv["chat_messages"], conv["messages"])
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["created_at"], "2023-02-01T00:00:00Z")
+    
+    def test_merge_sources_to_files(self):
+        """Test merging multiple file sources to files.""" conv = {
+            "id": "c4",
+            "created_at": "2023-03-01T00:00:00Z",
+            "chat_messages": [{
+                "id": "m4",
+                "created_at": "2023-03-01T00:01:00Z",
+                "files": [{"file_id": "f1"}],
+                "attachments": [{"uuid": "a1"}],
+                "fileIds": ["fid1"]
+            }]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (5, 0, 2, 0, 0, 0))
+        self.assertEqual(len(conv["chat_messages"][0]["files"]), 3)
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["file_uuid"], "f1")
+        self.assertEqual(conv["chat_messages"][0]["files"][1]["file_uuid"], "a1")
+        self.assertEqual(conv["chat_messages"][0]["files"][2]["file_uuid"], "fid1")
+    
+    def test_dedupe_files(self):
+        """Test deduplicating files by file_uuid.""" conv = {
+            "id": "c5",
+            "created_at": "2023-04-01T00:00:00Z",
+            "chat_messages": [{
+                "id": "m5",
+                "created_at": "2023-04-01T00:01:00Z",
+                "files": [{"file_id": "f1"}, {"file_id": "f1"}],
+                "attachments": [{"uuid": "f1"}]
+            }]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (3, 0, 1, 2, 0, 0))
+        self.assertEqual(len(conv["chat_messages"][0]["files"]), 1)
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["file_uuid"], "f1")
+    
+    def test_invalid_file_entry_drop(self):
+        """Test dropping invalid file entries.""" conv = {
+            "id": "c6",
+            "created_at": "2023-01-06T00:00:00Z",
+            "chat_messages": [{"id": "m6", "files": [123, "file1.txt"]}]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (1, 0, 0, 0, 1, 0))
+        self.assertEqual(len(conv["chat_messages"][0]["files"]), 1)
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["file_uuid"], "file1.txt")
+    
+    def test_keep_invalid_flag(self):
+        """Test keeping invalid file entries with --keep-invalid.""" conv = {
+            "id": "c7",
+            "created_at": "2023-01-07T00:00:00Z",
+            "chat_messages": [{"id": "m7", "files": [123, {"extra": "data"}]}]
+        }
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, keep_invalid=True, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (0, 0, 0, 0, 0, 0))
+        self.assertEqual(len(conv["chat_messages"][0]["files"]), 2)
+        self.assertEqual(conv["chat_messages"][0]["files"][0], 123)
+        self.assertEqual(conv["chat_messages"][0]["files"][1], {"extra": "data"})
+    
+    def test_timestamp_sources(self):
+        """Test timestamp priority: message > conversation.""" conv = {
+            "id": "c8",
+            "created_at": "2023-01-08T00:00:00Z",
+            "chat_messages": [
+                {"id": "m8", "created_at": "2023-01-08T00:01:00Z", "files": [{"id": "f8"}]},
+                {"id": "m9", "files": [{"id": "f9"}]},
+                {"id": "m10", "files": [{"id": "f10"}]}
+            ]
+        }
+        conv["chat_messages"][2].pop("created_at", None)
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        self.assertEqual((p, m, mr, dr, idr, e), (5, 1, 0, 0, 0, 0))
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["created_at"], "2023-01-08T00:01:00Z")
+        self.assertEqual(conv["chat_messages"][0]["files"][1]["created_at"], "2023-01-08T00:00:00Z")
+        self.assertFalse("created_at" in conv["chat_messages"][2]["files"][0])
+    
+    def test_offset_and_z(self):
+        """Test timestamp conversion with offset and Z.""" iso = to_iso8601("2023-03-01T01:00:00+02:00", self.logger)
+        self.assertEqual(iso, "2023-02-28T23:00:00Z")
+        iso2 = to_iso8601("2023-03-01T01:00:00Z", self.logger)
+        self.assertEqual(iso2, "2023-03-01T01:00:00Z")
+    
+    def test_project_linking(self):
+        """Test linking projects.json data.""" conv = {
+            "id": "c9",
+            "created_at": "2023-01-09T12:00:00Z",
+            "chat_messages": [{"id": "m9", "files": ["file9.txt"]}]
+        }
+        projects = {"projects": [{"conversation_id": "c9", "name": "Project1"}]}
+        proj_by_id = {p.get("conversation_id"): p for p in projects.get("projects", [])}
+        p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+        cid = conv.get("id")
+        if cid in proj_by_id:
+            conv["project_info"] = proj_by_id[cid]
+        self.assertEqual(conv["project_info"]["name"], "Project1")
+        self.assertEqual(conv["chat_messages"][0]["files"][0]["file_uuid"], "file9.txt")
+    
+    def test_invalid_zip_streaming(self):
+        """Test streaming with invalid ZIP.""" if not IJSON_AVAILABLE:
+            self.skipTest("ijson not installed, skipping streaming test")
+        data, conv_name, projects, convs = read_conversations_from_zip("nonexistent.zip", self.logger, stream=True)
+        self.assertIsNone(data)
+        self.assertIsNone(conv_name)
+        self.assertIsNone(projects)
+        self.assertIsNone(convs)
+    
+    def test_streaming_json_end_to_end(self):
+        """Test streaming JSON in and out with project linking.""" if not IJSON_AVAILABLE:
+            self.skipTest("ijson not installed, skipping streaming test")
+        temp_json = "test_conversations.json"
+        convs = [
+            {"id": "c10", "created_at": "2023-01-10T00:00:00Z", "chat_messages": [{"id": "m10", "files": ["file10.txt"]}]}
+        ]
+        projects = {"projects": [{"conversation_id": "c10", "name": "Project1"}]}
+        with open(temp_json, "w", encoding="utf-8") as f:
+            json.dump({"conversations": convs}, f)
+        output_json = "test_output.json"
+        proj_by_id = {p.get("conversation_id"): p for p in projects.get("projects", [])}
+        with open(temp_json, "rb") as f:
+            gen = ijson.items(f, "conversations.item")
+            with open(output_json, "w", encoding="utf-8") as out_f:
+                out_f.write('{"conversations":[')
+                first = True
+                for conv in gen:
+                    p, m, mr, dr, idr, e, msg = patch_conversation(conv, logger=self.logger)
+                    cid = conv.get("id")
+                    if cid in proj_by_id:
+                        conv["project_info"] = proj_by_id[cid]
+                    if not first:
+                        out_f.write(",")
+                    json.dump(conv, out_f, ensure_ascii=False)
+                    first = False
+                    out_f.write("]}")
+        with open(output_json, "r", encoding="utf-8") as f:
+            result = json.load(f)
+        self.assertEqual(len(result["conversations"]), 1)
+        self.assertEqual(result["conversations"][0]["id"], "c10")
+        self.assertEqual(result["conversations"][0]["chat_messages"][0]["files"][0]["file_uuid"], "file10.txt")
+        self.assertEqual(result["conversations"][0]["project_info"]["name"], "Project1")
+        os.remove(temp_json)
+        os.remove(output_json)
+    
+    def test_zip_nonstream_bytes_path(self):
+        """Test non-streaming ZIP output with bytes payload.""" temp_json = "test_conversations.json"
+        temp_zip = "test_input.zip"
+        convs = [
+            {"id": "c11", "created_at": "2023-01-11T00:00:00Z", "chat_messages": [{"id": "m11", "files": ["file11.txt"]}]}
+        ]
+        with open(temp_json, "w", encoding="utf-8") as f:
+            json.dump({"conversations": convs}, f)
+        with zipfile.ZipFile(temp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(temp_json, "conversations.json")
+        output_zip = "test_output.zip"
+        buf = io.BytesIO()
+        json.dump({"conversations": convs}, io.TextIOWrapper(buf, "utf-8", write_through=True), ensure_ascii=False)
+        write_zip_with_conversations(temp_zip, output_zip, "conversations.json", buf.getvalue())
+        with zipfile.ZipFile(output_zip, "r") as zf:
+            with zf.open("conversations.json") as f:
+                result = json.load(f)
+        self.assertEqual(len(result["conversations"]), 1)
+        self.assertEqual(result["conversations"][0]["id"], "c11")
+        os.remove(temp_json)
+        os.remove(temp_zip)
+        os.remove(output_zip)
+    
+    def test_dedupe_requires_id(self):
+        """Test deduplication only for non-empty file_uuid."""

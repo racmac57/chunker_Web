@@ -1,0 +1,489 @@
+"""
+Comprehensive RAG Evaluation Framework for Chunker_v2
+Implements retrieval metrics, generation metrics, and end-to-end evaluation
+"""
+
+import logging
+import json
+import time
+from typing import List, Dict, Any, Optional, Tuple
+import numpy as np
+from rouge_score import rouge_scorer
+from nltk.translate.bleu_score import sentence_bleu
+from bert_score import score as bertscore
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
+
+class RAGEvaluator:
+    """
+    Comprehensive RAG evaluation system with multiple metrics.
+    """
+    
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        """
+        Initialize RAG evaluator.
+        
+        Args:
+            model_name: SentenceTransformer model for semantic similarity
+        """
+        self.model_name = model_name
+        self.sentence_model = SentenceTransformer(model_name)
+        self.rouge_scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
+        
+    def precision_at_k(self, retrieved_docs: List[str], relevant_docs: List[str], k: int = 5) -> float:
+        """
+        Calculate Precision@K.
+        
+        Args:
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            k: Number of top results to consider
+            
+        Returns:
+            Precision@K score
+        """
+        if not retrieved_docs or k == 0:
+            return 0.0
+        
+        top_k = retrieved_docs[:k]
+        relevant_count = sum(1 for doc in top_k if doc in relevant_docs)
+        return relevant_count / k
+    
+    def recall_at_k(self, retrieved_docs: List[str], relevant_docs: List[str], k: int = 5) -> float:
+        """
+        Calculate Recall@K.
+        
+        Args:
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            k: Number of top results to consider
+            
+        Returns:
+            Recall@K score
+        """
+        if not relevant_docs:
+            return 0.0
+        
+        top_k = retrieved_docs[:k]
+        relevant_count = sum(1 for doc in top_k if doc in relevant_docs)
+        return relevant_count / len(relevant_docs)
+    
+    def mean_reciprocal_rank(self, retrieved_docs: List[str], relevant_docs: List[str]) -> float:
+        """
+        Calculate Mean Reciprocal Rank (MRR).
+        
+        Args:
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            
+        Returns:
+            MRR score
+        """
+        if not relevant_docs:
+            return 0.0
+        
+        for i, doc in enumerate(retrieved_docs):
+            if doc in relevant_docs:
+                return 1.0 / (i + 1)
+        return 0.0
+    
+    def normalized_dcg_at_k(self, retrieved_docs: List[str], relevant_docs: List[str], k: int = 5) -> float:
+        """
+        Calculate Normalized Discounted Cumulative Gain@K.
+        
+        Args:
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            k: Number of top results to consider
+            
+        Returns:
+            NDCG@K score
+        """
+        def dcg_at_k(relevance_scores: List[float], k: int) -> float:
+            relevance_scores = relevance_scores[:k]
+            return sum(score / np.log2(i + 2) for i, score in enumerate(relevance_scores))
+        
+        # Calculate relevance scores
+        relevance_scores = [1.0 if doc in relevant_docs else 0.0 for doc in retrieved_docs]
+        
+        # Calculate DCG
+        dcg = dcg_at_k(relevance_scores, k)
+        
+        # Calculate IDCG (ideal DCG)
+        ideal_relevance = [1.0] * min(len(relevant_docs), k)
+        idcg = dcg_at_k(ideal_relevance, k)
+        
+        return dcg / idcg if idcg > 0 else 0.0
+    
+    def evaluate_retrieval(self, retrieved_docs: List[str], relevant_docs: List[str], k_values: List[int] = [1, 3, 5, 10]) -> Dict[str, float]:
+        """
+        Evaluate retrieval performance with multiple metrics.
+        
+        Args:
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            k_values: List of k values to evaluate
+            
+        Returns:
+            Dictionary of retrieval metrics
+        """
+        metrics = {}
+        
+        for k in k_values:
+            metrics[f"precision_at_{k}"] = self.precision_at_k(retrieved_docs, relevant_docs, k)
+            metrics[f"recall_at_{k}"] = self.recall_at_k(retrieved_docs, relevant_docs, k)
+            metrics[f"ndcg_at_{k}"] = self.normalized_dcg_at_k(retrieved_docs, relevant_docs, k)
+        
+        metrics["mrr"] = self.mean_reciprocal_rank(retrieved_docs, relevant_docs)
+        
+        return metrics
+    
+    def evaluate_generation(self, reference: str, generated: str) -> Dict[str, float]:
+        """
+        Evaluate generation quality with multiple metrics.
+        
+        Args:
+            reference: Reference answer
+            generated: Generated answer
+            
+        Returns:
+            Dictionary of generation metrics
+        """
+        metrics = {}
+        
+        # ROUGE scores
+        rouge_scores = self.rouge_scorer.score(reference, generated)
+        metrics["rouge1"] = rouge_scores["rouge1"].fmeasure
+        metrics["rouge2"] = rouge_scores["rouge2"].fmeasure
+        metrics["rougeL"] = rouge_scores["rougeL"].fmeasure
+        
+        # BLEU score
+        try:
+            bleu_score = sentence_bleu([reference.split()], generated.split())
+            metrics["bleu"] = bleu_score
+        except Exception as e:
+            logger.warning(f"BLEU calculation failed: {e}")
+            metrics["bleu"] = 0.0
+        
+        # BERTScore
+        try:
+            P, R, F1 = bertscore([generated], [reference], lang="en")
+            metrics["bertscore_precision"] = P.mean().item()
+            metrics["bertscore_recall"] = R.mean().item()
+            metrics["bertscore_f1"] = F1.mean().item()
+        except Exception as e:
+            logger.warning(f"BERTScore calculation failed: {e}")
+            metrics["bertscore_precision"] = 0.0
+            metrics["bertscore_recall"] = 0.0
+            metrics["bertscore_f1"] = 0.0
+        
+        return metrics
+    
+    def calculate_faithfulness(self, answer: str, context: str, threshold: float = 0.7) -> float:
+        """
+        Calculate faithfulness score based on answer-context alignment.
+        
+        Args:
+            answer: Generated answer
+            context: Source context
+            threshold: Similarity threshold for claim support
+            
+        Returns:
+            Faithfulness score (0-1)
+        """
+        try:
+            # Get embeddings
+            answer_embedding = self.sentence_model.encode([answer])
+            context_embedding = self.sentence_model.encode([context])
+            
+            # Calculate similarity
+            similarity = cosine_similarity(answer_embedding, context_embedding)[0][0]
+            
+            # Apply threshold
+            return 1.0 if similarity >= threshold else similarity
+            
+        except Exception as e:
+            logger.error(f"Faithfulness calculation failed: {e}")
+            return 0.0
+    
+    def calculate_relevance(self, query: str, answer: str) -> float:
+        """
+        Calculate relevance score between query and answer.
+        
+        Args:
+            query: Input query
+            answer: Generated answer
+            
+        Returns:
+            Relevance score (0-1)
+        """
+        try:
+            # Get embeddings
+            query_embedding = self.sentence_model.encode([query])
+            answer_embedding = self.sentence_model.encode([answer])
+            
+            # Calculate similarity
+            similarity = cosine_similarity(query_embedding, answer_embedding)[0][0]
+            return similarity
+            
+        except Exception as e:
+            logger.error(f"Relevance calculation failed: {e}")
+            return 0.0
+    
+    def calculate_context_utilization(self, answer: str, context: str) -> float:
+        """
+        Calculate how much of the context is utilized in the answer.
+        
+        Args:
+            answer: Generated answer
+            context: Source context
+            
+        Returns:
+            Context utilization score (0-1)
+        """
+        try:
+            # Split into sentences
+            answer_sentences = [s.strip() for s in answer.split('.') if s.strip()]
+            context_sentences = [s.strip() for s in context.split('.') if s.strip()]
+            
+            if not answer_sentences or not context_sentences:
+                return 0.0
+            
+            # Calculate sentence-level similarities
+            answer_embeddings = self.sentence_model.encode(answer_sentences)
+            context_embeddings = self.sentence_model.encode(context_sentences)
+            
+            similarities = cosine_similarity(answer_embeddings, context_embeddings)
+            
+            # Find best matching context sentence for each answer sentence
+            max_similarities = np.max(similarities, axis=1)
+            
+            # Calculate utilization as average of best matches
+            utilization = np.mean(max_similarities)
+            return float(utilization)
+            
+        except Exception as e:
+            logger.error(f"Context utilization calculation failed: {e}")
+            return 0.0
+    
+    def evaluate_end_to_end(self, query: str, answer: str, context: str, 
+                           retrieved_docs: List[str] = None, relevant_docs: List[str] = None) -> Dict[str, float]:
+        """
+        Evaluate end-to-end RAG performance.
+        
+        Args:
+            query: Input query
+            answer: Generated answer
+            context: Retrieved context
+            retrieved_docs: List of retrieved document IDs
+            relevant_docs: List of relevant document IDs
+            
+        Returns:
+            Dictionary of end-to-end metrics
+        """
+        metrics = {}
+        
+        # Faithfulness
+        metrics["faithfulness"] = self.calculate_faithfulness(answer, context)
+        
+        # Relevance
+        metrics["relevance"] = self.calculate_relevance(query, answer)
+        
+        # Context utilization
+        metrics["context_utilization"] = self.calculate_context_utilization(answer, context)
+        
+        # Retrieval metrics (if provided)
+        if retrieved_docs and relevant_docs:
+            retrieval_metrics = self.evaluate_retrieval(retrieved_docs, relevant_docs)
+            metrics.update(retrieval_metrics)
+        
+        return metrics
+    
+    def evaluate_latency(self, start_time: float, end_time: float) -> Dict[str, float]:
+        """
+        Evaluate latency metrics.
+        
+        Args:
+            start_time: Start timestamp
+            end_time: End timestamp
+            
+        Returns:
+            Dictionary of latency metrics
+        """
+        total_time = end_time - start_time
+        
+        return {
+            "total_latency": total_time,
+            "latency_ms": total_time * 1000,
+            "throughput_qps": 1.0 / total_time if total_time > 0 else 0.0
+        }
+    
+    def comprehensive_evaluation(self, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Run comprehensive evaluation on multiple test cases.
+        
+        Args:
+            test_cases: List of test cases with query, answer, context, etc.
+            
+        Returns:
+            Comprehensive evaluation results
+        """
+        results = {
+            "individual_results": [],
+            "aggregate_metrics": {},
+            "summary": {}
+        }
+        
+        all_metrics = []
+        
+        for i, test_case in enumerate(test_cases):
+            start_time = time.time()
+            
+            # Extract test case data
+            query = test_case.get("query", "")
+            answer = test_case.get("answer", "")
+            context = test_case.get("context", "")
+            reference = test_case.get("reference", "")
+            retrieved_docs = test_case.get("retrieved_docs", [])
+            relevant_docs = test_case.get("relevant_docs", [])
+            
+            # Run evaluations
+            generation_metrics = self.evaluate_generation(reference, answer) if reference else {}
+            end_to_end_metrics = self.evaluate_end_to_end(query, answer, context, retrieved_docs, relevant_docs)
+            latency_metrics = self.evaluate_latency(start_time, time.time())
+            
+            # Combine metrics
+            case_metrics = {
+                "test_case_id": i,
+                "query": query,
+                **generation_metrics,
+                **end_to_end_metrics,
+                **latency_metrics
+            }
+            
+            results["individual_results"].append(case_metrics)
+            all_metrics.append(case_metrics)
+        
+        # Calculate aggregate metrics
+        if all_metrics:
+            numeric_keys = [k for k in all_metrics[0].keys() if isinstance(all_metrics[0][k], (int, float))]
+            
+            for key in numeric_keys:
+                values = [m[key] for m in all_metrics if key in m]
+                if values:
+                    results["aggregate_metrics"][key] = {
+                        "mean": np.mean(values),
+                        "std": np.std(values),
+                        "min": np.min(values),
+                        "max": np.max(values),
+                        "median": np.median(values)
+                    }
+        
+        # Generate summary
+        results["summary"] = {
+            "total_test_cases": len(test_cases),
+            "evaluation_timestamp": time.time(),
+            "model_used": self.model_name
+        }
+        
+        return results
+
+def run_evaluation_pipeline(test_queries: List[Dict], rag_system, faithfulness_scorer, llm=None) -> List[Dict]:
+    """
+    Run evaluation pipeline on test queries.
+    
+    Args:
+        test_queries: List of test queries
+        rag_system: RAG system for retrieval
+        faithfulness_scorer: Faithfulness scorer instance
+        llm: Optional LLM for answer generation
+        
+    Returns:
+        List of evaluation results
+    """
+    evaluator = RAGEvaluator()
+    results = []
+    
+    for query_data in test_queries:
+        query = query_data["query"]
+        expected_answer = query_data.get("expected_answer", "")
+        expected_sources = query_data.get("expected_sources", [])
+        
+        start_time = time.time()
+        
+        try:
+            # Retrieve relevant documents
+            retrieved_results = rag_system.hybrid_search(query, top_k=5)
+            retrieved_docs = [r["metadata"]["source_file"] for r in retrieved_results]
+            
+            # Generate context
+            context = "\n".join([r["content"] for r in retrieved_results])
+            
+            # Generate answer (if LLM provided)
+            if llm:
+                answer = llm.invoke(f"Context: {context}\nQuery: {query}")
+            else:
+                answer = f"Based on the context: {context[:200]}..."
+            
+            # Evaluate
+            retrieval_metrics = evaluator.evaluate_retrieval(retrieved_docs, expected_sources)
+            generation_metrics = evaluator.evaluate_generation(expected_answer, answer)
+            end_to_end_metrics = evaluator.evaluate_end_to_end(query, answer, context, retrieved_docs, expected_sources)
+            latency_metrics = evaluator.evaluate_latency(start_time, time.time())
+            
+            # Combine results
+            result = {
+                "query": query,
+                "answer": answer,
+                "context": context,
+                "retrieved_sources": retrieved_docs,
+                "expected_sources": expected_sources,
+                **retrieval_metrics,
+                **generation_metrics,
+                **end_to_end_metrics,
+                **latency_metrics
+            }
+            
+            results.append(result)
+            
+        except Exception as e:
+            logger.error(f"Evaluation failed for query '{query}': {e}")
+            results.append({
+                "query": query,
+                "error": str(e),
+                "success": False
+            })
+    
+    return results
+
+# Example usage
+if __name__ == "__main__":
+    # Initialize evaluator
+    evaluator = RAGEvaluator()
+    
+    # Example test case
+    test_case = {
+        "query": "How do I fix vlookup errors?",
+        "answer": "Check data types and table references for vlookup errors.",
+        "context": "VLOOKUP requires exact data types. Check table references and use FALSE for exact matches.",
+        "reference": "To fix vlookup errors, verify data types and table references.",
+        "retrieved_docs": ["excel_guide.md", "troubleshooting.xlsx"],
+        "relevant_docs": ["excel_guide.md", "troubleshooting.xlsx"]
+    }
+    
+    # Run evaluation
+    metrics = evaluator.evaluate_end_to_end(
+        test_case["query"],
+        test_case["answer"],
+        test_case["context"],
+        test_case["retrieved_docs"],
+        test_case["relevant_docs"]
+    )
+    
+    print("Evaluation Results:")
+    for metric, value in metrics.items():
+        print(f"{metric}: {value:.3f}")
+    
+    print("RAG evaluation test completed successfully!")

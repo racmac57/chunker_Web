@@ -1,0 +1,513 @@
+Please re-run:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+Then paste back:
+- Clone: …
+- Venv: …
+- Deps: …
+- Version: …
+- Key files present: …
+
+- I replaced the heredoc with a safe inline command and left the rest of the script unchanged. ```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+---
+
+**User**
+
+
+========================================
+INSTALLING v2.0.0 UNIFIED SYSTEM
+========================================
+
+
+=== CLONE ===
+Cloning into 'ClaudeExportFixer'...
+remote: Enumerating objects: 317, done. remote: Counting objects: 100% (317/317), done. remote: Compressing objects: 100% (247/247), done. remote: Total 317 (delta 102), reused 272 (delta 57), pack-reused 0 (from 0)
+Receiving objects: 100% (317/317), 2.25 MiB | 22.78 MiB/s, done. Resolving deltas: 100% (102/102), done. Clone: SUCCESS
+
+=== VENV ===
+Venv: CREATED
+
+=== DEPS ===
+Requirement already satisfied: pip in c:\dev\claudeexportfixer\venv\lib\site-packages (25.2)
+Collecting pip
+  Downloading pip-25.3-py3-none-any.whl.metadata (4.7 kB)
+Downloading pip-25.3-py3-none-any.whl (1.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 45.5 MB/s  0:00:00
+
+[notice] A new release of pip is available: 25.2 -> 25.3
+[notice] To update, run: python.exe -m pip install --upgrade pip
+ERROR: To modify pip, please run the following command:
+C:\Dev\ClaudeExportFixer\venv\Scripts\python.exe -m pip install --upgrade pip
+
+---
+
+**Cursor**
+
+I’ll fix the install step to use the virtualenv’s python -m pip so pip can upgrade and install cleanly, then you can re-run the script. ```powershell
+Write-Host "`n========================================"
+Write-Host "INSTALLING v2.0.0 UNIFIED SYSTEM"
+Write-Host "========================================`n"
+
+# 1) Ensure C:\Dev exists
+if (! (Test-Path "C:\Dev")) {
+    New-Item -ItemType Directory -Path "C:\Dev" -Force | Out-Null
+    Write-Host "Created C:\Dev"
+}
+
+# 2) Fresh clone
+Write-Host "`n=== CLONE ==="
+if (Test-Path "C:\Dev\ClaudeExportFixer") {
+    Write-Host "Existing C:\Dev\ClaudeExportFixer found. Removing for fresh clone..."
+    Remove-Item -Recurse -Force "C:\Dev\ClaudeExportFixer"
+}
+Push-Location "C:\Dev"
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+$cloneOk = Test-Path "C:\Dev\ClaudeExportFixer"
+if ($cloneOk) { Write-Host "Clone: SUCCESS" } else { Write-Host "Clone: FAILED"; Pop-Location; exit 1 }
+Pop-Location
+
+# 3) Create venv
+Write-Host "`n=== VENV ==="
+Push-Location "C:\Dev\ClaudeExportFixer"
+$py = "python"
+try { & $py -V *> $null } catch { $py = "py -3" }
+& $py -m venv venv
+if (Test-Path ".\venv\Scripts\Activate.ps1") { Write-Host "Venv: CREATED" } else { Write-Host "Venv: FAILED"; Pop-Location; exit 1 }
+
+# 4) Install dependencies
+Write-Host "`n=== DEPS ==="
+. .\venv\Scripts\Activate.ps1
+& .\venv\Scripts\python.exe -m pip install --upgrade pip
+$pipOut = & .\venv\Scripts\python.exe -m pip install -r requirements.txt 2>&1
+if ($LASTEXITCODE -eq 0) { Write-Host "Deps: INSTALLED" } else { Write-Host "Deps: FAILED"; $pipOut | Select-Object -First 50 | ForEach-Object { Write-Host $_ }; Pop-Location; exit 1 }
+
+# 5) Verify version and key files
+Write-Host "`n=== VERIFY ==="
+$ver = & python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+Write-Host ("Version: " + ($ver.Trim()))
+
+# Key files
+$key = @("config.json", "chunker_engine.py", "file_processors.py", "start_watchdog.py", "requirements.txt", "README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+
+Pop-Location
+
+Write-Host "`n========================================"
+Write-Host "INSTALLATION COMPLETE"
+Write-Host "========================================`n"
+```
+
+Please re-run Phase 4 with the updated script:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+Then paste back:
+- Clone: …
+- Venv: …
+- Deps: …
+- Version: …
+- Key files present: …
+
+I switched to using `.\venv\Scripts\python.exe -m pip …` so pip can upgrade and install correctly inside the venv. ```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+---
+
+**User**
+
+========================================
+INSTALLING v2.0.0 UNIFIED SYSTEM
+========================================
+
+
+=== CLONE ===
+Existing C:\Dev\ClaudeExportFixer found. Removing for fresh clone...
+Cloning into 'ClaudeExportFixer'... MB of 783.0 MB (110.8 MB/s)                                                      ]
+remote: Enumerating objects: 317, done. remote: Counting objects: 100% (317/317), done. remote: Compressing objects: 100% (247/247), done. remote: Total 317 (delta 102), reused 272 (delta 57), pack-reused 0 (from 0)
+Receiving objects: 100% (317/317), 2.25 MiB | 20.54 MiB/s, done. Clone: SUCCESS
+
+=== VENV ===
+Venv: CREATED
+
+=== DEPS ===
+Requirement already satisfied: pip in c:\dev\claudeexportfixer\venv\lib\site-packages (25.2)                         ]
+Collecting pip
+  Using cached pip-25.3-py3-none-any.whl.metadata (4.7 kB)
+Using cached pip-25.3-py3-none-any.whl (1.8 MB)
+Installing collected packages: pip
+  Attempting uninstall: pip
+    Found existing installation: pip 25.2
+    Uninstalling pip-25.2:
+      Successfully uninstalled pip-25.2
+Successfully installed pip-25.3
+
+---
+
+**Cursor**
+
+Looks good so far—pip upgraded inside the venv. Please paste the remaining script output so I can confirm Phase 4:
+
+- “Deps: …” line (after installing requirements.txt)
+- “Version: …” line (should be 2.0.0)
+- “Key files present: …”
+
+If the script stopped early, run these quick checks and paste results:
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+```
+And:
+```powershell
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+```
+
+```powershell
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+---
+
+**User**
+
+C:\Dev\ClaudeExportFixer>.\venv\Scripts\python.exe -m pip install -r requirements.txt
+Requirement already satisfied: ijson>=3.2.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 2)) (3.4.0.post0)
+Requirement already satisfied: watchdog>=2.1.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 3)) (6.0.0)
+Collecting nltk>=3.8 (from -r requirements.txt (line 4))
+  Using cached nltk-3.9.2-py3-none-any.whl.metadata (3.2 kB)
+Requirement already satisfied: numpy>=1.24.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 5)) (2.3.4)
+Requirement already satisfied: openpyxl>=3.1.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 8)) (3.1.5)
+Requirement already satisfied: PyPDF2>=3.0.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 9)) (3.0.1)
+Requirement already satisfied: python-docx>=0.8.11 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 10)) (1.2.0)
+Requirement already satisfied: PyYAML>=6.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 11)) (6.0.3)
+Collecting sentence-transformers>=2.2.0 (from -r requirements.txt (line 14))
+  Using cached sentence_transformers-5.1.2-py3-none-any.whl.metadata (16 kB)
+Requirement already satisfied: pytest>=7.4.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from -r requirements.txt (line 21)) (8.4.2)
+Requirement already satisfied: click in c:\dev\claudeexportfixer\venv\lib\site-packages (from nltk>=3.8->-r requirements.txt (line 4)) (8.3.0)
+Requirement already satisfied: joblib in c:\dev\claudeexportfixer\venv\lib\site-packages (from nltk>=3.8->-r requirements.txt (line 4)) (1.5.2)
+Requirement already satisfied: regex>=2021.8.3 in c:\dev\claudeexportfixer\venv\lib\site-packages (from nltk>=3.8->-r requirements.txt (line 4)) (2025.10.23)
+Requirement already satisfied: tqdm in c:\dev\claudeexportfixer\venv\lib\site-packages (from nltk>=3.8->-r requirements.txt (line 4)) (4.67.1)
+Requirement already satisfied: et-xmlfile in c:\dev\claudeexportfixer\venv\lib\site-packages (from openpyxl>=3.1.0->-r requirements.txt (line 8)) (2.0.0)
+Requirement already satisfied: lxml>=3.1.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from python-docx>=0.8.11->-r requirements.txt (line 10)) (6.0.2)
+Requirement already satisfied: typing_extensions>=4.9.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from python-docx>=0.8.11->-r requirements.txt (line 10)) (4.15.0)
+Collecting transformers<5.0.0,>=4.41.0 (from sentence-transformers>=2.2.0->-r requirements.txt (line 14))
+  Using cached transformers-4.57.1-py3-none-any.whl.metadata (43 kB)
+Requirement already satisfied: torch>=1.11.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (2.9.0)
+Collecting scikit-learn (from sentence-transformers>=2.2.0->-r requirements.txt (line 14))
+  Using cached scikit_learn-1.7.2-cp313-cp313-win_amd64.whl.metadata (11 kB)
+Requirement already satisfied: scipy in c:\dev\claudeexportfixer\venv\lib\site-packages (from sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (1.16.3)
+Collecting huggingface-hub>=0.20.0 (from sentence-transformers>=2.2.0->-r requirements.txt (line 14))
+  Using cached huggingface_hub-1.0.1-py3-none-any.whl.metadata (13 kB)
+Requirement already satisfied: Pillow in c:\dev\claudeexportfixer\venv\lib\site-packages (from sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (12.0.0)
+Requirement already satisfied: filelock in c:\dev\claudeexportfixer\venv\lib\site-packages (from transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.20.0)
+  Using cached huggingface_hub-0.36.0-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: packaging>=20.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (25.0)
+Requirement already satisfied: requests in c:\dev\claudeexportfixer\venv\lib\site-packages (from transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (2.32.5)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14))
+  Using cached tokenizers-0.22.1-cp39-abi3-win_amd64.whl.metadata (6.9 kB)
+Requirement already satisfied: safetensors>=0.4.3 in c:\dev\claudeexportfixer\venv\lib\site-packages (from transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (0.6.2)
+Requirement already satisfied: fsspec>=2023.5.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from huggingface-hub>=0.20.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (2025.9.0)
+Requirement already satisfied: colorama>=0.4 in c:\dev\claudeexportfixer\venv\lib\site-packages (from pytest>=7.4.0->-r requirements.txt (line 21)) (0.4.6)
+Requirement already satisfied: iniconfig>=1 in c:\dev\claudeexportfixer\venv\lib\site-packages (from pytest>=7.4.0->-r requirements.txt (line 21)) (2.3.0)
+Requirement already satisfied: pluggy<2,>=1.5 in c:\dev\claudeexportfixer\venv\lib\site-packages (from pytest>=7.4.0->-r requirements.txt (line 21)) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in c:\dev\claudeexportfixer\venv\lib\site-packages (from pytest>=7.4.0->-r requirements.txt (line 21)) (2.19.2)
+Requirement already satisfied: sympy>=1.13.3 in c:\dev\claudeexportfixer\venv\lib\site-packages (from torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (1.14.0)
+Requirement already satisfied: networkx>=2.5.1 in c:\dev\claudeexportfixer\venv\lib\site-packages (from torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.5)
+Requirement already satisfied: jinja2 in c:\dev\claudeexportfixer\venv\lib\site-packages (from torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.1.6)
+Requirement already satisfied: setuptools in c:\dev\claudeexportfixer\venv\lib\site-packages (from torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (80.9.0)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from sympy>=1.13.3->torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (1.3.0)
+Requirement already satisfied: MarkupSafe>=2.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from jinja2->torch>=1.11.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.0.3)
+Requirement already satisfied: charset_normalizer<4,>=2 in c:\dev\claudeexportfixer\venv\lib\site-packages (from requests->transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.4.4)
+Requirement already satisfied: idna<4,>=2.5 in c:\dev\claudeexportfixer\venv\lib\site-packages (from requests->transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.11)
+Requirement already satisfied: urllib3<3,>=1.21.1 in c:\dev\claudeexportfixer\venv\lib\site-packages (from requests->transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in c:\dev\claudeexportfixer\venv\lib\site-packages (from requests->transformers<5.0.0,>=4.41.0->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (2025.10.5)
+Requirement already satisfied: threadpoolctl>=3.1.0 in c:\dev\claudeexportfixer\venv\lib\site-packages (from scikit-learn->sentence-transformers>=2.2.0->-r requirements.txt (line 14)) (3.6.0)
+Using cached nltk-3.9.2-py3-none-any.whl (1.5 MB)
+Using cached sentence_transformers-5.1.2-py3-none-any.whl (488 kB)
+Using cached transformers-4.57.1-py3-none-any.whl (12.0 MB)
+Using cached huggingface_hub-0.36.0-py3-none-any.whl (566 kB)
+Using cached tokenizers-0.22.1-cp39-abi3-win_amd64.whl (2.7 MB)
+Using cached scikit_learn-1.7.2-cp313-cp313-win_amd64.whl (8.7 MB)
+Installing collected packages: scikit-learn, nltk, huggingface-hub, tokenizers, transformers, sentence-transformers
+Successfully installed huggingface-hub-0.36.0 nltk-3.9.2 scikit-learn-1.7.2 sentence-transformers-5.1.2 tokenizers-0.22.1 transformers-4.57.1
+
+C:\Dev\ClaudeExportFixer>python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+  File "<string>", line 1
+    import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))Test-Path
+                                                                                 ^^^^
+SyntaxError: invalid syntax
+
+C:\Dev\ClaudeExportFixer>Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+'Test-Path' is not recognized as an internal or external command,
+operable program or batch file. ---
+
+**Cursor**
+
+You accidentally ran two commands on one line and used a PowerShell cmdlet in cmd. Run them separately in PowerShell:
+
+- In PowerShell:
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+```
+
+- Verify key files (PowerShell):
+```powershell
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+Optional detailed view:
+```powershell
+Get-Item config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md | Select-Object Name,Length
+```
+
+Please paste back:
+- The version printed by the python command (expect: 2.0.0)
+- The Test-Path results for the 6 files
+
+Once confirmed, Phase 4 is complete and I’ll wait for your approval before Phase 5. ```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+```
+
+```powershell
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+```powershell
+Get-Item config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md | Select-Object Name,Length
+```
+
+---
+
+**User**
+
+C:\Dev\ClaudeExportFixer>Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+'Test-Path' is not recognized as an internal or external command,
+operable program or batch file. C:\Dev\ClaudeExportFixer>cd C:\Dev\ClaudeExportFixer
+
+C:\Dev\ClaudeExportFixer>.\venv\Scripts\Activate.ps1
+
+C:\Dev\ClaudeExportFixer>python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+✅ Loaded configuration from C:\Dev\ClaudeExportFixer\config.json
+2.0.0
+
+---
+
+**Cursor**
+
+Phase 4 looks good. - Clone: SUCCESS
+- Venv: CREATED
+- Deps: INSTALLED (requirements.txt completed)
+- Version: 2.0.0
+
+Optional key files check (run in PowerShell):
+```powershell
+cd C:\Dev\ClaudeExportFixer
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+Proceed to Phase 5 (Integrate preserved data)? I’ll move unprocessed files, databases, processed outputs, and legacy docs/configs into the new `C:\Dev\ClaudeExportFixer` structure, then report counts and stop. ```powershell
+cd C:\Dev\ClaudeExportFixer
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+---
+
+**User**
+
+Phase 4 looks good. - Clone: SUCCESS
+- Venv: CREATED
+- Deps: INSTALLED (requirements.txt completed)
+- Version: 2.0.0
+
+Optional key files check (run in PowerShell):
+```powershell
+cd C:\Dev\ClaudeExportFixer
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+Proceed to Phase 5 (Integrate preserved data)? I’ll move unprocessed files, databases, processed outputs, and legacy docs/configs into the new `C:\Dev\ClaudeExportFixer` structure, then report counts and stop. ---
+
+**Cursor**
+
+Confirm to proceed with Phase 5 (Integrate preserved data)? If yes, I’ll:
+- Copy unprocessed → `C:\Dev\ClaudeExportFixer\01_input`
+- Copy databases → `C:\Dev\ClaudeExportFixer\03_knowledge_base`
+- Copy processed → `C:\Dev\ClaudeExportFixer\04_archive\from_old_desktop_[timestamp]`
+- Copy legacy configs/docs → `docs\legacy_configs` and `docs\legacy_docs`
+
+Then I’ll report file counts and stop before Phase 6. ---
+
+**User**
+
+Yes, proceed with Phase 5 (Integrate Preserved Data). Please integrate the data from the backup C:\Desktop_Chunker_Backup_20251029_144807 into the new system:
+
+1. Unprocessed files → C:\Dev\ClaudeExportFixer\01_input\
+2. Database files → C:\Dev\ClaudeExportFixer\03_knowledge_base\
+3. Processed outputs → C:\Dev\ClaudeExportFixer\04_archive\from_old_desktop_20251029_144807\
+4. Config files → C:\Dev\ClaudeExportFixer\docs\legacy_configs\
+5. Documentation → C:\Dev\ClaudeExportFixer\docs\legacy_docs\
+
+After integration, show me:
+- What was moved and where
+- File counts in each destination folder
+- Any files that couldn't be moved
+- Summary of the new system structure
+
+Then proceed to Phase 6 (Final Verification). ---
+
+**Cursor**
+
+I'll integrate preserved data from the specified backup into the new system, then run final verification. I’ll provide a clean Phase 5 script for you to run locally to avoid the inline parsing issues. Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE5_INTEGRATE.ps1
+
+```powershell
+$preserveRoot = "C:\Desktop_Chunker_Backup_20251029_144807"
+$newSystemPath = "C:\Dev\ClaudeExportFixer"
+$timestamp = "20251029_144807"
+
+Write-Host "`n========================================"
+Write-Host "INTEGRATING PRESERVED DATA"
+Write-Host "========================================`n"
+
+$errors = @()
+
+# 1) Unprocessed -> 01_input
+Write-Host "Moving unprocessed files..."
+$unprocessedSource = Join-Path $preserveRoot "unprocessed"
+if (Test-Path $unprocessedSource) {
+    $inputDest = Join-Path $newSystemPath "01_input"
+    New-Item -ItemType Directory -Path $inputDest -Force | Out-Null
+    Get-ChildItem $unprocessedSource -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $destPath = Join-Path $inputDest $_.Name
+            if (Test-Path $destPath) { $destPath = Join-Path $inputDest ("${timestamp}_" + $_.Name) }
+            Copy-Item $_.FullName -Destination $destPath -Force
+            Write-Host ("   Copied: " + $_.Name)
+        } catch { $errors += "Unprocessed: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $inputCount = (Get-ChildItem $inputDest -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total in 01_input: " + $inputCount)
+} else {
+    Write-Host "   No unprocessed source found"
+}
+
+# 2) Databases -> 03_knowledge_base
+Write-Host "`nMoving databases..."
+$dbSource = Join-Path $preserveRoot "databases"
+if (Test-Path $dbSource) {
+    $kbDest = Join-Path $newSystemPath "03_knowledge_base"
+    New-Item -ItemType Directory -Path $kbDest -Force | Out-Null
+    Get-ChildItem $dbSource -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Copy-Item $_.FullName -Destination (Join-Path $kbDest $_.Name) -Force
+            Write-Host ("   Copied DB: " + $_.Name)
+        } catch { $errors += "DB: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $kbCount = (Get-ChildItem $kbDest -Filter "*.db" -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total DBs in 03_knowledge_base: " + $kbCount)
+} else {
+    Write-Host "   No database source found"
+}
+
+# 3) Processed outputs -> 04_archive/from_old_desktop_[timestamp]
+Write-Host "`nOrganizing processed outputs..."
+$processedSource = Join-Path $preserveRoot "processed"
+if (Test-Path $processedSource) {
+    $archiveDest = Join-Path $newSystemPath ("04_archive\from_old_desktop_" + $timestamp)
+    New-Item -ItemType Directory -Path $archiveDest -Force | Out-Null
+    Copy-Item (Join-Path $processedSource "*") -Destination $archiveDest -Recurse -Force -ErrorAction SilentlyContinue
+    $procCount = (Get-ChildItem $archiveDest -Recurse -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total processed archived: " + $procCount)
+} else {
+    Write-Host "   No processed source found"
+}
+
+# 4) Configs -> docs/legacy_configs
+Write-Host "`nSaving legacy configs..."
+$configSource = Join-Path $preserveRoot "configs"
+if (Test-Path $configSource) {
+    $configDest = Join-Path $newSystemPath "docs\legacy_configs"
+    New-Item -ItemType Directory -Path $configDest -Force | Out-Null
+    Get-ChildItem $configSource -Filter "*.json" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Copy-Item $_.FullName -Destination (Join-Path $configDest $_.Name) -Force
+            Write-Host ("   Copied: " + $_.Name)
+        } catch { $errors += "Config: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $cfgCount = (Get-ChildItem $configDest -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total legacy configs: " + $cfgCount)
+} else {
+    Write-Host "   No legacy config source found"
+}
+
+# 5) Docs -> docs/legacy_docs
+Write-Host "`nSaving legacy docs..."
+$docsSource = Join-Path $preserveRoot "docs"
+if (Test-Path $docsSource) {
+    $docsDest = Join-Path $newSystemPath "docs\legacy_docs"
+    New-Item -ItemType Directory -Path $docsDest -Force | Out-Null
+    Copy-Item (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force -ErrorAction SilentlyContinue
+    $docsCount = (Get-ChildItem $docsDest -Recurse -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total legacy docs: " + $docsCount)
+} else {
+    Write-Host "   No legacy docs source found"
+}
+
+Write-Host "`n========================================"
+Write-Host "INTEGRATION COMPLETE"
+Write-Host "========================================`n"
+
+Write-Host "Destinations and counts:"
+Write-Host (" - 01_input: " + ((Get-ChildItem (Join-Path $newSystemPath "01_input") -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - 03_knowledge_base: " + ((Get-ChildItem (Join-Path $newSystemPath "03_knowledge_base") -Filter "*.db" -ErrorAction SilentlyContinue).Count))
+Write-Host (" - 04_archive/from_old_desktop_" + $timestamp + ": " + ((Get-ChildItem (Join-Path $newSystemPath ("04_archive\from_old_desktop_" + $timestamp)) -Recurse -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - docs/legacy_configs: " + ((Get-ChildItem (Join-Path $newSystemPath "docs\legacy_configs") -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - docs/legacy_docs: " + ((Get-ChildItem (Join-Path $newSystemPath "docs\legacy_docs") -Recurse -File -ErrorAction SilentlyContinue).Count))
+
+if ($errors.Count -gt 0) {
+    Write-Host "`nErrors encountered:"
+    $errors | ForEach-Object { Write-Host ("   - " + $_) }
+} else {
+    Write-Host "`nNo errors encountered." }
+
+Write-Host "`nNew System Summary:"
+Write-Host ("   Location: " + $newSystemPath)
+$inputCount = (Get-ChildItem (Join-Path $newSystemPath "01_input") -File -ErrorAction SilentlyContinue).Count
+$kbCount = (Get-ChildItem (Join-Path $newSystemPath "03_knowledge_base") -Filter "*.db" -ErrorAction SilentlyContinue).Count
+$archiveFiles = (Get-ChildItem (Join-Path $newSystemPath "04_archive") -Recurse -File -ErrorAction SilentlyContinue).Count
+Write-Host ("   Files in input: " + $inputCount)
+Write-Host ("   Knowledge bases: " + $kbCount)
+Write-Host ("   Archived files: " + $archiveFiles)
+```
+
+Run it:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE5_INTEGRATE.ps1"
+```
+
+Please paste back:
+- The “Destinations and counts” section
+- Any “Errors encountered” lines (if any)
+- The “New System Summary” lines
+
+Then I’ll immediately run Phase 6 (Final Verification) for you.

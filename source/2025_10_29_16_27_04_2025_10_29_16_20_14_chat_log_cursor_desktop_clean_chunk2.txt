@@ -1,0 +1,807 @@
+Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE2_PRESERVE.ps1
+
+```powershell
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$preserveRoot = "C:\Desktop_Chunker_Backup_$timestamp"
+New-Item -ItemType Directory -Path $preserveRoot -Force | Out-Null
+
+Write-Host "`n========================================"
+Write-Host "PRESERVING DESKTOP DATA"
+Write-Host "========================================`n"
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = Split-Path $dir -Leaf
+        Write-Host "Processing: $dir"
+
+        # Unprocessed
+        @("01_input","02_data") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $files = Get-ChildItem $sourceDir -File -ErrorAction SilentlyContinue
+                if ($files) {
+                    $destDir = Join-Path $preserveRoot ("unprocessed\" + $dirName + "_" + $_)
+                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                    Copy-Item ($sourceDir + "\*") -Destination $destDir -Recurse -Force
+                    Write-Host ("   Saved unprocessed: {0} ({1})" -f $_, $files.Count)
+                }
+            }
+        }
+
+        # Processed outputs
+        @("02_output","04_output") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $destDir = Join-Path $preserveRoot ("processed\" + $dirName + "_" + $_)
+                Copy-Item $sourceDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+                $fileCount = (Get-ChildItem $destDir -Recurse -File -ErrorAction SilentlyContinue).Count
+                if ($fileCount -gt 0) {
+                    Write-Host ("   Saved processed: {0} ({1})" -f $_, $fileCount)
+                }
+            }
+        }
+
+        # Knowledge bases
+        $kbDir = Join-Path $dir "03_knowledge_base"
+        if (Test-Path $kbDir) {
+            $destDir = Join-Path $preserveRoot ("knowledge_bases\" + $dirName)
+            Copy-Item $kbDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   Saved knowledge base"
+        }
+
+        # Databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        foreach ($db in $dbs) {
+            $destPath = Join-Path $preserveRoot ("databases\" + $dirName + "_" + $db.Name)
+            New-Item -ItemType Directory -Path (Split-Path $destPath) -Force | Out-Null
+            Copy-Item $db.FullName -Destination $destPath -Force
+            Write-Host ("   Saved database: {0}" -f $db.Name)
+        }
+
+        # Docs
+        $docs = Get-ChildItem $dir -Filter "*.md" -File -ErrorAction SilentlyContinue
+        if ($docs) {
+            $destDir = Join-Path $preserveRoot ("docs\" + $dirName)
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item $docs -Destination $destDir -Force
+            Write-Host ("   Saved documentation: {0}" -f $docs.Count)
+        }
+
+        # Config
+        $cfg = Join-Path $dir "config.json"
+        if (Test-Path $cfg) {
+            $destDir = Join-Path $preserveRoot "configs"
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item $cfg -Destination (Join-Path $destDir ($dirName + "_config.json")) -Force
+            Write-Host "   Saved config.json"
+        }
+    }
+}
+
+Write-Host "`n========================================"
+Write-Host "DATA PRESERVATION COMPLETE"
+Write-Host "========================================"
+Write-Host ("Backup location: {0}`n" -f $preserveRoot)
+
+$backupSize = (Get-ChildItem $preserveRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+$backupFiles = (Get-ChildItem $preserveRoot -Recurse -File).Count
+Write-Host "Backup stats:"
+Write-Host ("   Files: {0}" -f $backupFiles)
+Write-Host ("   Size: {0} MB`n" -f ([math]::Round($backupSize, 2)))
+```
+
+Run it:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE2_PRESERVE.ps1"
+```
+
+Please paste back:
+- “Backup location:” line
+- “Backup stats:” lines
+- A few “Saved …” lines showing what got preserved
+
+I’ll then mark Phase 2 complete and await your approval before Phase 3. ```powershell
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$preserveRoot = "C:\Desktop_Chunker_Backup_$timestamp"
+New-Item -ItemType Directory -Path $preserveRoot -Force | Out-Null
+
+Write-Host "`n========================================"
+Write-Host "PRESERVING DESKTOP DATA"
+Write-Host "========================================`n"
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $dirName = Split-Path $dir -Leaf
+        Write-Host "Processing: $dir"
+
+        # Unprocessed
+        @("01_input","02_data") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $files = Get-ChildItem $sourceDir -File -ErrorAction SilentlyContinue
+                if ($files) {
+                    $destDir = Join-Path $preserveRoot ("unprocessed\" + $dirName + "_" + $_)
+                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                    Copy-Item ($sourceDir + "\*") -Destination $destDir -Recurse -Force
+                    Write-Host ("   Saved unprocessed: {0} ({1})" -f $_, $files.Count)
+                }
+            }
+        }
+
+        # Processed outputs
+        @("02_output","04_output") | ForEach-Object {
+            $sourceDir = Join-Path $dir $_
+            if (Test-Path $sourceDir) {
+                $destDir = Join-Path $preserveRoot ("processed\" + $dirName + "_" + $_)
+                Copy-Item $sourceDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+                $fileCount = (Get-ChildItem $destDir -Recurse -File -ErrorAction SilentlyContinue).Count
+                if ($fileCount -gt 0) {
+                    Write-Host ("   Saved processed: {0} ({1})" -f $_, $fileCount)
+                }
+            }
+        }
+
+        # Knowledge bases
+        $kbDir = Join-Path $dir "03_knowledge_base"
+        if (Test-Path $kbDir) {
+            $destDir = Join-Path $preserveRoot ("knowledge_bases\" + $dirName)
+            Copy-Item $kbDir -Destination $destDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   Saved knowledge base"
+        }
+
+        # Databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        foreach ($db in $dbs) {
+            $destPath = Join-Path $preserveRoot ("databases\" + $dirName + "_" + $db.Name)
+            New-Item -ItemType Directory -Path (Split-Path $destPath) -Force | Out-Null
+            Copy-Item $db.FullName -Destination $destPath -Force
+            Write-Host ("   Saved database: {0}" -f $db.Name)
+        }
+
+        # Docs
+        $docs = Get-ChildItem $dir -Filter "*.md" -File -ErrorAction SilentlyContinue
+        if ($docs) {
+            $destDir = Join-Path $preserveRoot ("docs\" + $dirName)
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item $docs -Destination $destDir -Force
+            Write-Host ("   Saved documentation: {0}" -f $docs.Count)
+        }
+
+        # Config
+        $cfg = Join-Path $dir "config.json"
+        if (Test-Path $cfg) {
+            $destDir = Join-Path $preserveRoot "configs"
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            Copy-Item $cfg -Destination (Join-Path $destDir ($dirName + "_config.json")) -Force
+            Write-Host "   Saved config.json"
+        }
+    }
+}
+
+Write-Host "`n========================================"
+Write-Host "DATA PRESERVATION COMPLETE"
+Write-Host "========================================"
+Write-Host ("Backup location: {0}`n" -f $preserveRoot)
+
+$backupSize = (Get-ChildItem $preserveRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+$backupFiles = (Get-ChildItem $preserveRoot -Recurse -File).Count
+Write-Host "Backup stats:"
+Write-Host ("   Files: {0}" -f $backupFiles)
+Write-Host ("   Size: {0} MB`n" -f ([math]::Round($backupSize, 2)))
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE2_PRESERVE.ps1"
+```
+
+---
+
+**User**
+
+Processing: C:\Dev\ClaudeExportFixer
+   Saved unprocessed: 01_input (2)
+   Saved processed: 02_output (1)
+   Saved knowledge base
+   Saved documentation: 5
+Processing: C:\Dev\Chunker
+   Saved database: chunker_tracking.db
+   Saved documentation: 2
+Processing: C:\Dev\Chat_Log_Transcript
+   Saved documentation: 1
+Processing: C:\Users\carucci_r\Documents\chat_log_processor
+Processing: C:\_chunker
+
+========================================
+DATA PRESERVATION COMPLETE
+========================================
+Backup location: C:\Desktop_Chunker_Backup_20251029_144807
+
+Backup stats:
+   Files: 13
+   Size: 0.21 MB
+
+---
+
+**Cursor**
+
+Great—Phase 2 completed successfully. - **Backup location**: `C:\Desktop_Chunker_Backup_20251029_144807`
+- **Backup stats**: Files: 13, Size: 0.21 MB
+- **Preserved (highlights)**:
+  - From `C:\Dev\ClaudeExportFixer`: `01_input` (2), `02_output` (1), knowledge base, docs (5)
+  - From `C:\Dev\Chunker`: database `chunker_tracking.db`, docs (2)
+  - From `C:\Dev\Chat_Log_Transcript`: docs (1)
+
+Would you like me to proceed to Phase 3 (Archive old directories)? I will move (not delete) the five directories to a timestamped archive folder and then report which were moved and the archive path. ---
+
+**User**
+
+[1 tool called]
+
+Great—Phase 2 completed successfully. - **Backup location**: `C:\Desktop_Chunker_Backup_20251029_144807`
+- **Backup stats**: Files: 13, Size: 0.21 MB
+- **Preserved (highlights)**:
+  - From `C:\Dev\ClaudeExportFixer`: `01_input` (2), `02_output` (1), knowledge base, docs (5)
+  - From `C:\Dev\Chunker`: database `chunker_tracking.db`, docs (2)
+  - From `C:\Dev\Chat_Log_Transcript`: docs (1)
+
+Would you like me to proceed to Phase 3 (Archive old directories)? I will move (not delete) the five directories to a timestamped archive folder and then report which were moved and the archive path. ---
+
+**Cursor**
+
+Please confirm: proceed with Phase 3 (Archive old directories)? - I will move (not delete) the 5 directories into a timestamped archive folder and then report the archive path and which directories were moved. ---
+
+**User**
+
+Yes, proceed with Phase 3 (Archive Old Directories). Please move (not delete) all 5 directories to the timestamped archive folder:
+1. `C:\Dev\ClaudeExportFixer`
+2. `C:\Dev\Chunker`
+3. `C:\Dev\Chat_Log_Transcript`
+4. `C:\Users\carucci_r\Documents\chat_log_processor`
+5. `C:\_chunker`
+
+After archiving, show me:
+- Archive location
+- Which directories were successfully moved
+- Which directories (if any) couldn't be moved
+- Verification that the original locations are now empty
+
+Then STOP and wait for my approval before Phase 4. "**
+
+---
+
+After Phase 3, you'll have a clean slate on your desktop, ready for the fresh v2.0.0 installation in Phase 4! 🚀
+
+---
+
+**Cursor**
+
+I'll begin Phase 3 now: I'll move the five directories into a timestamped archive folder, then verify and report successes, failures, and that the originals are gone. Please run this Phase 3 archiving script locally to move the five directories into a timestamped archive and show results. Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE3_ARCHIVE.ps1
+
+```powershell
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$archiveRoot = "C:\Old_Desktop_Chunkers_Archive_$timestamp"
+New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
+
+Write-Host "`n========================================"
+Write-Host "ARCHIVING OLD DIRECTORIES"
+Write-Host "========================================`n"
+
+$moved = @()
+$failed = @()
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $safeName = ($dir -replace '[:\\]', '_')
+        $archivePath = Join-Path $archiveRoot $safeName
+        Write-Host "Archiving: $dir"
+        try {
+            Move-Item -Path $dir -Destination $archivePath -Force -ErrorAction Stop
+            if (Test-Path $archivePath) {
+                Write-Host "   Moved to: $archivePath"
+                $moved += [PSCustomObject]@{ Directory = $dir; ArchivedTo = $archivePath }
+            } else {
+                Write-Host "   Failed to move (unknown error)"
+                $failed += [PSCustomObject]@{ Directory = $dir; Reason = 'Unknown' }
+            }
+        } catch {
+            Write-Host "   Failed to move: $($_.Exception.Message)"
+            $failed += [PSCustomObject]@{ Directory = $dir; Reason = $_.Exception.Message }
+        }
+    } else {
+        Write-Host "Not found: $dir"
+        $failed += [PSCustomObject]@{ Directory = $dir; Reason = 'Not found' }
+    }
+}
+
+Write-Host "`n========================================"
+Write-Host "ARCHIVING COMPLETE"
+Write-Host "========================================"
+Write-Host "Archive location: $archiveRoot"
+
+Write-Host "`nMoved:"
+if ($moved.Count -gt 0) { $moved | Format-Table -AutoSize } else { Write-Host "  (none)" }
+
+Write-Host "`nFailed:"
+if ($failed.Count -gt 0) { $failed | Format-Table -AutoSize } else { Write-Host "  (none)" }
+
+Write-Host "`nVerifying cleanup:"
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "  Still exists: $dir"
+    } else {
+        Write-Host "  Removed: $dir"
+    }
+}
+```
+
+Run it:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE3_ARCHIVE.ps1"
+```
+
+Please paste back:
+- Archive location line
+- The “Moved” table
+- Any “Failed” entries (if present)
+- The “Verifying cleanup” lines
+
+I’ll stop after reviewing your results and wait for your approval before Phase 4. ```powershell
+$desktopDirs = @(
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\_chunker"
+)
+
+$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$archiveRoot = "C:\Old_Desktop_Chunkers_Archive_$timestamp"
+New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
+
+Write-Host "`n========================================"
+Write-Host "ARCHIVING OLD DIRECTORIES"
+Write-Host "========================================`n"
+
+$moved = @()
+$failed = @()
+
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        $safeName = ($dir -replace '[:\\]', '_')
+        $archivePath = Join-Path $archiveRoot $safeName
+        Write-Host "Archiving: $dir"
+        try {
+            Move-Item -Path $dir -Destination $archivePath -Force -ErrorAction Stop
+            if (Test-Path $archivePath) {
+                Write-Host "   Moved to: $archivePath"
+                $moved += [PSCustomObject]@{ Directory = $dir; ArchivedTo = $archivePath }
+            } else {
+                Write-Host "   Failed to move (unknown error)"
+                $failed += [PSCustomObject]@{ Directory = $dir; Reason = 'Unknown' }
+            }
+        } catch {
+            Write-Host "   Failed to move: $($_.Exception.Message)"
+            $failed += [PSCustomObject]@{ Directory = $dir; Reason = $_.Exception.Message }
+        }
+    } else {
+        Write-Host "Not found: $dir"
+        $failed += [PSCustomObject]@{ Directory = $dir; Reason = 'Not found' }
+    }
+}
+
+Write-Host "`n========================================"
+Write-Host "ARCHIVING COMPLETE"
+Write-Host "========================================"
+Write-Host "Archive location: $archiveRoot"
+
+Write-Host "`nMoved:"
+if ($moved.Count -gt 0) { $moved | Format-Table -AutoSize } else { Write-Host "  (none)" }
+
+Write-Host "`nFailed:"
+if ($failed.Count -gt 0) { $failed | Format-Table -AutoSize } else { Write-Host "  (none)" }
+
+Write-Host "`nVerifying cleanup:"
+foreach ($dir in $desktopDirs) {
+    if (Test-Path $dir) {
+        Write-Host "  Still exists: $dir"
+    } else {
+        Write-Host "  Removed: $dir"
+    }
+}
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE3_ARCHIVE.ps1"
+```
+
+---
+
+**User**
+
+
+========================================
+ARCHIVING OLD DIRECTORIES
+========================================
+
+Archiving: C:\Dev\ClaudeExportFixer
+   Moved to: C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_ClaudeExportFixer
+Archiving: C:\Dev\Chunker
+   Moved to: C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_Chunker
+Archiving: C:\Dev\Chat_Log_Transcript
+   Moved to: C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_Chat_Log_Transcript
+Archiving: C:\Users\carucci_r\Documents\chat_log_processor
+   Moved to: C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Users_carucci_r_Documents_chat_log_processor
+Archiving: C:\_chunker
+   Moved to: C:\Old_Desktop_Chunkers_Archive_20251029_145528\C___chunker
+
+========================================
+ARCHIVING COMPLETE
+========================================
+Archive location: C:\Old_Desktop_Chunkers_Archive_20251029_145528
+
+Moved:
+
+Directory                                       ArchivedTo
+---------                                       ----------
+C:\Dev\ClaudeExportFixer                        C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_ClaudeExportFixer
+C:\Dev\Chunker                                  C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_Chunker
+C:\Dev\Chat_Log_Transcript                      C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Dev_Chat_Log_Transcript
+C:\Users\carucci_r\Documents\chat_log_processor C:\Old_Desktop_Chunkers_Archive_20251029_145528\C__Users_carucci_r_Documents_chat_log_processor
+C:\_chunker                                     C:\Old_Desktop_Chunkers_Archive_20251029_145528\C___chunker
+
+
+Failed:
+  (none)
+
+Verifying cleanup:
+  Removed: C:\Dev\ClaudeExportFixer
+  Removed: C:\Dev\Chunker
+  Removed: C:\Dev\Chat_Log_Transcript
+  Removed: C:\Users\carucci_r\Documents\chat_log_processor
+  Removed: C:\_chunker
+
+---
+
+**Cursor**
+
+Phase 3 complete. - **Archive location**: `C:\Old_Desktop_Chunkers_Archive_20251029_145528`
+- **Moved**: All 5 directories moved successfully
+- **Failed**: None
+- **Verification**: All original locations show as removed
+
+Ready for Phase 4 (Clone fresh v2.0.0 from GitHub). Approve to proceed? ---
+
+**User**
+
+Yes, proceed with Phase 4 (Clone fresh v2.0.0 from GitHub). Please:
+1. Clone https://github.com/racmac57/ClaudeExportFixer.git to `C:\Dev\ClaudeExportFixer`
+2. Create Python virtual environment
+3. Install all dependencies from requirements.txt
+4. Verify the installation works
+5. Confirm version is 2.0.0
+
+After installation, show me:
+- Clone success confirmation
+- Virtual environment setup status
+- Dependency installation results
+- Version verification (should be v2.0.0)
+- Which key files are present
+
+Then STOP and wait for my approval before Phase 5. "**
+
+---
+
+After Phase 4, you'll have the brand new v2.0.0 unified system installed and ready. Then in Phase 5, we'll integrate your preserved data (those 2 unprocessed files, database, etc.) into the new system! 🎉
+
+**You're almost there - desktop cleanup is going perfectly! ** ✨
+
+---
+
+**Cursor**
+
+I’m seeing inline execution quirks here. Please run Phase 4 locally with this script. Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1
+
+```powershell
+Write-Host "`n========================================"
+Write-Host "INSTALLING v2.0.0 UNIFIED SYSTEM"
+Write-Host "========================================`n"
+
+# 1) Ensure C:\Dev exists
+if (! (Test-Path "C:\Dev")) {
+    New-Item -ItemType Directory -Path "C:\Dev" -Force | Out-Null
+    Write-Host "Created C:\Dev"
+}
+
+# 2) Fresh clone
+Write-Host "`n=== CLONE ==="
+if (Test-Path "C:\Dev\ClaudeExportFixer") {
+    Write-Host "Existing C:\Dev\ClaudeExportFixer found. Removing for fresh clone..."
+    Remove-Item -Recurse -Force "C:\Dev\ClaudeExportFixer"
+}
+Push-Location "C:\Dev"
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+$cloneOk = Test-Path "C:\Dev\ClaudeExportFixer"
+if ($cloneOk) { Write-Host "Clone: SUCCESS" } else { Write-Host "Clone: FAILED"; Pop-Location; exit 1 }
+Pop-Location
+
+# 3) Create venv
+Write-Host "`n=== VENV ==="
+Push-Location "C:\Dev\ClaudeExportFixer"
+$py = "python"
+try { & $py -V *> $null } catch { $py = "py -3" }
+& $py -m venv venv
+if (Test-Path ".\venv\Scripts\Activate.ps1") { Write-Host "Venv: CREATED" } else { Write-Host "Venv: FAILED"; Pop-Location; exit 1 }
+
+# 4) Install dependencies
+Write-Host "`n=== DEPS ==="
+. .\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+$pipOut = pip install -r requirements.txt 2>&1
+if ($LASTEXITCODE -eq 0) { Write-Host "Deps: INSTALLED" } else { Write-Host "Deps: FAILED"; $pipOut | Select-Object -First 50 | ForEach-Object { Write-Host $_ }; Pop-Location; exit 1 }
+
+# 5) Verify version and key files
+Write-Host "`n=== VERIFY ==="
+$ver = & python - <<'PY'
+try:
+    import start_watchdog
+    print(getattr(start_watchdog, "__version__", "unknown"))
+except Exception as e:
+    print("ERROR:", e)
+PY
+Write-Host ("Version: " + $ver.Trim())
+
+# Key files
+$key = @("config.json","chunker_engine.py","file_processors.py","start_watchdog.py","requirements.txt","README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+
+Pop-Location
+
+Write-Host "`n========================================"
+Write-Host "INSTALLATION COMPLETE"
+Write-Host "========================================`n"
+```
+
+Run it:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+Please paste back:
+- “Clone: …” line
+- “Venv: …” line
+- “Deps: …” line (and any error snippet if failed)
+- “Version: …” line (should be 2.0.0)
+- “Key files present: …”
+
+I’ll then stop and wait for your approval before Phase 5. ```powershell
+Write-Host "`n========================================"
+Write-Host "INSTALLING v2.0.0 UNIFIED SYSTEM"
+Write-Host "========================================`n"
+
+# 1) Ensure C:\Dev exists
+if (! (Test-Path "C:\Dev")) {
+    New-Item -ItemType Directory -Path "C:\Dev" -Force | Out-Null
+    Write-Host "Created C:\Dev"
+}
+
+# 2) Fresh clone
+Write-Host "`n=== CLONE ==="
+if (Test-Path "C:\Dev\ClaudeExportFixer") {
+    Write-Host "Existing C:\Dev\ClaudeExportFixer found. Removing for fresh clone..."
+    Remove-Item -Recurse -Force "C:\Dev\ClaudeExportFixer"
+}
+Push-Location "C:\Dev"
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+$cloneOk = Test-Path "C:\Dev\ClaudeExportFixer"
+if ($cloneOk) { Write-Host "Clone: SUCCESS" } else { Write-Host "Clone: FAILED"; Pop-Location; exit 1 }
+Pop-Location
+
+# 3) Create venv
+Write-Host "`n=== VENV ==="
+Push-Location "C:\Dev\ClaudeExportFixer"
+$py = "python"
+try { & $py -V *> $null } catch { $py = "py -3" }
+& $py -m venv venv
+if (Test-Path ".\venv\Scripts\Activate.ps1") { Write-Host "Venv: CREATED" } else { Write-Host "Venv: FAILED"; Pop-Location; exit 1 }
+
+# 4) Install dependencies
+Write-Host "`n=== DEPS ==="
+. .\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+$pipOut = pip install -r requirements.txt 2>&1
+if ($LASTEXITCODE -eq 0) { Write-Host "Deps: INSTALLED" } else { Write-Host "Deps: FAILED"; $pipOut | Select-Object -First 50 | ForEach-Object { Write-Host $_ }; Pop-Location; exit 1 }
+
+# 5) Verify version and key files
+Write-Host "`n=== VERIFY ==="
+$ver = & python - <<'PY'
+try:
+    import start_watchdog
+    print(getattr(start_watchdog, "__version__", "unknown"))
+except Exception as e:
+    print("ERROR:", e)
+PY
+Write-Host ("Version: " + $ver.Trim())
+
+# Key files
+$key = @("config.json","chunker_engine.py","file_processors.py","start_watchdog.py","requirements.txt","README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+
+Pop-Location
+
+Write-Host "`n========================================"
+Write-Host "INSTALLATION COMPLETE"
+Write-Host "========================================`n"
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+---
+
+**User**
+
+C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev>pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+ParserError: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1:40
+Line |
+  40 |  $ver = & python - <<'PY'
+     |                     ~
+     | Missing file specification after redirection operator. ---
+
+**Cursor**
+
+The script failed on the version check heredoc. PowerShell doesn’t support that syntax. Quick fix: change the verify section to use python -c.
+
+Edit PHASE4_INSTALL.ps1: replace the “=== VERIFY ===” block with this:
+
+```powershell
+Write-Host "`n=== VERIFY ==="
+$ver = & python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+Write-Host ("Version: " + ($ver.Trim()))
+
+# Key files
+$key = @("config.json","chunker_engine.py","file_processors.py","start_watchdog.py","requirements.txt","README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+```
+
+Then re-run:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+If you prefer to verify manually right now (no script changes), run:
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+Please paste back:
+- Clone: …
+- Venv: …
+- Deps: …
+- Version: …
+- Key files present: …
+
+I’ll stop after confirming these and wait for your approval before Phase 5. ```powershell
+Write-Host "`n=== VERIFY ==="
+$ver = & python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+Write-Host ("Version: " + ($ver.Trim()))
+
+# Key files
+$key = @("config.json","chunker_engine.py","file_processors.py","start_watchdog.py","requirements.txt","README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+```
+
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python -c "import start_watchdog; print(getattr(start_watchdog,'__version__','unknown'))"
+Test-Path config.json, chunker_engine.py, file_processors.py, start_watchdog.py, requirements.txt, README.md
+```
+
+---
+
+**User**
+
+edit the file directly
+"C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE4_INSTALL.ps1"
+
+---
+
+**Cursor**
+
+I'll update the verify section in `PHASE4_INSTALL.ps1` to use a python -c call, then you can re-run the script. ```powershell
+Write-Host "`n========================================"
+Write-Host "INSTALLING v2.0.0 UNIFIED SYSTEM"
+Write-Host "========================================`n"
+
+# 1) Ensure C:\Dev exists
+if (! (Test-Path "C:\Dev")) {
+    New-Item -ItemType Directory -Path "C:\Dev" -Force | Out-Null
+    Write-Host "Created C:\Dev"
+}
+
+# 2) Fresh clone
+Write-Host "`n=== CLONE ==="
+if (Test-Path "C:\Dev\ClaudeExportFixer") {
+    Write-Host "Existing C:\Dev\ClaudeExportFixer found. Removing for fresh clone..."
+    Remove-Item -Recurse -Force "C:\Dev\ClaudeExportFixer"
+}
+Push-Location "C:\Dev"
+git clone https://github.com/racmac57/ClaudeExportFixer.git
+$cloneOk = Test-Path "C:\Dev\ClaudeExportFixer"
+if ($cloneOk) { Write-Host "Clone: SUCCESS" } else { Write-Host "Clone: FAILED"; Pop-Location; exit 1 }
+Pop-Location
+
+# 3) Create venv
+Write-Host "`n=== VENV ==="
+Push-Location "C:\Dev\ClaudeExportFixer"
+$py = "python"
+try { & $py -V *> $null } catch { $py = "py -3" }
+& $py -m venv venv
+if (Test-Path ".\venv\Scripts\Activate.ps1") { Write-Host "Venv: CREATED" } else { Write-Host "Venv: FAILED"; Pop-Location; exit 1 }
+
+# 4) Install dependencies
+Write-Host "`n=== DEPS ==="
+. .\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+$pipOut = pip install -r requirements.txt 2>&1
+if ($LASTEXITCODE -eq 0) { Write-Host "Deps: INSTALLED" } else { Write-Host "Deps: FAILED"; $pipOut | Select-Object -First 50 | ForEach-Object { Write-Host $_ }; Pop-Location; exit 1 }
+
+# 5) Verify version and key files
+Write-Host "`n=== VERIFY ==="
+$ver = & python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+Write-Host ("Version: " + ($ver.Trim()))
+
+# Key files
+$key = @("config.json","chunker_engine.py","file_processors.py","start_watchdog.py","requirements.txt","README.md")
+$present = @()
+foreach ($f in $key) { if (Test-Path $f) { $present += $f } }
+Write-Host ("Key files present: " + ($present -join ", "))
+
+Pop-Location
+
+Write-Host "`n========================================"
+Write-Host "INSTALLATION COMPLETE"
+Write-Host "========================================`n"
+```
+
+I updated the verify section in `PHASE4_INSTALL.ps1` to use a `python -c` one-liner for version checking.

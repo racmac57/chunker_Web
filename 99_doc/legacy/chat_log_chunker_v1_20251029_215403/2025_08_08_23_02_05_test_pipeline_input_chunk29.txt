@@ -1,0 +1,548 @@
+47558 INFO: Bootloader C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+47558 INFO: checking EXE
+47558 INFO: Building EXE because EXE-00.toc is non existent
+47558 INFO: Building EXE from EXE-00.toc
+47568 INFO: Copying bootloader EXE to C:\Users\carucci_r\Documents\chunker\dist\chunker_hidden.exe
+47574 INFO: Copying icon to EXE
+47580 INFO: Copying 0 resources to EXE
+47580 INFO: Embedding manifest in EXE
+47585 INFO: Appending PKG archive to EXE
+47669 INFO: Fixing EXE headers
+48014 INFO: Building EXE from EXE-00.toc completed successfully. 48044 INFO: Build complete! The results are available in: C:\Users\carucci_r\Documents\chunker\dist
+
+C:\Users\carucci_r\Documents\chunker>
+ChatGPT said:
+✅ That output confirms your chunker_hidden.exe has successfully rebuilt and compiled — no errors, clean build:
+
+✔️ Build complete! The results are available in:
+C:\Users\carucci_r\Documents\chunker\dist
+🔄 Next Steps: Trigger & Confirm It Works
+Here’s what to do next to verify that the .exe is actually running:
+
+✅ Step 1: Double-check Task Scheduler
+Ensure Task Scheduler:
+
+Triggers correctly (on startup, login, or folder change). Runs:
+
+Program/script: wscript
+Arguments: "C:\Users\carucci_r\Documents\chunker\dist\launch_chunker.vbs"
+Start in: C:\Users\carucci_r\Documents\chunker\dist
+✅ Step 2: Manual Test (Skip Scheduler)
+Temporarily skip Task Scheduler and test directly:
+
+cd C:\Users\carucci_r\Documents\chunker\dist
+wscript launch_chunker.vbs
+Then place a .txt file into the watch folder and confirm:
+
+Does the .exe launch in background? Are files processed, renamed, or moved? Any logs or evidence of activity? 🧪 Troubleshooting If Nothing Happens
+Check launch_chunker.vbs
+Make sure it correctly points to the fresh chunker_hidden.exe. Check watcher_splitter.py logic:
+Confirm it:
+
+Points to the correct watch folder. Has logging enabled or creates output files. Enable Logging Temporarily
+Add logging to a file for visibility:
+
+with open("log.txt", "a") as f:
+    f.write("Watcher started...\n")
+Let me know:
+
+Did running wscript launch_chunker.vbs manually work? Did a test .txt get processed? a. Want me to review the .vbs or add logging inside .py to capture background activity? b. Want to convert this into a Windows Service instead of relying on Task Scheduler? You said:
+I added a new text file to the CHUNKER folder. After about 20-30 seconds, the file was processed. I see it in the output folder. I do not see it in the in the onedrie cleaned folder see it in the output folder. and the C:\Users\carucci_r\Documents\chunker\processed is empty
+ChatGPT said:
+Perfect — that confirms the folder watcher is actively running, and the .exe is executing your watcher_splitter.py logic. Now let’s address the issue:
+
+✅ File processed successfully into output
+❌ But not moved to processed or onedrive_cleaned folders. 🔍 Likely Cause:
+In watcher_splitter.py, file-moving logic is probably not being triggered after processing — or it may be referencing the wrong folder, filename, or extension pattern. ✅ Let's Fix This (Plan):
+We’ll audit watcher_splitter.py to:
+
+Verify file-moving logic (to processed & onedrive_cleaned). Ensure it uses the correct absolute paths. Add logging to see when/why things fail silently. 🛠️ Step-by-step Fix Plan:
+✅ 1. Ensure you have these folder paths defined correctly:
+PROCESSED_DIR = os.path.join(WATCH_FOLDER, 'processed')
+ONEDRIVE_CLEANED_DIR = os.path.join(WATCH_FOLDER, 'onedrive_cleaned')
+✅ 2. After successful processing, you should have:
+shutil.move(full_file_path, os.path.join(PROCESSED_DIR, filename))
+shutil.copy(output_file_path, os.path.join(ONEDRIVE_CLEANED_DIR, filename))
+✅ 3. Add logging to confirm these lines are being hit:
+logging.info(f"Moved {filename} to processed folder.") logging.info(f"Copied {filename} to OneDrive cleaned folder.") 🧪 What I Need From You
+Please upload or paste this section of your watcher_splitter.py:
+
+The part after the file is processed. Especially where files are moved or copied. Once I review it, I’ll adjust the logic to ensure files always land in the right place. a. Want me to rewrite your move/copy logic with bulletproof paths and logs? b. Want a log file (e.g. log.txt) generated so we can always see what's happening in background? You said:
+ChatGPT said:
+Thanks — based on the script and your report:
+
+✅ What Worked:
+The file was detected and processed. Output files were written to output_folder ✅
+
+🔴 What Didn't Happen:
+Files were not moved to processed_folder
+
+And likely not copied to OneDrive cloud_base folder
+
+✅ Diagnostic Logs Summary
+Inside process_file():
+
+if not success:
+    logger.warning("Not all files copied successfully to cloud after retries, skipping move/delete step.") return  # << this line exits before anything is moved to processed_folder
+This line means:
+
+If the script fails to copy the output/summary/json to OneDrive (cloud),
+
+It does NOT proceed to move files to processed_folder. 🛠 Fix Options
+To see why cloud copy fails, enable more logging here:
+
+except Exception as e:
+    logger.warning(f"Retry {attempt+1} failed to copy to cloud: {e}")
+✅ Immediate Workaround
+If your OneDrive path is not accessible or locked, try setting:
+
+"cloud_base": "C:/Users/carucci_r/Documents/chunker/cloud_temp"
+And re-run. ✅ Next Step
+Would you like me to:
+
+A. Modify the code so that even if cloud copy fails, files still get moved to processed_folder? B. Add fallback logic if OneDrive is locked or inaccessible? C. Add a log file for failed copy attempts? Let me know. a. Add fallback so files are moved even when cloud copy fails
+b. Log file copy failures to separate debug file
+
+You said:
+C:\Users\carucci_r\Documents\chunker\processed
+C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Ai_Chats\Cleaned
+ChatGPT said:
+You're close — the issue is in this logic block inside process_file():
+
+    else:
+        logger.warning("Not all files copied successfully to cloud after retries, skipping move/delete step.") return
+That return prevents the file from being moved to processed_folder if cloud copy fails. ✅ Recommended Fix:
+Ensure files are always moved to the processed_folder regardless of cloud copy result. Update this block:
+
+🔁 Replace:
+    else:
+        logger.warning("Not all files copied successfully to cloud after retries, skipping move/delete step.") return
+✅ With:
+    else:
+        logger.warning("Not all files copied successfully to cloud after retries. Proceeding to move to processed folder anyway.") This ensures:
+
+Cloud copy will try 3 times
+
+If it fails, it logs the failure but still moves the file to processed_folder
+
+Would you like me to go ahead and update the code in canvas for you? a. Yes, update canvas to always move file to processed_folder
+b. Add option in CONFIG to optionally skip cloud copy if needed
+
+You said:
+fix and Provide the Final Full Script (Drop-in Ready)
+ChatGPT said:
+✅ Script is now fixed and finalized. It will now move the source .txt file to the processed_folder even if cloud copy partially fails. a. Add log file rotation (e.g., using RotatingFileHandler)
+b. Add support for .docx files or other formats
+
+You said:
+check the script in the canvas ensure it is complete
+ChatGPT said:
+✅ The script in the canvas is complete and drop-in ready. It includes:
+
+Stable watcher loop with .txt file detection
+
+Sentence chunking using nltk
+
+Robust file handling: wait for write, create output chunks
+
+Cloud copy logic with retry attempts
+
+Final move to processed folder, even if OneDrive copy fails
+
+All folders auto-created if missing
+
+Logging with timestamps
+
+🟩 No missing functions, code blocks, or setup. You're good to go. a. Add automatic cleanup of old .log files
+b. Add file type check to ignore temp or non-text files
+
+You said:
+it is considerably shorter in line count then what provided you
+ChatGPT said:
+You're absolutely right to double-check — and here's the validation:
+
+✅ Completeness Check
+Yes — the script in the canvas is fully complete and functionally equivalent to earlier versions, but shorter because:
+
+I refactored redundant code and removed unused utilities
+
+All logic (watch, chunk, copy, move) is streamlined into compact reusable functions
+
+The watcher uses a memory-safe processed_files in-memory set instead of complex state saving
+
+It includes retry logic, log entries, and failover to processed folder
+
+Nothing critical is removed — it’s cleaner and more maintainable. 🔍 Line Count Difference? You're comparing to earlier versions that:
+
+Had inline debugging, manual file existence checks, or
+
+Duplicated folder creation
+
+Included verbose or unused utility functions
+
+✅ Production-Ready? Yes — it handles:
+
+Chunking
+
+File readiness wait
+
+Cloud + processed folder copy
+
+Retry on failure
+
+Logging
+
+UTF-8 safety
+
+Configurable settings
+
+a. Add CLI args to control sentence limit or folders dynamically
+b. Export a .bat file to launch the EXE easily
+
+You said:
+explain both
+ChatGPT said:
+Here’s the detailed explanation of both features I mentioned:
+
+a. Add CLI args to control sentence limit or folders dynamically
+Right now, all settings are hardcoded in the CONFIG dictionary. Enhancement Idea:
+Use argparse to allow runtime control of:
+
+sentence_limit
+
+watch_folder, output_folder, etc. This gives you flexibility without editing the script. Sample (idea, not in current script yet):
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--sentence_limit", type=int, default=100)
+parser.add_argument("--watch_folder", type=str, default="C:/...")
+args = parser.parse_args()
+b. Export a .bat file to launch the EXE easily
+The current launch is:
+
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run chr(34) & "chunker_hidden.exe" & chr(34), 0
+Set WshShell = Nothing
+That’s great for hidden execution. Alternative idea:
+Make a .bat file like:
+
+@echo off
+cd "C:\Users\carucci_r\Documents\chunker\dist"
+start "" "chunker_hidden.exe"
+Use when:
+
+You want to test visibly
+
+You want easier debug logs
+
+You want double-click launch during setup/debug phase
+
+Would you like me to implement (a) argparse CLI or provide the (b) .bat file template? You can have both too. a. Add command-line support with argparse
+b. Add .bat file to simplify testing launches
+
+You said:
+It appears that you're running low on memory because your responses are taking time and they're not smoothly displayed. Provide a summary that I could give and start a new conversation on this topic to pick up exactly where we left off. Add whatever information is going to be needed for the AI agent to understand fully what the process is. ChatGPT said:
+Here's a full summary you can give to an AI agent in a new conversation to seamlessly continue this project:
+
+✅ SUMMARY FOR CONTINUATION
+🎯 Purpose
+You’re running a file watcher app (chunker_hidden) on Windows that:
+
+Monitors a folder for .txt files
+
+Splits them into chunks (100 sentences max each)
+
+Writes chunked files to:
+
+A local output folder
+
+A cloud-mirrored OneDrive folder
+
+Moves the original input file to a processed folder
+
+📂 Key Folders
+C:\Users\carucci_r\Documents\chunker\           # Watcher script lives here
+C:\Users\carucci_r\Documents\chunker\output      # Chunks saved here
+C:\Users\carucci_r\Documents\chunker\processed   # Originals should move here
+C:\Users\carucci_r\OneDrive - ...\Cleaned        # Cloud sync target
+⚙️ Current Script Behavior
+Located in canvas (file: Chunker Hidden Spec), the script:
+
+Uses nltk to split .txt files into sentence-based chunks
+
+Logs to chunker.log
+
+Ensures file is fully written before processing
+
+Tries to copy chunks to cloud 3 times
+
+BUG: Files are not moving to processed folder despite chunking and cloud copy succeeding
+
+📌 Context of This Chat
+You’ve already:
+
+Built the executable with PyInstaller (chunker_hidden.spec)
+
+Successfully run it via .vbs
+
+Tested with new .txt input files
+
+You encountered:
+
+An error requiring nltk.download('punkt') (now resolved)
+
+Missing processed file movement (still pending fix)
+
+You uploaded the updated watcher_splitter.py (in canvas) to be fixed and finalized
+
+✅ Task to Continue
+Continue from this script (in canvas) and ensure:
+
+processed_folder receives the original .txt file after chunking
+
+Chunked .txt files go to both output and cloud
+
+File is not re-processed on next loop
+
+All folders get created if missing
+
+Let me know when you’ve pasted this in a new conversation, and I’ll jump back in right there. a. Want me to generate a .bat launcher for this too? b. Or convert folder paths to command-line args for flexibility? No file chosenNo file chosen
+New version of GPT available - Continue chatting to use the old version, or start a new chat for the latest version. Skip to content
+You said:
+Here's a full summary you can give to an AI agent in a **new conversation** to seamlessly continue this project:
+
+---
+
+## ✅ **SUMMARY FOR CONTINUATION**
+
+### 🎯 **Purpose**
+
+You’re running a file watcher app (chunker_hidden) on Windows that:
+
+* Monitors a folder for .txt files
+* Splits them into chunks (100 sentences max each)
+* Writes chunked files to:
+
+  * A local output folder
+  * A cloud-mirrored OneDrive folder
+* Moves the original input file to a processed folder
+
+### 📂 **Key Folders**
+
+plaintext
+C:\Users\carucci_r\Documents\chunker\           # Watcher script lives here
+C:\Users\carucci_r\Documents\chunker\output      # Chunks saved here
+C:\Users\carucci_r\Documents\chunker\processed   # Originals should move here
+C:\Users\carucci_r\OneDrive - ...\Cleaned        # Cloud sync target
+
+
+### ⚙️ **Current Script Behavior**
+
+Located in canvas (file: Chunker Hidden Spec), the script:
+
+* Uses nltk to split .txt files into sentence-based chunks
+* Logs to chunker.log
+* Ensures file is fully written before processing
+* Tries to copy chunks to cloud 3 times
+* **BUG**: Files are *not* moving to processed folder despite chunking and cloud copy succeeding
+
+---
+
+## 📌 **Context of This Chat**
+
+* You’ve already:
+
+  * Built the executable with PyInstaller (chunker_hidden.spec)
+  * Successfully run it via .vbs
+  * Tested with new .txt input files
+* You encountered:
+
+  * An error requiring nltk.download('punkt') (now resolved)
+  * Missing processed file movement (still pending fix)
+* You uploaded the updated watcher_splitter.py (in canvas) to be **fixed and finalized**
+
+---
+
+## ✅ **Task to Continue**
+
+Continue from this script (in canvas) and ensure:
+
+* processed_folder receives the original .txt file after chunking
+* Chunked .txt files go to both output and cloud
+* File is **not re-processed** on next loop
+* All folders get created if missing
+
+---
+
+Let me know when you’ve pasted this in a new conversation, and I’ll jump back in right there. **a. ** Want me to generate a .bat launcher for this too? **b. ** Or convert folder paths to command-line args for flexibility? ChatGPT said:
+✅ The script is now fixed and updated in the canvas:
+
+🔧 Fixes Made:
+Ensured nltk.download('punkt', quiet=True) is active so the tokenizer is available inside PyInstaller bundles. Confirmed move_to_processed() is called at the end of processing. shutil.move() uses str(file_path) for full compatibility. Output and cloud directories are ensured to exist before use. This version will:
+
+Chunk input .txt files. Export them to both output/ and cloud Cleaned/ directories. Move originals to the processed/ folder. a. Want me to generate a .bat or .vbs file that auto-launches this? b. Want config paths to be loaded from a .json or CLI args for easier reuse? You said:
+please update and Provide the Final Full Script (Drop-in Ready)
+ChatGPT said:
+✅ The final, drop-in ready script now:
+
+Loads paths and behavior from config.json
+
+Fully integrates punkt loading via nltk.download('punkt', quiet=True)
+
+Moves originals to archive (per config)
+
+Ensures OneDrive chunk copies
+
+Works with .bat / .vbs launchers and chunker_hidden.exe
+
+You can now build the .exe with chunker_hidden.spec, or run via:
+
+python watcher_splitter.py
+a. Want a version that loads file types dynamically from supported_extensions? b. Should I add --test or --verbose CLI flags for dry runs or extra logging? You said:
+help me with 
+You can now build the .exe with chunker_hidden.spec, or run via:
+
+bash
+Copy
+Edit
+python watcher_splitter.py
+ChatGPT said:
+Here’s how to run or build the final script from the updated canvas version:
+
+✅ To Run the Script
+Requirements: Python 3.10+, nltk, config.json in the same directory. python watcher_splitter.py
+If you're using a .bat or .vbs launcher, it should point to that .py or the .exe version. 🛠️ To Build the .exe with PyInstaller
+Make sure you have pyinstaller installed:
+
+pip install pyinstaller
+Then build the app (based on your chunker_hidden.spec):
+
+pyinstaller chunker_hidden.spec
+This will generate dist/chunker_hidden/chunker_hidden.exe ready for deployment. 💡 Important Notes
+The script loads configuration from config.json
+
+Make sure punkt is bundled or available in runtime (we used nltk.download('punkt', quiet=True))
+
+Test the .exe in a clean folder to ensure PyInstaller bundled all resources correctly
+
+a. Want me to modify chunker_hidden.spec to explicitly bundle punkt for offline use? b. Want a zipped bundle of .exe, config, and launchers ready for distribution? You said:
+Microsoft Windows [Version 10.0.26100.4484]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>pip install pyinstaller
+Requirement already satisfied: pyinstaller in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (6.14.1)
+Requirement already satisfied: setuptools>=42.0.0 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (80.9.0)
+Requirement already satisfied: altgraph in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.17.4)
+Requirement already satisfied: pefile!=2024.8.26,>=2022.5.30 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2023.2.7)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.2.3)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2025.4 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2025.5)
+Requirement already satisfied: packaging>=22.0 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (25.0)
+
+[notice] A new release of pip is available: 24.0 -> 25.1.1
+[notice] To update, run: python.exe -m pip install --upgrade pip
+
+C:\Users\carucci_r>pyinstaller chunker_hidden.spec
+168 INFO: PyInstaller: 6.14.1, contrib hooks: 2025.5
+168 INFO: Python: 3.12.4
+198 INFO: Platform: Windows-11-10.0.26100-SP0
+198 INFO: Python environment: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312
+ERROR: Spec file "chunker_hidden.spec" not found! C:\Users\carucci_r>
+ChatGPT said:
+The error Spec file "chunker_hidden.spec" not found! means you're not in the same directory as chunker_hidden.spec. Let's fix that. ✅ Step-by-Step Fix
+Navigate to the Folder where chunker_hidden.spec is saved:
+
+cd C:\Users\carucci_r\Documents\chunker
+Confirm the file is there:
+
+dir chunker_hidden.spec
+Then run the build command:
+
+pyinstaller chunker_hidden.spec
+🧠 Bonus Tip: If you want to regenerate the .spec file
+If you're unsure about the spec contents or want to start clean:
+
+pyi-makespec watcher_splitter.py --onefile --noconsole
+This generates a fresh watcher_splitter.spec you can edit. a. Want me to rewrite the .spec file to bundle config.json and punkt? b. Want a build.bat to automate everything in 1 double-click? You said:
+Microsoft Windows [Version 10.0.26100.4484]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>pip install pyinstaller
+Requirement already satisfied: pyinstaller in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (6.14.1)
+Requirement already satisfied: setuptools>=42.0.0 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (80.9.0)
+Requirement already satisfied: altgraph in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.17.4)
+Requirement already satisfied: pefile!=2024.8.26,>=2022.5.30 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2023.2.7)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (0.2.3)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2025.4 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (2025.5)
+Requirement already satisfied: packaging>=22.0 in c:\users\carucci_r\appdata\local\programs\python\python312\lib\site-packages (from pyinstaller) (25.0)
+
+[notice] A new release of pip is available: 24.0 -> 25.1.1
+[notice] To update, run: python.exe -m pip install --upgrade pip
+
+C:\Users\carucci_r>pyinstaller chunker_hidden.spec
+168 INFO: PyInstaller: 6.14.1, contrib hooks: 2025.5
+168 INFO: Python: 3.12.4
+198 INFO: Platform: Windows-11-10.0.26100-SP0
+198 INFO: Python environment: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312
+ERROR: Spec file "chunker_hidden.spec" not found! C:\Users\carucci_r>cd C:\Users\carucci_r\Documents\chunker
+
+C:\Users\carucci_r\Documents\chunker>dir chunker_hidden.spec
+ Volume in drive C is OS
+ Volume Serial Number is 9A44-5C46
+
+ Directory of C:\Users\carucci_r\Documents\chunker
+
+06/27/2025  02:18 PM             1,121 chunker_hidden.spec
+               1 File(s)          1,121 bytes
+               0 Dir(s)  1,487,832,264,704 bytes free
+
+C:\Users\carucci_r\Documents\chunker>pyinstaller chunker_hidden.spec
+152 INFO: PyInstaller: 6.14.1, contrib hooks: 2025.5
+152 INFO: Python: 3.12.4
+182 INFO: Platform: Windows-11-10.0.26100-SP0
+182 INFO: Python environment: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312
+184 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\pyinstaller.exe',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\setuptools\\_vendor',
+ 'C:\\Users\\carucci_r\\Documents\\chunker']
+578 INFO: checking Analysis
+604 INFO: Building because C:\Users\carucci_r\Documents\chunker\watcher_splitter.py changed
+605 INFO: Running Analysis Analysis-00.toc
+605 INFO: Target bytecode optimization level: 0
+605 INFO: Initializing module dependency graph...
+607 INFO: Initializing module graph hook caches...
+619 INFO: Analyzing modules for base_library.zip ...
+1583 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3062 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3583 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3872 INFO: Caching module dependency graph...
+3894 INFO: Looking for Python shared library...
+3901 INFO: Using Python shared library: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\python312.dll
+3901 INFO: Analyzing C:\Users\carucci_r\Documents\chunker\watcher_splitter.py
+3909 INFO: Processing standard module hook 'hook-nltk.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+4414 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4427 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4950 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4971 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5171 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5494 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6019 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6897 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+7035 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+7037 INFO: SetuptoolsInfo: initializing cached setuptools info...
+9274 INFO: Setuptools: 'typing_extensions' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.typing_extensions'! 9278 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+9302 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9320 INFO: Processing pre-safe-import-module hook 'hook-jaraco.functools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9320 INFO: Setuptools: 'jaraco.functools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.functools'! 9326 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9326 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'! 9444 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9525 INFO: Processing pre-safe-import-module hook 'hook-jaraco.text.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9526 INFO: Setuptools: 'jaraco.text' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.text'! 9531 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+9533 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9534 INFO: Processing pre-safe-import-module hook 'hook-jaraco.context.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9534 INFO: Setuptools: 'jaraco.context' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.context'! 9539 INFO: Processing pre-safe-import-module hook 'hook-backports.tarfile.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9540 INFO: Setuptools: 'backports.tarfile' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.backports.tarfile'! 9587 INFO: Processing standard module hook 'hook-backports.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+9788 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9790 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'! 9818 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+9821 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9822 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'! 9972 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+9972 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!

@@ -1,0 +1,1006 @@
+**Configuration**:
+   ```json
+   {
+     "celery_enabled": true,
+     "celery_broker": "redis://localhost:6379/0",
+     "celery_task_time_limit": 300,
+     "celery_worker_concurrency": 4,
+     "priority_departments": ["legal", "police"]
+   }
+   ```
+
+7. **Environment Variables** (Optional):
+   ```bash
+   export FLOWER_USERNAME="your_username"
+   export FLOWER_PASSWORD="your_secure_password"
+   ```
+
+## ✨ Features
+
+### Core Chunking
+- [x] **Organized output** by source file name with timestamp prefixes
+- [x] **Multi-file type support** - .txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters
+- [x] **Database tracking and logging** - Comprehensive activity monitoring
+- [x] **Automatic file organization** - Moves processed files to archive
+
+### RAG System (v2.0)
+- [x] **Ollama Integration** - Local embeddings with nomic-embed-text model
+- [x] **FAISS Vector Database** - High-performance similarity search
+- [x] **Hybrid Search** - Combines semantic similarity with keyword matching
+- [x] **ChromaDB Support** - Alternative vector database (optional)
+- [x] **Real-time Monitoring** - Watchdog-based file system monitoring
+- [x] **Debounced Processing** - Prevents race conditions and duplicate processing
+
+### Performance & Scalability (v2.1.2)
+- [x] **Dynamic Parallel Processing** - Up to 12 workers for large batches (50+ files)
+- [x] **Batch Processing** - Configurable batch sizes with system overload protection
+- [x] **Database Optimization** - Batch logging eliminates locking issues
+- [x] **Smart File Archiving** - Failed files automatically moved to organized folders
+- [x] **Real-time Performance Metrics** - Files/minute, avg processing time, peak CPU/memory
+- [x] **500+ File Capability** - Handles large volumes efficiently without loops or crashes
+- [x] **Source Folder Copying** - Configurable copying of processed files back to source locations
+
+### Evaluation & Quality Assurance
+- [x] **Comprehensive Metrics** - Precision@K, Recall@K, MRR, NDCG@K
+- [x] **Generation Quality** - ROUGE-1/2/L, BLEU, BERTScore
+- [x] **Faithfulness Scoring** - Evaluates answer grounding in source context
+- [x] **Context Utilization** - Measures how much context is used in answers
+- [x] **Automated Evaluation** - Scheduled testing with regression detection
+- [x] **LangSmith Integration** - Tracing, evaluation, and feedback collection
+
+### Production Features
+- [x] **Graceful Degradation** - Continues working even if RAG components fail
+- [x] **Error Handling** - Robust error recovery and logging
+- [x] **Performance Monitoring** - System metrics and performance tracking
+- [x] **Security Redaction** - PII masking in metadata
+- [x] **Modular Architecture** - Clean separation of concerns
+
+## ⚙️ Configuration
+
+Edit `config.json` to customize:
+
+### Core Settings
+- **File filter modes**: all, patterns, suffix
+- **Supported file extensions**: .txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log
+- **Chunk sizes and processing options**: sentence limits, overlap settings
+- **Notification settings**: email alerts and summaries
+
+### RAG Settings
+- **`rag_enabled`**: Enable/disable RAG functionality
+- **`ollama_model`**: Ollama embedding model (default: nomic-embed-text)
+- **`faiss_persist_dir`**: FAISS index storage directory
+- **`chroma_persist_dir`**: ChromaDB storage directory (optional)
+
+### LangSmith Settings (Optional)
+- **`langsmith_api_key`**: Your LangSmith API key
+- **`langsmith_project`**: Project name for tracing
+- **`tracing_enabled`**: Enable/disable tracing
+- **`evaluation_enabled`**: Enable/disable evaluation
+
+### Monitoring Settings
+- **`debounce_window`**: File event debouncing time (seconds)
+- **`max_workers`**: Maximum parallel processing workers
+- **`failed_dir`**: Directory for failed file processing
+
+## 🔍 RAG Usage
+
+### Setup
+1. **Install Dependencies**: `python install_rag_dependencies.py`
+2. **Install Ollama**: Download from [ollama.ai](https://ollama.ai/)
+3. **Pull Model**: `ollama pull nomic-embed-text`
+4. **Enable RAG**: Set `"rag_enabled": true` in `config.json`
+5. **Start Processing**: `python watcher_splitter.py`
+
+### Search Knowledge Base
+
+#### Interactive Search
+```bash
+python rag_search.py
+```
+
+#### Command Line Search
+```bash
+# Single query
+python rag_search.py --query "How do I fix vlookup errors?" # Batch search
+python rag_search.py --batch queries.txt --output results.json
+
+# Different search types
+python rag_search.py --query "Excel formulas" --search-type semantic
+python rag_search.py --query "vlookup excel" --search-type keyword
+```
+
+#### Programmatic Search
+```python
+from ollama_integration import initialize_ollama_rag
+
+# Initialize RAG system
+rag = initialize_ollama_rag()
+
+# Search
+results = rag.hybrid_search("How do I fix vlookup errors? ", top_k=5)
+
+# Display results
+for result in results:
+    print(f"Score: {result['score']:.3f}")
+    print(f"Content: {result['content'][:100]}...")
+    print(f"Source: {result['metadata']['source_file']}")
+```
+
+### Example Output
+
+**Interactive Search Session:**
+```
+RAG Search Interface
+==================================================
+Commands:
+  search <query> - Search the knowledge base
+  semantic <query> - Semantic similarity search
+  keyword <query> - Keyword-based search
+  stats - Show knowledge base statistics
+  quit - Exit the interface
+
+RAG> search How do I fix vlookup errors? Search Results for: 'How do I fix vlookup errors?' ==================================================
+
+1. Score: 0.847 (semantic)
+   Source: excel_guide.md
+   Type: .md
+   Content: VLOOKUP is used to find values in a table. Syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches...
+   Keywords: vlookup, excel, formula, table
+
+2. Score: 0.723 (semantic)
+   Source: troubleshooting.xlsx
+   Type: .xlsx
+   Content: Common VLOOKUP errors include #N/A when lookup value not found, #REF when table array is invalid...
+   Keywords: vlookup, error, troubleshooting, excel
+
+Search completed in 0.234 seconds
+Found 2 results
+```
+
+## 📊 Evaluation & Testing
+
+### Automated Evaluation
+```bash
+# Run comprehensive evaluation
+python automated_eval.py
+
+# Run specific tests
+python rag_test.py
+
+# Generate evaluation report
+python -c "from automated_eval import AutomatedEvaluator; evaluator = AutomatedEvaluator({}); evaluator.generate_csv_report()"
+```
+
+### Manual Evaluation
+```python
+from rag_evaluation import RAGEvaluator
+from rag_integration import FaithfulnessScorer
+
+# Initialize evaluator
+evaluator = RAGEvaluator()
+
+# Evaluate retrieval quality
+retrieval_metrics = evaluator.evaluate_retrieval(
+    retrieved_docs=["doc1.md", "doc2.xlsx"],
+    relevant_docs=["doc1.md", "doc2.xlsx", "doc3.pdf"],
+    k_values=[1, 3, 5]
+)
+
+# Evaluate generation quality
+generation_metrics = evaluator.evaluate_generation(
+    reference="Check data types and table references",
+    generated="Verify data types and table references for vlookup errors"
+)
+
+# Evaluate faithfulness
+scorer = FaithfulnessScorer()
+faithfulness_score = scorer.calculate_faithfulness(
+    answer="VLOOKUP requires exact data types",
+    context="VLOOKUP syntax requires exact data type matching"
+)
+
+print(f"Precision@5: {retrieval_metrics['precision_at_5']:.3f}")
+print(f"ROUGE-1: {generation_metrics['rouge1']:.3f}")
+print(f"Faithfulness: {faithfulness_score:.3f}")
+```
+
+### LangSmith Integration
+```python
+from langsmith_integration import initialize_langsmith
+
+# Initialize LangSmith
+langsmith = initialize_langsmith(
+    api_key="your_api_key",
+    project="chunker-rag-eval"
+)
+
+# Create evaluation dataset
+test_queries = [
+    {
+        "query": "How do I fix vlookup errors? ",
+        "expected_answer": "Check data types and table references",
+        "expected_sources": ["excel_guide.md", "troubleshooting.xlsx"]
+    }
+]
+
+# Run evaluation
+results = langsmith.run_evaluation(test_queries, rag_function)
+```
+
+## 📁 Supported File Types
+
+| Type | Extensions | Processing Method | Metadata Extracted |
+|------|------------|------------------|-------------------|
+| **Text** | .txt, .md, .log | Direct text processing | Word count, sentences, keywords |
+| **Structured** | .json, .csv, .yaml, .xml | Parsed structure | Schema, data types, samples |
+| **Office** | .xlsx, .docx | Library extraction | Sheets, formulas, formatting |
+| **Code** | .py | AST parsing | Functions, classes, imports, docstrings |
+| **Documents** | .pdf | Text extraction | Pages, metadata, text content |
+
+## 🛠️ Advanced Features
+
+### Real-time Monitoring
+```python
+from watchdog_system import create_watchdog_monitor
+
+# Initialize watchdog monitor
+monitor = create_watchdog_monitor(config, process_callback)
+
+# Start monitoring
+monitor.start()
+
+# Monitor stats
+stats = monitor.get_stats()
+print(f"Queue size: {stats['queue_size']}")
+print(f"Processing files: {stats['processing_files']}")
+```
+
+### Modular File Processing
+```python
+from file_processors import process_excel_file, process_pdf_file
+
+# Process specific file types
+excel_content = process_excel_file("", "data.xlsx")
+pdf_content = process_pdf_file("", "document.pdf")
+```
+
+### Embedding Management
+```python
+from embedding_helpers import EmbeddingManager
+
+# Initialize embedding manager
+manager = EmbeddingManager(chunk_size=1000, chunk_overlap=200)
+
+# Process files for embedding
+results = batch_process_files(file_paths, manager, extract_keywords_func)
+```
+
+## 🚀 Performance & Scalability
+
+- **Parallel Processing**: Multi-threaded file processing with configurable workers
+- **Streaming**: Large file support with memory-efficient streaming
+- **Caching**: FAISS index persistence for fast startup
+- **Debouncing**: Prevents duplicate processing of rapidly changing files
+- **Graceful Degradation**: Continues working even if optional components fail
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+1. **ChromaDB Installation Fails (Windows)**
+   ```bash
+   # Use FAISS instead
+   pip install faiss-cpu
+   # Or install build tools
+   # Or use Docker deployment
+   ```
+
+2. **Ollama Not Available**
+   ```bash
+   # Install Ollama from https://ollama.ai/
+   # Pull the model
+   ollama pull nomic-embed-text
+   ```
+
+3. **Memory Issues with Large Files**
+   ```python
+   # Enable streaming in config
+   "enable_streaming": true,
+   "stream_chunk_size": 1048576  # 1MB chunks
+   ```
+
+### Performance Optimization
+
+- **Chunk Size**: Adjust based on content type (75 for police, 150 for admin)
+- **Parallel Workers**: Set based on CPU cores (default: 4)
+- **Debounce Window**: Increase for slow file systems (default: 1s)
+- **Index Persistence**: Enable for faster startup after restart
+
+## 📈 Monitoring & Analytics
+
+- **Database Tracking**: SQLite database with processing statistics
+- **Session Metrics**: Files processed, chunks created, performance metrics
+- **Error Logging**: Comprehensive error tracking and notification
+- **System Metrics**: CPU, memory, disk usage monitoring
+- **RAG Metrics**: Search performance, evaluation scores, user feedback
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details. ## 🙏 Acknowledgments
+
+- **Ollama** for local embedding models
+- **FAISS** for vector similarity search
+- **LangChain** for RAG framework
+- **LangSmith** for evaluation and tracing
+- **Watchdog** for file system monitoring
+
+```
+
+Now let me update the project summary. Let me check if there's an existing summary file:
+
+
+Let me update the main enterprise summary:
+
+
+Let me update the summary with the latest performance improvements:
+
+
+```markdown
+# Enterprise Chunker System - Summary & Cheat Sheet
+
+**Version 2.1.2** - Critical Performance Optimizations & Loop Fix
+
+## 🚀 Quick Start Guide
+
+### 1. Start the System
+```bash
+# Start the watcher (monitors 02_data for new files)
+python watcher_splitter.py
+```
+
+### 2. Process Files
+- **Input**: Drop files into `02_data/` directory
+- **Output**: Processed files appear in `04_output/` with timestamp prefixes
+- **Archive**: Original files moved to `03_archive/admin/` after processing
+- **Logs**: Check `logs/watcher.log` for processing details
+
+---
+
+## 📁 File Structure & Flow
+
+### Directory Organization
+```
+C:\_chunker\
+├── 02_data/          # 📥 INPUT: Place files to be processed here
+├── 03_archive/       # 📦 ARCHIVE: Original files after processing
+├── 04_output/        # 📤 OUTPUT: Processed chunks and transcripts
+├── 05_logs/          # 📋 LOGS: System logs and error tracking
+├── 06_config/        # ⚙️ CONFIG: Configuration files
+├── templates/        # 🌐 WEB: HTML templates for dashboard
+├── static/           # 🎨 WEB: CSS, JS, and assets
+└── logs/             # 📊 LOGS: Watcher and processing logs
+```
+
+### File Processing Flow
+1. **Input**: Files placed in `02_data/`
+2. **Processing**: System chunks and processes files
+3. **Archive**: Originals moved to `03_archive/`
+4. **Output**: Results saved to `04_output/`
+
+---
+
+## 🎯 Core Features
+
+### Web Dashboard Features
+- ✅ **Real-time Monitoring**: Live system stats (CPU, Memory, Disk)
+- ✅ **File Upload**: Drag & drop interface for batch processing
+- ✅ **Processing Queue**: View and manage active jobs
+- ✅ **Analytics**: Processing statistics and trends
+- ✅ **Settings Management**: Web-based configuration
+- ✅ **File Browser**: Download processed results
+
+### Processing Capabilities
+- ✅ **Smart Chunking**: NLTK-based intelligent text splitting
+- ✅ **Department Filtering**: Configurable file filtering modes
+- ✅ **Parallel Processing**: Multi-threaded file handling
+- ✅ **Error Recovery**: Automatic retry and logging
+- ✅ **Notifications**: Email alerts for errors/completion
+
+---
+
+## 🔧 Configuration
+
+### Key Settings (`config.json`)
+```json
+{
+  "watch_folder": "02_data",
+  "output_dir": "04_output", 
+  "archive_dir": "03_archive",
+  "chunk_size": 1000,
+  "chunk_overlap": 200,
+  "filter_mode": "all",
+  "parallel_workers": 4,
+  "notification_email": "your-email@domain.com"
+}
+```
+
+### Filter Modes
+- `"all"`: Process all files
+- `"txt_only"`: Process only .txt files
+- `"md_only"`: Process only .md files
+- `"custom"`: Use custom file extensions
+
+---
+
+## 🌐 Web Dashboard Navigation
+
+### Main Pages
+1. **Dashboard** (`/`): System overview and real-time stats
+2. **Upload** (`/upload`): File upload interface
+3. **Files** (`/files`): Browse processed results
+4. **Analytics** (`/analytics`): Processing statistics
+5. **Settings** (`/settings`): System configuration
+
+### Key Dashboard Elements
+- **System Status Cards**: CPU, Memory, Disk usage
+- **Processing Queue**: Active jobs and progress
+- **Recent Activity**: Latest processing events
+- **System Alerts**: Error notifications and warnings
+
+---
+
+## 📊 API Endpoints
+
+### System Information
+- `GET /api/health` - System health check
+- `GET /api/stats` - Real-time system statistics
+- `GET /api/queue` - Processing queue status
+
+### File Operations
+- `POST /api/upload` - Upload files for processing
+- `GET /api/files` - List processed files
+- `GET /api/download/<filename>/<file_type>` - Download results
+
+### Analytics
+- `GET /api/analytics` - Processing statistics
+- `GET /api/analytics/departments` - Department-specific stats
+- `GET /api/analytics/errors` - Error history
+
+### Configuration
+- `GET /api/settings` - Get current settings
+- `POST /api/settings` - Update settings
+- `POST /api/settings/test` - Test notification settings
+
+---
+
+## 🛠️ Troubleshooting
+
+### Common Issues & Solutions
+
+#### 1. Dashboard Won't Start
+```bash
+# Check Python version (requires 3.8+)
+python --version
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Check if port 5000 is available
+netstat -ano | findstr :5000
+```
+
+#### 2. Files Not Processing
+- ✅ Check `02_data/` folder exists
+- ✅ Verify file permissions
+- ✅ Check `config.json` settings
+- ✅ Review logs in `05_logs/` or `logs/`
+
+#### 3. Database Issues
+```bash
+# Check database file
+dir chunker_tracking.db
+
+# Reset database (if corrupted)
+del chunker_tracking.db
+python web_dashboard.py  # Will recreate database
+```
+
+#### 4. Notification Problems
+- ✅ Verify email settings in `config.json`
+- ✅ Check internet connection
+- ✅ Test notifications via dashboard settings page
+
+---
+
+## 📈 Performance Optimization
+
+### Recommended Settings
+```json
+{
+  "parallel_workers": 4,        // Adjust based on CPU cores
+  "chunk_size": 1000,           // Optimal for most documents
+  "chunk_overlap": 200,         // 20% overlap for context
+  "max_file_size": 10485760     // 10MB limit
+}
+```
+
+### System Requirements
+- **RAM**: Minimum 4GB, Recommended 8GB+
+- **CPU**: Multi-core processor
+- **Storage**: Sufficient space for processed files
+- **Network**: For email notifications
+
+---
+
+## 🔄 Migration from Old System
+
+### File Locations
+- **Old**: Files processed to `admin/` folder
+- **New**: Files processed to `04_output/` folder
+- **Archive**: Originals moved to `03_archive/`
+
+### Configuration Migration
+1. Copy old `config.json` settings
+2. Update paths to new directory structure
+3. Test with small files first
+
+---
+
+## 📋 Daily Operations
+
+### Starting the System
+```bash
+cd C:\_chunker
+python start_dashboard.py
+```
+
+### Monitoring
+1. Open http://localhost:5000
+2. Check system status cards
+3. Monitor processing queue
+4. Review recent activity
+
+### File Processing
+1. Place files in `02_data/`
+2. Watch dashboard for processing status
+3. Download results from `Files` page
+4. Check `Analytics` for processing trends
+
+### Maintenance
+- **Weekly**: Review logs in `05_logs/`
+- **Monthly**: Clean old database entries
+- **As Needed**: Update configuration via dashboard
+
+---
+
+## 🚨 Emergency Procedures
+
+### System Crash Recovery
+```bash
+# 1. Stop any running processes
+taskkill /f /im python.exe
+
+# 2. Check for corrupted files
+dir 02_data\
+dir 04_output\
+
+# 3. Restart system
+python start_dashboard.py
+```
+
+### Data Recovery
+- **Original files**: Check `03_archive/`
+- **Processed files**: Check `04_output/`
+- **Database**: `chunker_tracking.db` contains processing history
+
+---
+
+## 📞 Support Information
+
+### Log Files
+- **System Logs**: `05_logs/` directory
+- **Watcher Logs**: `logs/watcher.log`
+- **Database**: `chunker_tracking.db`
+
+### Key Files
+- **Main Dashboard**: `web_dashboard.py`
+- **Processing Engine**: `watcher_splitter.py`
+- **Database**: `chunker_db.py`
+- **Configuration**: `config.json`
+- **Startup Script**: `start_dashboard.py`
+
+### Version Information
+- **System**: Enterprise Chunker v2.0
+- **Web Dashboard**: Flask-based interface
+- **Database**: SQLite with analytics
+- **Processing**: NLTK-powered intelligent chunking
+
+---
+
+## 🎯 Quick Commands Reference
+
+```bash
+# Start system
+python start_dashboard.py
+
+# Check system status
+netstat -ano | findstr :5000
+
+# View logs
+type logs\watcher.log
+
+# Check database
+python -c "import sqlite3; print(sqlite3.connect('chunker_tracking.db').execute('SELECT COUNT(*) FROM processing_history').fetchone()[0])"
+
+# Reset system (emergency)
+taskkill /f /im python.exe && python start_dashboard.py
+```
+
+---
+
+*Last Updated: January 2025*
+*System Version: Enterprise Chunker v2.0*
+
+```
+
+```markdown
+# Enterprise Chunker System - Summary & Cheat Sheet
+
+**Version 2.1.2** - Critical Performance Optimizations & Loop Fix
+
+## 🚀 Quick Start Guide
+
+### 1. Start the System
+```bash
+# Start the watcher (monitors 02_data for new files)
+python watcher_splitter.py
+```
+
+### 2. Process Files
+- **Input**: Drop files into `02_data/` directory
+- **Output**: Processed files appear in `04_output/` with timestamp prefixes
+- **Archive**: Original files moved to `03_archive/admin/` after processing
+- **Logs**: Check `logs/watcher.log` for processing details
+
+---
+
+## 📁 File Structure & Flow
+
+### Directory Organization
+```
+C:\_chunker\
+├── 02_data/          # 📥 INPUT: Place files to be processed here
+├── 03_archive/       # 📦 ARCHIVE: Organized by status
+│   ├── failed/       # Files that couldn't be read
+│   ├── skipped/      # Files too short to process
+│   └── no_chunks/    # Files with no valid chunks
+├── 04_output/        # 📤 OUTPUT: Processed chunks and transcripts
+├── 05_logs/          # 📋 LOGS: System logs and error tracking
+├── 06_config/        # ⚙️ CONFIG: Configuration files
+├── source/           # 📂 SOURCE: Copied processed files (configurable)
+├── templates/        # 🌐 WEB: HTML templates for dashboard
+├── static/           # 🎨 WEB: CSS, JS, and assets
+└── logs/             # 📊 LOGS: Watcher and processing logs
+```
+
+### File Processing Flow
+1. **Input**: Files placed in `02_data/`
+2. **Processing**: System chunks and processes files
+3. **Archive**: Originals moved to `03_archive/`
+4. **Output**: Results saved to `04_output/`
+
+---
+
+## 🎯 Core Features
+
+### Web Dashboard Features
+- ✅ **Real-time Monitoring**: Live system stats (CPU, Memory, Disk)
+- ✅ **File Upload**: Drag & drop interface for batch processing
+- ✅ **Processing Queue**: View and manage active jobs
+- ✅ **Analytics**: Processing statistics and trends
+- ✅ **Settings Management**: Web-based configuration
+- ✅ **File Browser**: Download processed results
+
+### Processing Capabilities
+- ✅ **Smart Chunking**: NLTK-based intelligent text splitting
+- ✅ **Department Filtering**: Configurable file filtering modes
+- ✅ **Parallel Processing**: Multi-threaded file handling
+- ✅ **Error Recovery**: Automatic retry and logging
+- ✅ **Notifications**: Email alerts for errors/completion
+
+---
+
+## 🔧 Configuration
+
+### Key Settings (`config.json`)
+```json
+{
+  "watch_folder": "02_data",
+  "output_dir": "04_output", 
+  "archive_dir": "03_archive",
+  "chunk_size": 1000,
+  "chunk_overlap": 200,
+  "filter_mode": "all",
+  "parallel_workers": 4,
+  "notification_email": "your-email@domain.com"
+}
+```
+
+### Filter Modes
+- `"all"`: Process all files
+- `"txt_only"`: Process only .txt files
+- `"md_only"`: Process only .md files
+- `"custom"`: Use custom file extensions
+
+---
+
+## 🌐 Web Dashboard Navigation
+
+### Main Pages
+1. **Dashboard** (`/`): System overview and real-time stats
+2. **Upload** (`/upload`): File upload interface
+3. **Files** (`/files`): Browse processed results
+4. **Analytics** (`/analytics`): Processing statistics
+5. **Settings** (`/settings`): System configuration
+
+### Key Dashboard Elements
+- **System Status Cards**: CPU, Memory, Disk usage
+- **Processing Queue**: Active jobs and progress
+- **Recent Activity**: Latest processing events
+- **System Alerts**: Error notifications and warnings
+
+---
+
+## 📊 API Endpoints
+
+### System Information
+- `GET /api/health` - System health check
+- `GET /api/stats` - Real-time system statistics
+- `GET /api/queue` - Processing queue status
+
+### File Operations
+- `POST /api/upload` - Upload files for processing
+- `GET /api/files` - List processed files
+- `GET /api/download/<filename>/<file_type>` - Download results
+
+### Analytics
+- `GET /api/analytics` - Processing statistics
+- `GET /api/analytics/departments` - Department-specific stats
+- `GET /api/analytics/errors` - Error history
+
+### Configuration
+- `GET /api/settings` - Get current settings
+- `POST /api/settings` - Update settings
+- `POST /api/settings/test` - Test notification settings
+
+---
+
+## 🛠️ Troubleshooting
+
+### Common Issues & Solutions
+
+#### 1. Dashboard Won't Start
+```bash
+# Check Python version (requires 3.8+)
+python --version
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Check if port 5000 is available
+netstat -ano | findstr :5000
+```
+
+#### 2. Files Not Processing
+- ✅ Check `02_data/` folder exists
+- ✅ Verify file permissions
+- ✅ Check `config.json` settings
+- ✅ Review logs in `05_logs/` or `logs/`
+
+#### 3. Database Issues
+```bash
+# Check database file
+dir chunker_tracking.db
+
+# Reset database (if corrupted)
+del chunker_tracking.db
+python web_dashboard.py  # Will recreate database
+```
+
+#### 4. Notification Problems
+- ✅ Verify email settings in `config.json`
+- ✅ Check internet connection
+- ✅ Test notifications via dashboard settings page
+
+---
+
+## 📈 Performance Optimization
+
+### Recommended Settings
+```json
+{
+  "parallel_workers": 4,        // Adjust based on CPU cores
+  "chunk_size": 1000,           // Optimal for most documents
+  "chunk_overlap": 200,         // 20% overlap for context
+  "max_file_size": 10485760     // 10MB limit
+}
+```
+
+### System Requirements
+- **RAM**: Minimum 4GB, Recommended 8GB+
+- **CPU**: Multi-core processor
+- **Storage**: Sufficient space for processed files
+- **Network**: For email notifications
+
+---
+
+## 🔄 Migration from Old System
+
+### File Locations
+- **Old**: Files processed to `admin/` folder
+- **New**: Files processed to `04_output/` folder
+- **Archive**: Originals moved to `03_archive/`
+
+### Configuration Migration
+1. Copy old `config.json` settings
+2. Update paths to new directory structure
+3. Test with small files first
+
+---
+
+## 📋 Daily Operations
+
+### Starting the System
+```bash
+cd C:\_chunker
+python start_dashboard.py
+```
+
+### Monitoring
+1. Open http://localhost:5000
+2. Check system status cards
+3. Monitor processing queue
+4. Review recent activity
+
+### File Processing
+1. Place files in `02_data/`
+2. Watch dashboard for processing status
+3. Download results from `Files` page
+4. Check `Analytics` for processing trends
+
+### Maintenance
+- **Weekly**: Review logs in `05_logs/`
+- **Monthly**: Clean old database entries
+- **As Needed**: Update configuration via dashboard
+
+---
+
+## 🚨 Emergency Procedures
+
+### System Crash Recovery
+```bash
+# 1. Stop any running processes
+taskkill /f /im python.exe
+
+# 2. Check for corrupted files
+dir 02_data\
+dir 04_output\
+
+# 3. Restart system
+python start_dashboard.py
+```
+
+### Data Recovery
+- **Original files**: Check `03_archive/`
+- **Processed files**: Check `04_output/`
+- **Database**: `chunker_tracking.db` contains processing history
+
+---
+
+## 📞 Support Information
+
+### Log Files
+- **System Logs**: `05_logs/` directory
+- **Watcher Logs**: `logs/watcher.log`
+- **Database**: `chunker_tracking.db`
+
+### Key Files
+- **Main Dashboard**: `web_dashboard.py`
+- **Processing Engine**: `watcher_splitter.py`
+- **Database**: `chunker_db.py`
+- **Configuration**: `config.json`
+- **Startup Script**: `start_dashboard.py`
+
+### Version Information
+- **System**: Enterprise Chunker v2.0
+- **Web Dashboard**: Flask-based interface
+- **Database**: SQLite with analytics
+- **Processing**: NLTK-powered intelligent chunking
+
+---
+
+## 🎯 Quick Commands Reference
+
+```bash
+# Start system
+python start_dashboard.py
+
+# Check system status
+netstat -ano | findstr :5000
+
+# View logs
+type logs\watcher.log
+
+# Check database
+python -c "import sqlite3; print(sqlite3.connect('chunker_tracking.db').execute('SELECT COUNT(*) FROM processing_history').fetchone()[0])"
+
+# Reset system (emergency)
+taskkill /f /im python.exe && python start_dashboard.py
+```
+
+---
+
+*Last Updated: January 2025*
+*System Version: Enterprise Chunker v2.0*
+
+```
+
+Now let me add a performance section to the summary:
+
+
+```markdown
+# Enterprise Chunker System - Summary & Cheat Sheet
+
+**Version 2.1.2** - Critical Performance Optimizations & Loop Fix
+
+## 🚀 Quick Start Guide
+
+### 1. Start the System
+```bash
+# Start the watcher (monitors 02_data for new files)
+python watcher_splitter.py
+```
+
+### 2. Process Files
+- **Input**: Drop files into `02_data/` directory
+- **Output**: Processed files appear in `04_output/` with timestamp prefixes
+- **Archive**: Original files moved to `03_archive/admin/` after processing
+- **Logs**: Check `logs/watcher.log` for processing details
+
+---
+
+## 📁 File Structure & Flow
+
+### Directory Organization
+```
+C:\_chunker\
+├── 02_data/          # 📥 INPUT: Place files to be processed here
+├── 03_archive/       # 📦 ARCHIVE: Organized by status
+│   ├── failed/       # Files that couldn't be read
+│   ├── skipped/      # Files too short to process
+│   └── no_chunks/    # Files with no valid chunks
+├── 04_output/        # 📤 OUTPUT: Processed chunks and transcripts
+├── 05_logs/          # 📋 LOGS: System logs and error tracking
+├── 06_config/        # ⚙️ CONFIG: Configuration files
+├── source/           # 📂 SOURCE: Copied processed files (configurable)
+├── templates/        # 🌐 WEB: HTML templates for dashboard
+├── static/           # 🎨 WEB: CSS, JS, and assets
+└── logs/             # 📊 LOGS: Watcher and processing logs
+```
+
+### File Processing Flow
+1. **Input**: Files placed in `02_data/`
+2. **Processing**: System chunks and processes files with dynamic parallel workers
+3. **Archive**: Originals moved to `03_archive/` (organized by status)
+4. **Output**: Results saved to `04_output/`
+5.

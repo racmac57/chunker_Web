@@ -1,0 +1,809 @@
+Args:
+            file_path: Path to the file
+            dest_path: Destination path (for moved events)
+            event_type: Type of event
+            source_folder: Source folder
+        """
+        try:
+            # Mark as processing
+            self.processing_files.add(str(file_path))
+            
+            if CELERY_AVAILABLE:
+                # Use Celery task chain for advanced processing
+                task_id = process_file_with_celery_chain(
+                    str(file_path),
+                    str(dest_path) if dest_path else None,
+                    event_type,
+                    self.config
+                )
+                
+                logger.info(f"Queued Celery workflow for: {file_path} (task_id: {task_id})")
+                
+                # Monitor task completion in background
+                self._monitor_celery_task_completion(file_path, task_id)
+                
+            else:
+                # Fallback to direct processing
+                logger.info(f"Using fallback processing for: {file_path}")
+                self._process_file_directly(file_path, dest_path, event_type, source_folder)
+            
+        except Exception as e:
+            logger.error(f"Error queuing processing task: {e}")
+            self.processing_files.discard(str(file_path))
+            self._handle_failed_file(file_path, str(e))
+    
+    def _monitor_celery_task_completion(self, file_path: Path, task_id: str) -> None:
+        """
+        Monitor Celery task completion using task ID. Args:
+            file_path: Path to the file
+            task_id: Celery task ID
+        """
+        def monitor():
+            try:
+                if not CELERY_AVAILABLE:
+                    logger.error("Celery not available for task monitoring")
+                    self.processing_files.discard(str(file_path))
+                    return
+                
+                # Get task result with timeout
+                result = celery_app.AsyncResult(task_id)
+                
+                # Wait for task completion with timeout
+                try:
+                    task_result = result.get(timeout=300)  # 5 minute timeout
+                    
+                    if task_result and task_result.get("status") == "success":
+                        logger.info(f"Successfully processed: {file_path}")
+                        self.stats["files_processed"] += 1
+                    else:
+                        logger.error(f"Failed to process: {file_path} - {task_result.get('message', 'Unknown error')}")
+                        self.stats["files_failed"] += 1
+                        self._handle_failed_file(file_path, task_result.get("message", "Processing failed"))
+                
+                except Exception as e:
+                    logger.error(f"Task monitoring timeout or error: {e}")
+                    self.stats["files_failed"] += 1
+                    self._handle_failed_file(file_path, str(e))
+                
+            except Exception as e:
+                logger.error(f"Error monitoring Celery task: {e}")
+                self.stats["files_failed"] += 1
+                self._handle_failed_file(file_path, str(e))
+            
+            finally:
+                # Remove from processing set
+                self.processing_files.discard(str(file_path))
+        
+        # Start monitoring in background thread
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+    
+    def _process_file_directly(self, file_path: Path, dest_path: Optional[str], 
+                              event_type: str, source_folder: Optional[str]) -> None:
+        """
+        Fallback direct file processing when Celery is not available. Args:
+            file_path: Path to the file
+            dest_path: Destination path (for moved events)
+            event_type: Type of event
+            source_folder: Source folder
+        """
+        def process():
+            try:
+                logger.info(f"Processing file directly: {file_path}")
+                
+                # Import the original processing function
+                from watcher_splitter import process_file_enhanced
+                
+                # Process the file
+                success = process_file_enhanced(file_path, self.config)
+                
+                if success:
+                    logger.info(f"Successfully processed: {file_path}")
+                    self.stats["files_processed"] += 1
+                else:
+                    logger.error(f"Failed to process: {file_path}")
+                    self.stats["files_failed"] += 1
+                    self._handle_failed_file(file_path, "Direct processing failed")
+                
+            except Exception as e:
+                logger.error(f"Direct processing failed: {e}")
+                self.stats["files_failed"] += 1
+                self._handle_failed_file(file_path, str(e))
+            
+            finally:
+                # Remove from processing set
+                self.processing_files.discard(str(file_path))
+        
+        # Start processing in background thread
+        process_thread = threading.Thread(target=process, daemon=True)
+        process_thread.start()
+    
+    def _monitor_task_completion(self, file_path: Path, task) -> None:
+        """
+        Monitor Celery task completion in background thread. Args:
+            file_path: Path to the file
+            task: Celery task object
+        """
+        def monitor():
+            try:
+                # Wait for task completion
+                result = task.get(timeout=300)  # 5 minute timeout
+                
+                if result.get("status") == "success":
+                    logger.info(f"Successfully processed: {file_path}")
+                    self.stats["files_processed"] += 1
+                else:
+                    logger.error(f"Failed to process: {file_path} - {result.get('message', 'Unknown error')}")
+                    self.stats["files_failed"] += 1
+                    self._handle_failed_file(file_path, result.get("message", "Processing failed"))
+                
+            except Exception as e:
+                logger.error(f"Error monitoring task completion: {e}")
+                self.stats["files_failed"] += 1
+                self._handle_failed_file(file_path, str(e))
+            
+            finally:
+                # Remove from processing set
+                self.processing_files.discard(str(file_path))
+        
+        # Start monitoring in background thread
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+    
+    def _handle_failed_file(self, file_path: Path, error: str) -> None:
+        """
+        Handle failed file processing. Args:
+            file_path: Path to the failed file
+            error: Error message
+        """
+        try:
+            # Move to failed directory
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            failed_path = Path(self.failed_dir) / f"{file_path.stem}_{timestamp}{file_path.suffix}"
+            
+            file_path.rename(failed_path)
+            
+            # Log error details
+            error_log = Path(self.failed_dir) / f"{file_path.stem}_{timestamp}_error.log"
+            with open(error_log, 'w') as f:
+                f.write(f"File: {file_path}\n")
+                f.write(f"Error: {error}\n")
+                f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            
+            logger.info(f"Moved failed file to: {failed_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to handle failed file: {e}")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get processing statistics. Returns:
+            Statistics dictionary
+        """
+        uptime = datetime.now() - self.stats["start_time"]
+        
+        return {
+            "uptime_seconds": uptime.total_seconds(),
+            "files_processed": self.stats["files_processed"],
+            "files_failed": self.stats["files_failed"],
+            "events_ignored": self.stats["events_ignored"],
+            "race_conditions_prevented": self.stats["race_conditions_prevented"],
+            "queue_size": len(self.event_queue),
+            "processing_files": len(self.processing_files),
+            "processing_file_list": list(self.processing_files)
+        }
+
+class EnhancedWatchdogMonitor:
+    """
+    Enhanced watchdog monitor with Celery integration and comprehensive monitoring.
+    """ def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize enhanced watchdog monitor. Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.watch_folder = config.get("watch_folder", "02_data")
+        self.recursive = config.get("recursive_watch", True)
+        self.observer = None
+        self.event_handler = None
+        self.queue_thread = None
+        self.running = False
+        
+        logger.info("Initialized EnhancedWatchdogMonitor")
+    
+    def start(self) -> None:
+        """
+        Start the enhanced watchdog monitor.
+        """ try:
+            # Create event handler
+            self.event_handler = EnhancedChunkerEventHandler(self.config)
+            
+            # Create observer
+            self.observer = Observer()
+            self.observer.schedule(
+                self.event_handler, 
+                self.watch_folder, 
+                recursive=self.recursive
+            )
+            
+            # Start observer
+            self.observer.start()
+            
+            # Start queue processing thread
+            self.queue_thread = threading.Thread(
+                target=self.event_handler.process_queue, 
+                daemon=True
+            )
+            self.queue_thread.start()
+            
+            self.running = True
+            logger.info(f"Started enhanced watchdog monitor for: {self.watch_folder}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start enhanced watchdog monitor: {e}")
+            raise
+    
+    def stop(self) -> None:
+        """
+        Stop the enhanced watchdog monitor.
+        """ try:
+            self.running = False
+            
+            if self.observer:
+                self.observer.stop()
+                self.observer.join()
+            
+            logger.info("Stopped enhanced watchdog monitor")
+            
+        except Exception as e:
+            logger.error(f"Error stopping enhanced watchdog monitor: {e}")
+    
+    def is_running(self) -> bool:
+        """
+        Check if monitor is running. Returns:
+            True if running, False otherwise
+        """
+        return self.running and self.observer and self.observer.is_alive()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get monitoring statistics. Returns:
+            Statistics dictionary
+        """
+        if not self.event_handler:
+            return {"error": "Event handler not initialized"}
+        
+        stats = self.event_handler.get_stats()
+        stats.update({
+            "watch_folder": self.watch_folder,
+            "recursive": self.recursive,
+            "running": self.running,
+            "observer_alive": self.observer.is_alive() if self.observer else False
+        })
+        
+        return stats
+    
+    def force_process_file(self, file_path: str) -> bool:
+        """
+        Force process a specific file. Args:
+            file_path: Path to the file
+            
+        Returns:
+            True if queued successfully, False otherwise
+        """
+        try:
+            file_path_obj = Path(file_path)
+            
+            if not file_path_obj.exists():
+                logger.error(f"File does not exist: {file_path}")
+                return False
+            
+            # Queue processing task directly
+            task = process_file_task.delay(
+                str(file_path_obj),
+                None,
+                "manual",
+                self.config
+            )
+            
+            logger.info(f"Force queued processing for: {file_path} (task_id: {task.id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error force processing file: {e}")
+            return False
+
+def create_enhanced_watchdog_monitor(config: Dict[str, Any]) -> EnhancedWatchdogMonitor:
+    """
+    Create enhanced watchdog monitor instance. Args:
+        config: Configuration dictionary
+        
+    Returns:
+        EnhancedWatchdogMonitor instance
+    """
+    return EnhancedWatchdogMonitor(config)
+
+def start_celery_worker() -> None:
+    """
+    Start Celery worker process.
+    """ try:
+        from celery_tasks import app
+        app.worker_main(['worker', '--loglevel=info', '--concurrency=4'])
+    except Exception as e:
+        logger.error(f"Failed to start Celery worker: {e}")
+
+# Example usage
+if __name__ == "__main__":
+    # Configuration
+    config = {
+        "watch_folder": "02_data",
+        "debounce_window": 1.0,
+        "max_workers": 4,
+        "failed_dir": "03_archive/failed",
+        "default_source_folder": "02_data",
+        "recursive_watch": True,
+        "supported_extensions": [".txt", ".md", ".json", ".csv", ".xlsx", ".pdf", ".py", ".docx", ".sql", ".yaml", ".xml", ".log"],
+        "rag_enabled": True,
+        "chroma_persist_dir": "./chroma_db",
+        "output_dir": "04_output",
+        "archive_dir": "03_archive"
+    }
+    
+    # Create monitor
+    monitor = create_enhanced_watchdog_monitor(config)
+    
+    try:
+        # Start monitoring
+        monitor.start()
+        
+        # Keep running
+        while monitor.is_running():
+            time.sleep(10)
+            
+            # Print stats every 10 seconds
+            stats = monitor.get_stats()
+            logger.info(f"Monitor stats: {stats}")
+    
+    except KeyboardInterrupt:
+        logger.info("Stopping monitor...")
+        monitor.stop()
+    
+    print("Enhanced watchdog monitor test completed successfully!") ```
+
+Now let me update the orchestrator to include Flower dashboard and better error handling:
+
+
+```python
+"""
+Simple Orchestration Script for Chunker_v2
+Replaces Airflow with lightweight task coordination
+"""
+
+import os
+import time
+import logging
+import subprocess
+import threading
+from typing import Dict, Any, List
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class ChunkerOrchestrator:
+    """
+    Lightweight orchestration for Chunker_v2 without Airflow complexity.
+    """ def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize orchestrator. Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.processes = {}
+        self.running = False
+        
+        logger.info("Initialized ChunkerOrchestrator")
+    
+    def start_all_services(self) -> None:
+        """Start all Chunker_v2 services.""" try:
+            # Start Redis (if not running)
+            self._start_redis()
+            
+            # Start Celery workers
+            self._start_celery_workers()
+            
+            # Start Celery beat scheduler
+            self._start_celery_beat()
+            
+            # Start Flower dashboard
+            self._start_flower_dashboard()
+            
+            # Start Watchdog monitor
+            self._start_watchdog()
+            
+            # Start monitoring
+            self._start_monitoring()
+            
+            self.running = True
+            logger.info("All services started successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to start services: {e}")
+            self.stop_all_services()
+            raise
+    
+    def stop_all_services(self) -> None:
+        """Stop all services.""" try:
+            self.running = False
+            
+            for service_name, process in self.processes.items():
+                if process and process.poll() is None:
+                    process.terminate()
+                    logger.info(f"Stopped {service_name}")
+            
+            self.processes.clear()
+            logger.info("All services stopped")
+            
+        except Exception as e:
+            logger.error(f"Error stopping services: {e}")
+    
+    def _start_redis(self) -> None:
+        """Start Redis server.""" try:
+            # Check if Redis is already running
+            result = subprocess.run(['redis-cli', 'ping'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Redis already running")
+                return
+            
+            # Start Redis
+            redis_process = subprocess.Popen(['redis-server'], 
+                                           stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL)
+            self.processes['redis'] = redis_process
+            
+            # Wait for Redis to start
+            time.sleep(2)
+            logger.info("Redis started")
+            
+        except Exception as e:
+            logger.warning(f"Could not start Redis: {e}")
+            logger.info("Please start Redis manually: redis-server")
+    
+    def _start_celery_workers(self) -> None:
+        """Start Celery workers.""" try:
+            # Start file processing worker
+            file_worker = subprocess.Popen([
+                'python', '-m', 'celery', 'worker',
+                '-A', 'celery_tasks',
+                '-Q', 'file_processing',
+                '--concurrency=4',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_file_worker'] = file_worker
+            
+            # Start batch processing worker
+            batch_worker = subprocess.Popen([
+                'python', '-m', 'celery', 'worker',
+                '-A', 'celery_tasks',
+                '-Q', 'batch_processing',
+                '--concurrency=2',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_batch_worker'] = batch_worker
+            
+            logger.info("Celery workers started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start Celery workers: {e}")
+            raise
+    
+    def _start_celery_beat(self) -> None:
+        """Start Celery beat scheduler.""" try:
+            beat_process = subprocess.Popen([
+                'python', '-m', 'celery', 'beat',
+                '-A', 'celery_tasks',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_beat'] = beat_process
+            
+            logger.info("Celery beat scheduler started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start Celery beat: {e}")
+            raise
+    
+    def _start_watchdog(self) -> None:
+        """Start watchdog monitor.""" try:
+            watchdog_process = subprocess.Popen([
+                'python', 'enhanced_watchdog.py'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['watchdog'] = watchdog_process
+            
+            logger.info("Watchdog monitor started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start watchdog: {e}")
+            raise
+    
+    def _start_monitoring(self) -> None:
+        """Start monitoring thread.""" def monitor():
+            while self.running:
+                try:
+                    self._check_service_health()
+                    time.sleep(30)  # Check every 30 seconds
+                except Exception as e:
+                    logger.error(f"Monitoring error: {e}")
+                    time.sleep(60)
+        
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+        logger.info("Monitoring started")
+    
+    def _check_service_health(self) -> None:
+        """Check health of all services.""" healthy_services = []
+        unhealthy_services = []
+        
+        for service_name, process in self.processes.items():
+            if process and process.poll() is None:
+                healthy_services.append(service_name)
+            else:
+                unhealthy_services.append(service_name)
+        
+        if unhealthy_services:
+            logger.warning(f"Unhealthy services: {unhealthy_services}")
+        
+        logger.info(f"Service health: {len(healthy_services)} healthy, {len(unhealthy_services)} unhealthy")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get status of all services.""" status = {
+            "timestamp": datetime.now().isoformat(),
+            "running": self.running,
+            "services": {}
+        }
+        
+        for service_name, process in self.processes.items():
+            status["services"][service_name] = {
+                "running": process and process.poll() is None,
+                "pid": process.pid if process else None
+            }
+        
+        return status
+    
+    def restart_service(self, service_name: str) -> bool:
+        """Restart a specific service.""" try:
+            if service_name in self.processes:
+                old_process = self.processes[service_name]
+                if old_process:
+                    old_process.terminate()
+                    old_process.wait()
+                
+                # Restart based on service type
+                if service_name == 'celery_file_worker':
+                    self._start_celery_workers()
+                elif service_name == 'watchdog':
+                    self._start_watchdog()
+                # Add other services as needed
+                
+                logger.info(f"Restarted {service_name}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to restart {service_name}: {e}")
+            return False
+
+def main():
+    """Main orchestration function.""" config = {
+        "watch_folder": "02_data",
+        "output_dir": "04_output",
+        "archive_dir": "03_archive",
+        "rag_enabled": True
+    }
+    
+    orchestrator = ChunkerOrchestrator(config)
+    
+    try:
+        print("Starting Chunker_v2 services...")
+        orchestrator.start_all_services()
+        
+        print("All services started. Press Ctrl+C to stop.") while True:
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        print("\nStopping services...")
+        orchestrator.stop_all_services()
+        print("All services stopped.") if __name__ == "__main__":
+    main()
+
+```
+
+Now let me add the Flower dashboard startup method and enhance error handling:
+
+
+```python
+"""
+Simple Orchestration Script for Chunker_v2
+Replaces Airflow with lightweight task coordination
+"""
+
+import os
+import time
+import logging
+import subprocess
+import threading
+from typing import Dict, Any, List
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class ChunkerOrchestrator:
+    """
+    Lightweight orchestration for Chunker_v2 without Airflow complexity.
+    """ def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize orchestrator. Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.processes = {}
+        self.running = False
+        
+        logger.info("Initialized ChunkerOrchestrator")
+    
+    def start_all_services(self) -> None:
+        """Start all Chunker_v2 services.""" try:
+            # Start Redis (if not running)
+            self._start_redis()
+            
+            # Start Celery workers
+            self._start_celery_workers()
+            
+            # Start Celery beat scheduler
+            self._start_celery_beat()
+            
+            # Start Flower dashboard
+            self._start_flower_dashboard()
+            
+            # Start Watchdog monitor
+            self._start_watchdog()
+            
+            # Start monitoring
+            self._start_monitoring()
+            
+            self.running = True
+            logger.info("All services started successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to start services: {e}")
+            self.stop_all_services()
+            raise
+    
+    def stop_all_services(self) -> None:
+        """Stop all services.""" try:
+            self.running = False
+            
+            for service_name, process in self.processes.items():
+                if process and process.poll() is None:
+                    process.terminate()
+                    logger.info(f"Stopped {service_name}")
+            
+            self.processes.clear()
+            logger.info("All services stopped")
+            
+        except Exception as e:
+            logger.error(f"Error stopping services: {e}")
+    
+    def _start_redis(self) -> None:
+        """Start Redis server.""" try:
+            # Check if Redis is already running
+            result = subprocess.run(['redis-cli', 'ping'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Redis already running")
+                return
+            
+            # Start Redis
+            redis_process = subprocess.Popen(['redis-server'], 
+                                           stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL)
+            self.processes['redis'] = redis_process
+            
+            # Wait for Redis to start
+            time.sleep(2)
+            logger.info("Redis started")
+            
+        except Exception as e:
+            logger.warning(f"Could not start Redis: {e}")
+            logger.info("Please start Redis manually: redis-server")
+    
+    def _start_celery_workers(self) -> None:
+        """Start Celery workers.""" try:
+            # Start file processing worker
+            file_worker = subprocess.Popen([
+                'python', '-m', 'celery', 'worker',
+                '-A', 'celery_tasks',
+                '-Q', 'file_processing',
+                '--concurrency=4',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_file_worker'] = file_worker
+            
+            # Start batch processing worker
+            batch_worker = subprocess.Popen([
+                'python', '-m', 'celery', 'worker',
+                '-A', 'celery_tasks',
+                '-Q', 'batch_processing',
+                '--concurrency=2',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_batch_worker'] = batch_worker
+            
+            logger.info("Celery workers started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start Celery workers: {e}")
+            raise
+    
+    def _start_celery_beat(self) -> None:
+        """Start Celery beat scheduler.""" try:
+            beat_process = subprocess.Popen([
+                'python', '-m', 'celery', 'beat',
+                '-A', 'celery_tasks',
+                '--loglevel=info'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['celery_beat'] = beat_process
+            
+            logger.info("Celery beat scheduler started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start Celery beat: {e}")
+            raise
+    
+    def _start_flower_dashboard(self) -> None:
+        """Start Flower dashboard for Celery monitoring.""" try:
+            flower_process = subprocess.Popen([
+                'python', '-m', 'flower',
+                '--broker=redis://localhost:6379/0',
+                '--port=5555',
+                '--address=0.0.0.0'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['flower'] = flower_process
+            
+            logger.info("Flower dashboard started on http://localhost:5555")
+            
+        except Exception as e:
+            logger.warning(f"Failed to start Flower dashboard: {e}")
+            logger.info("Celery monitoring will be available via CLI only")
+    
+    def _start_watchdog(self) -> None:
+        """Start watchdog monitor.""" try:
+            watchdog_process = subprocess.Popen([
+                'python', 'enhanced_watchdog.py'
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.processes['watchdog'] = watchdog_process
+            
+            logger.info("Watchdog monitor started")
+            
+        except Exception as e:
+            logger.error(f"Failed to start watchdog: {e}")
+            raise
+    
+    def _start_monitoring(self) -> None:
+        """Start monitoring thread.""" def monitor():
+            while self.running:
+                try:
+                    self._check_service_health()
+                    time.sleep(30)  # Check every 30 seconds
+                except Exception as e:
+                    logger.error(f"Monitoring error: {e}")
+                    time.sleep(60)
+        
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+        logger.info("Monitoring started")
+    
+    def _check_service_health(self) -> None:
+        """Check health of all services."""

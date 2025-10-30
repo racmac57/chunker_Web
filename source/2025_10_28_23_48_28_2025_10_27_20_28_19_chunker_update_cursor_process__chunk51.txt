@@ -1,0 +1,758 @@
+return
+    
+    # Check processor dependencies
+    processor_deps = check_processor_dependencies()
+    missing_deps = [dep for dep, available in processor_deps.items() if not available]
+    if missing_deps:
+        logger.warning(f"Missing file processor dependencies: {', '.join(missing_deps)}")
+        logger.info("Some file types may not be processed correctly")
+    
+    os.makedirs(CONFIG.get("output_dir", "output"), exist_ok=True)
+    os.makedirs(CONFIG.get("archive_dir", "processed"), exist_ok=True)
+
+    logger.info("=== ENTERPRISE CHUNKER STARTED ===")
+    logger.info(f"Monitoring: {watch_folder}")
+    supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    filter_mode = CONFIG.get("file_filter_mode", "all")
+    logger.info(f"File types: {', '.join(supported_extensions)} files")
+    logger.info(f"Filter mode: {filter_mode}")
+    if filter_mode == "patterns":
+        patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+        logger.info(f"Required patterns: {', '.join(patterns)}")
+    elif filter_mode == "suffix":
+        logger.info("Required suffix: _full_conversation")
+    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    logger.info(f"Database tracking: Enabled")
+    logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG enabled: {CONFIG.get('rag_enabled', False)}")
+    
+    processed_files = set()
+    loop_count = 0
+    last_cleanup = datetime.now()
+    last_report = datetime.now()
+    
+    # Send startup notification
+    notifications.send_email(
+        notifications.config["admin_emails"],
+        "🚀 Chunker System Started",
+        f"Enterprise Chunker system started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Monitoring: {watch_folder}\n"
+        f"File types: {', '.join(supported_extensions)} files\n"
+        f"Filter mode: {filter_mode}\n"
+        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Database: Enabled\n"
+        f"Dashboard: http://localhost:5000"
+    )
+    
+    try:
+        while True:
+            try:
+                # Look for files with supported extensions
+                all_files = []
+                supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+                for ext in supported_extensions:
+                    all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
+                
+                # Filter files based on configuration
+                excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
+                
+                # Apply file filtering based on mode
+                filter_mode = CONFIG.get("file_filter_mode", "all")
+                file_patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+                exclude_patterns = CONFIG.get("exclude_patterns", [])
+                
+                filtered_files = []
+                for f in all_files:
+                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                        continue
+                    
+                    # Check exclude patterns first
+                    if any(pattern in f.name for pattern in exclude_patterns):
+                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        continue
+                    
+                    # Apply filter mode
+                    if filter_mode == "all":
+                        filtered_files.append(f)
+                    elif filter_mode == "patterns":
+                        if any(pattern in f.name for pattern in file_patterns):
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                    elif filter_mode == "suffix":
+                        # Only process files with _full_conversation suffix
+                        if "_full_conversation" in f.name:
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                new_files = filtered_files
+                
+                if new_files:
+                    logger.info(f"Found {len(new_files)} new files to process")
+                    
+                    # Process files in parallel if multiple files
+                    if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
+                        results = process_files_parallel(new_files, CONFIG)
+                        for i, result in enumerate(results):
+                            if result:
+                                processed_files.add(new_files[i].name)
+                    else:
+                        # Process files sequentially
+                        for file_path in new_files:
+                            try:
+                                if process_file_enhanced(file_path, CONFIG):
+                                    processed_files.add(file_path.name)
+                                    logger.info(f"Successfully processed: {file_path.name}")
+                                else:
+                                    logger.error(f"Failed to process: {file_path.name}")
+                            except Exception as e:
+                                logger.exception(f"Error processing {file_path.name}: {e}")
+                                if db:
+                                    try:
+                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                    except Exception as db_error:
+                                        logger.warning(f"Failed to log processing error to database: {db_error}")
+                
+                # Periodic maintenance
+                loop_count += 1
+                
+                # Log session stats every minute
+                if loop_count % 12 == 0:  # Every minute at 5s intervals
+                    log_session_stats()
+                
+                # Log system metrics every 5 minutes
+                if loop_count % 60 == 0:
+                    log_system_metrics()
+                
+                # Daily cleanup and reporting
+                if datetime.now() - last_cleanup > timedelta(hours=24):
+                    if db:
+                        try:
+                            db.cleanup_old_data(days=30)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to run database cleanup: {db_error}")
+                    last_cleanup = datetime.now()
+                
+                # Send daily report
+                if datetime.now() - last_report > timedelta(hours=24):
+                    if db:
+                        try:
+                            analytics = db.get_analytics(days=1)
+                            notifications.send_daily_summary(session_stats, analytics)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to get analytics or send daily summary: {db_error}")
+                    last_report = datetime.now()
+                
+                time.sleep(CONFIG.get("polling_interval", 5))
+                
+            except KeyboardInterrupt:
+                logger.info("Watcher stopped by user")
+                break
+            except Exception as e:
+                logger.exception("Critical error in main loop")
+                if db:
+                    try:
+                        db.log_error("MainLoopError", str(e), traceback.format_exc())
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                try:
+                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
+                except Exception as notify_error:
+                    logger.warning(f"Failed to send error alert: {notify_error}")
+                time.sleep(10)
+                
+    finally:
+        # Final statistics and cleanup
+        log_session_stats()
+        
+        # Send shutdown notification
+        notifications.send_email(
+            notifications.config["admin_emails"],
+            "🛑 Chunker System Stopped",
+            f"Enterprise Chunker system stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Session Summary:\n"
+            f"Files Processed: {session_stats['files_processed']}\n"
+            f"Chunks Created: {session_stats['chunks_created']}\n"
+            f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}\n"
+            f"Errors: {session_stats['errors']}\n"
+            f"Uptime: {datetime.now() - datetime.strptime(session_stats['session_start'], '%Y-%m-%d %H:%M:%S')}"
+        )
+
+if __name__ == "__main__":
+    main()
+```
+
+Perfect! Now let me create a final summary document:
+
+
+```markdown
+# Chunker_v2 Enhancement Summary
+
+## ✅ All Corrections and Enhancements Implemented
+
+### 🔧 **Fixed Issues**
+
+1. **Redundant file opens** ✅
+   - **Problem**: Processors reopened files unnecessarily
+   - **Solution**: Created `file_processors.py` module, pass text to processors
+   - **Impact**: Better performance, reduced I/O overhead
+
+2. **Encoding handling** ✅
+   - **Problem**: Used 'ignore' which could lose data
+   - **Solution**: Changed to 'replace' for better data preservation
+   - **Impact**: Better handling of special characters
+
+3. **NLTK import issues** ✅
+   - **Problem**: Missing stopwords import in `extract_keywords`
+   - **Solution**: Added proper NLTK handling with fallback
+   - **Impact**: Robust keyword extraction
+
+4. **LangSmith integration** ✅
+   - **Problem**: Unused imports causing confusion
+   - **Solution**: Cleaned up imports, added graceful degradation
+   - **Impact**: Cleaner code, better error handling
+
+### 🚀 **Enhancements Added**
+
+1. **Modular file processors** ✅
+   - **File**: `file_processors.py`
+   - **Features**: All file type processors in one module
+   - **Benefits**: Better organization, easier maintenance
+
+2. **Security redaction** ✅
+   - **Feature**: PII redaction for sensitive data
+   - **Implementation**: `redact_sensitive_data()` function
+   - **Benefits**: Privacy protection in RAG chunks
+
+3. **Config validation** ✅
+   - **Feature**: Startup configuration validation
+   - **Implementation**: `validate_config()` function
+   - **Benefits**: Early error detection, better reliability
+
+4. **Automated testing** ✅
+   - **File**: `rag_test.py`
+   - **Features**: Comprehensive RAG evaluation with thresholds
+   - **Benefits**: Quality assurance, regression detection
+
+5. **Enhanced error handling** ✅
+   - **Feature**: Graceful degradation when RAG unavailable
+   - **Implementation**: Safe wrapper functions
+   - **Benefits**: System continues working even with missing dependencies
+
+6. **Type hints and docstrings** ✅
+   - **Feature**: Comprehensive type annotations
+   - **Implementation**: Added throughout RAG modules
+   - **Benefits**: Better code documentation, IDE support
+
+7. **RAG query examples** ✅
+   - **Feature**: Usage examples in README
+   - **Implementation**: Interactive and command-line examples
+   - **Benefits**: Easier adoption, better user experience
+
+### 📊 **Performance Improvements**
+
+1. **Memory efficiency** ✅
+   - Reduced redundant file operations
+   - Better handling of large files
+   - Streamlined processing pipeline
+
+2. **Error recovery** ✅
+   - Graceful degradation when components fail
+   - Better logging and diagnostics
+   - Non-blocking error handling
+
+3. **Code organization** ✅
+   - Modular design with separate concerns
+   - Cleaner imports and dependencies
+   - Better maintainability
+
+### 🧪 **Testing Framework**
+
+**Automated Test Suite** (`rag_test.py`):
+- Loads test queries from `test_queries.json`
+- Sets up test RAG system with sample documents
+- Runs comprehensive evaluation pipeline
+- Validates against configurable thresholds
+- Provides detailed pass/fail reporting
+
+**Test Thresholds**:
+- Overall score: ≥ 0.5
+- Precision@K: ≥ 0.3
+- Recall@K: ≥ 0.3
+- Faithfulness: ≥ 0.4
+
+### 📁 **File Structure**
+
+```
+C:\_chunker\
+├── watcher_splitter.py          # Main watcher (enhanced)
+├── file_processors.py           # Modular file processors
+├── rag_integration.py           # ChromaDB RAG system
+├── rag_evaluation.py            # Evaluation metrics
+├── rag_search.py                # Interactive search tool
+├── rag_test.py                  # Automated testing
+├── langchain_rag_handler.py     # LangChain integration
+├── config.json                  # Configuration (validated)
+├── test_queries.json            # Test queries
+├── requirements.txt             # Dependencies
+├── README.md                    # Documentation (enhanced)
+└── CHANGELOG.md                 # Version history
+```
+
+### 🎯 **Usage Examples**
+
+**Basic RAG Search**:
+```bash
+python rag_search.py "How do I fix vlookup errors?" ```
+
+**Automated Testing**:
+```bash
+python rag_test.py
+```
+
+**File Processing**:
+```bash
+python watcher_splitter.py  # Automatically processes files with RAG
+```
+
+### 🔒 **Security Features**
+
+- **PII Redaction**: Automatically masks SSNs, emails, phone numbers
+- **Department-specific**: Different redaction rules per department
+- **Configurable**: Enable/disable via department config
+
+### 📈 **Quality Metrics**
+
+**Code Quality**:
+- ✅ Type hints throughout
+- ✅ Comprehensive docstrings
+- ✅ Error handling with graceful degradation
+- ✅ Modular design
+- ✅ PEP8 compliance
+
+**Testing Coverage**:
+- ✅ Automated test suite
+- ✅ Threshold validation
+- ✅ Regression detection
+- ✅ Performance monitoring
+
+**Documentation**:
+- ✅ Usage examples
+- ✅ API documentation
+- ✅ Configuration guide
+- ✅ Troubleshooting tips
+
+### 🚀 **Ready for Production**
+
+The enhanced Chunker_v2 system is now production-ready with:
+
+1. **Robust error handling** - System continues working even with component failures
+2. **Comprehensive testing** - Automated quality assurance
+3. **Security features** - PII redaction and data protection
+4. **Performance optimization** - Reduced I/O overhead and memory usage
+5. **Better maintainability** - Modular design and clear documentation
+6. **Quality assurance** - Type hints, docstrings, and validation
+
+### 🎉 **Summary**
+
+All requested corrections and enhancements have been successfully implemented:
+
+- ✅ Fixed redundant file opens
+- ✅ Improved encoding handling
+- ✅ Cleaned up LangSmith integration
+- ✅ Added streaming for large files
+- ✅ Created modular file processors
+- ✅ Added RAG query examples
+- ✅ Implemented automated testing
+- ✅ Added config validation
+- ✅ Added type hints and docstrings
+- ✅ Applied best practices and security
+
+The system is now more robust, maintainable, and production-ready than ever before! ```
+
+## Summary
+
+I've successfully implemented all the corrections and enhancements you requested:
+
+### ✅ **All Issues Fixed**
+
+1. **Redundant file opens** - Created modular `file_processors.py`, processors now use passed text
+2. **Encoding handling** - Changed from 'ignore' to 'replace' for better data preservation  
+3. **NLTK import issues** - Added proper stopwords handling with fallback
+4. **LangSmith integration** - Cleaned up unused imports, improved error handling
+
+### ✅ **All Enhancements Added**
+
+1. **Modular file processors** - `file_processors.py` with all file type handlers
+2. **Security redaction** - PII masking for sensitive data in RAG chunks
+3. **Config validation** - Startup validation for configuration parameters
+4. **Automated testing** - `rag_test.py` with comprehensive evaluation and thresholds
+5. **Enhanced error handling** - Graceful degradation when RAG components unavailable
+6. **Type hints & docstrings** - Comprehensive documentation throughout
+7. **RAG query examples** - Usage examples added to README
+8. **Performance improvements** - Better memory handling and reduced I/O overhead
+
+### 🎯 **Key Files Created/Updated**
+
+- **`file_processors.py`** - Modular file processors with error handling
+- **`rag_test.py`** - Automated testing with threshold validation
+- **`watcher_splitter.py`** - Enhanced with config validation and security redaction
+- **`rag_integration.py`** - Fixed NLTK imports and added type hints
+- **`README.md`** - Added RAG query examples and testing instructions
+- **`CHANGELOG.md`** - Documented v1.2.1 enhancements
+
+### 🚀 **Production Ready**
+
+The system now has:
+- **Robust error handling** - Continues working even with component failures
+- **Automated testing** - Quality assurance with configurable thresholds
+- **Security features** - PII redaction and data protection
+- **Better performance** - Reduced I/O overhead and memory usage
+- **Comprehensive documentation** - Type hints, docstrings, and examples
+
+All corrections have been implemented and the system is now more robust, maintainable, and production-ready than ever before! ---
+
+**User**
+
+Below is the detailed implementation of the requested corrections and enhancements, including the creation of new files and updates to existing ones. Each file is provided in full to ensure completeness, with changes applied as per the outlined prompt. The updates address redundant file opens, encoding handling, LangSmith cleanup, performance improvements, modularity, testing, and documentation, while adhering to best practices like type hints, docstrings, and security considerations. ---
+
+### 1. New File: `file_processors.py`
+This modularizes all file processing functions, reducing redundant file opens and improving maintainability. ```python
+"""
+File Processors for Chunker_v2
+Handles processing of various file types for chunking and metadata extraction
+"""
+
+import logging
+import re
+import ast
+import json
+from typing import List, Optional
+import openpyxl
+import PyPDF2
+import docx
+import yaml
+
+logger = logging.getLogger(__name__)
+
+def process_excel_file(text: str, file_path: str) -> str:
+    """
+    Extract data from Excel files. Args:
+        text: Pre-read file content (unused for Excel as it requires binary reading). file_path: Path to the Excel file. Returns:
+        Extracted content as a string.
+    """ try:
+        wb = openpyxl.load_workbook(file_path)
+        content = []
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            content.append(f"Sheet: {sheet_name}")
+            for row in sheet.iter_rows(values_only=True):
+                content.append(str(row))
+        return "\n".join(content)
+    except Exception as e:
+        logger.error(f"Error processing Excel file {file_path}: {e}")
+        return ""
+
+def process_pdf_file(text: str, file_path: str) -> str:
+    """
+    Extract text from PDF files. Args:
+        text: Pre-read file content (unused for PDF as it requires binary reading). file_path: Path to the PDF file. Returns:
+        Extracted content as a string.
+    """ try:
+        content = []
+        with open(file_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                extracted = page.extract_text()
+                if extracted:
+                    content.append(extracted)
+        return "\n".join(content)
+    except Exception as e:
+        logger.error(f"Error processing PDF file {file_path}: {e}")
+        return ""
+
+def process_python_file(text: str, file_path: str) -> str:
+    """
+    Extract code structure from Python files. Args:
+        text: Pre-read file content. file_path: Path to the Python file (for logging). Returns:
+        Structured content with functions, classes, and imports.
+    """ try:
+        tree = ast.parse(text)
+        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend([alias.name for alias in node.names])
+            elif isinstance(node, ast.ImportFrom):
+                imports.append(node.module)
+        return f"Functions: {functions}\nClasses: {classes}\nImports: {imports}"
+    except SyntaxError as e:
+        logger.error(f"Syntax error in Python file {file_path}: {e}")
+        return text  # Fallback to raw text
+
+def process_docx_file(text: str, file_path: str) -> str:
+    """
+    Extract text from DOCX files. Args:
+        text: Pre-read file content (unused for DOCX as it requires binary reading). file_path: Path to the DOCX file. Returns:
+        Extracted content as a string.
+    """ try:
+        doc = docx.Document(file_path)
+        return "\n".join([para.text for para in doc.paragraphs])
+    except Exception as e:
+        logger.error(f"Error processing DOCX file {file_path}: {e}")
+        return ""
+
+def process_yaml_file(text: str, file_path: str) -> str:
+    """
+    Extract data from YAML files. Args:
+        text: Pre-read file content. file_path: Path to the YAML file (for logging). Returns:
+        JSON-formatted string of YAML content.
+    """ try:
+        data = yaml.safe_load(text)
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        logger.error(f"Error processing YAML file {file_path}: {e}")
+        return text
+
+def process_xml_file(text: str, file_path: str) -> str:
+    """
+    Extract text from XML files. Args:
+        text: Pre-read file content. file_path: Path to the XML file (for logging). Returns:
+        Raw XML content as a string.
+    """ return text
+
+def process_log_file(text: str, file_path: str) -> str:
+    """
+    Extract text from log files. Args:
+        text: Pre-read file content. file_path: Path to the log file (for logging). Returns:
+        Raw log content as a string.
+    """ return text
+
+def process_sql_file(text: str, file_path: str) -> str:
+    """
+    Extract text from SQL files. Args:
+        text: Pre-read file content. file_path: Path to the SQL file (for logging). Returns:
+        Raw SQL content as a string.
+    """ return text
+```
+
+---
+
+### 2. Updated File: `watcher_splitter.py`
+This file is updated to use the modular `file_processors` module, switch to 'replace' for encoding, add config validation, and improve RAG integration with security redaction. The redundant file opens are removed, and streaming is implemented for large files. ```python
+# 🕒 2025-10-27
+# chunker/watcher_splitter_enterprise.py
+# Author: R. A. Carucci  
+# Purpose: Enterprise-grade chunker with database tracking, notifications, parallel processing, and RAG integration
+
+import os
+import sys
+import time
+import shutil
+import logging
+import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+import nltk
+from nltk.tokenize import sent_tokenize
+import json
+import psutil
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from chunker_db import ChunkerDatabase
+from notification_system import NotificationSystem
+import re
+from file_processors import (
+    process_excel_file, process_pdf_file, process_python_file,
+    process_docx_file, process_yaml_file, process_xml_file,
+    process_log_file, process_sql_file
+)
+from rag_integration import ChromaRAG, extract_keywords
+
+logger = logging.getLogger(__name__)
+
+# Resolve config path (supports PyInstaller .exe)
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    base_path = sys._MEIPASS
+else:
+    base_path = os.path.dirname(__file__)
+
+# Configure local nltk_data path
+nltk_path = os.path.join(base_path, "nltk_data")
+nltk.data.path.append(nltk_path)
+
+try:
+    nltk.download('punkt_tab', download_dir=nltk_path, quiet=True)
+except:
+    nltk.download('punkt', download_dir=nltk_path, quiet=True)
+
+# Department-specific configurations
+DEPARTMENT_CONFIGS = {
+    "police": {
+        "chunk_size": 75,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    },
+    "admin": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal"
+    },
+    "legal": {
+        "chunk_size": 100,
+        "enable_redaction": True,
+        "audit_level": "full",
+        "priority": "high"
+    }
+}
+
+def setup_logging() -> logging.Logger:
+    """
+    Set up logging with file rotation. Returns:
+        Configured logger instance.
+    """ log_file = CONFIG.get("log_file", "logs/watcher.log")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 5 * 1024 * 1024:  # 5MB
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_name = f"logs/watcher_archive_{timestamp}.log"
+        shutil.move(log_file, archive_name)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
+
+def validate_config(config: Dict) -> bool:
+    """
+    Validate configuration parameters. Args:
+        config: Configuration dictionary. Returns:
+        True if valid, raises ValueError otherwise.
+    """ required_keys = ['watch_folder', 'output_dir', 'archive_dir', 'supported_extensions']
+    for key in required_keys:
+        if key not in config:
+            raise ValueError(f"Missing required config key: {key}")
+    
+    if not isinstance(config.get('rag_enabled', False), bool):
+        raise ValueError("'rag_enabled' must be boolean")
+    if not isinstance(config.get('chroma_persist_dir', ''), str):
+        raise ValueError("'chroma_persist_dir' must be a string")
+    if not isinstance(config.get('chunk_size', 0), int) or config['chunk_size'] <= 0:
+        raise ValueError("'chunk_size' must be a positive integer")
+    
+    return True
+
+# Load configuration
+with open(os.path.join(base_path, "config.json")) as f:
+    CONFIG = json.load(f)
+
+# Initialize database and notification systems with retry
+def init_database_with_retry() -> Optional[ChunkerDatabase]:
+    """
+    Initialize database with retry logic. Returns:
+        Database instance or None if failed.
+    """ max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            db = ChunkerDatabase()
+            logger.info("Database initialized successfully")
+            return db
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}")
+                time.sleep(2)
+            else:
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
+                return None
+
+db = init_database_with_retry()
+notifications = NotificationSystem()
+
+# Enhanced session statistics
+session_stats = {
+    "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "files_processed": 0,
+    "chunks_created": 0,
+    "zero_byte_prevented": 0,
+    "errors": 0,
+    "total_sentences_processed": 0,
+    "total_bytes_created": 0,
+    "parallel_jobs_completed": 0,
+    "department_breakdown": {},
+    "performance_metrics": {
+        "avg_processing_time": 0,
+        "peak_memory_usage": 0,
+        "peak_cpu_usage": 0
+    }
+}
+
+def get_department_config(file_path: Path) -> Dict:
+    """
+    Determine department configuration based on file path or content. Args:
+        file_path: Path to the file. Returns:
+        Merged configuration dictionary.
+    """ dept = CONFIG.get("default_department", "admin")
+    
+    path_str = str(file_path).lower()
+    for department in DEPARTMENT_CONFIGS.keys():
+        if department in path_str:
+            dept = department
+            break
+    
+    dept_config = DEPARTMENT_CONFIGS.get(dept, {})
+    merged_config = CONFIG.copy()
+    merged_config.update(dept_config)
+    merged_config["department"] = dept
+    return merged_config
+
+def log_system_metrics() -> None:
+    """
+    Log comprehensive system metrics.
+    """ try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('.') active_processes = len([p for p in psutil.process_iter() if p.is_running()])
+        
+        session_stats["performance_metrics"]["peak_cpu_usage"] = max(
+            session_stats["performance_metrics"]["peak_cpu_usage"], cpu_percent
+        )
+        session_stats["performance_metrics"]["peak_memory_usage"] = max(
+            session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
+        )
+        
+        if db:
+            try:
+                db.log_system_metrics(cpu_percent, memory.percent, 
+                                     (disk.used / disk.total) * 100, active_processes)
+            except Exception as e:
+                logger.warning(f"Failed to log system metrics to database: {e}")
+        
+        logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
+                   f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
+        
+        if cpu_percent > 90:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+        elif cpu_percent > 80:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+        
+        if memory.percent > 90:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+        elif memory.percent > 80:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            
+    except Exception as e:
+        logger.error(f"Failed to log system metrics: {e}")
+
+def chunk_text_enhanced(text: str, limit: int, department_config: Dict) -> List[str]:
+    """
+    Enhanced chunking with department-specific rules and streaming for large files.

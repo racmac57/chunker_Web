@@ -1,0 +1,802 @@
+# Main frame with padding
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        
+        row = 0
+        
+        # Input file section
+        ttk.Label(main_frame, text="Input File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.input_path, width=50).grid(
+            row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5
+        )
+        ttk.Button(main_frame, text="Browse...", command=self.browse_input).grid(
+            row=row, column=2, pady=5
+        )
+        row += 1
+        
+        # Output file section
+        ttk.Label(main_frame, text="Output File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.output_path, width=50).grid(
+            row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5
+        )
+        ttk.Button(main_frame, text="Save as...", command=self.browse_output).grid(
+            row=row, column=2, pady=5
+        )
+        row += 1
+        
+        # Projects file section (read-only, auto-detected)
+        ttk.Label(main_frame, text="Projects File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        projects_entry = ttk.Entry(main_frame, textvariable=self.projects_path, width=50, state='readonly')
+        projects_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
+        ttk.Label(main_frame, text="(auto-detected)").grid(row=row, column=2, pady=5)
+        row += 1
+        
+        # Separator
+        ttk.Separator(main_frame, orient='horizontal').grid(
+            row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10
+        )
+        row += 1
+        
+        # Options section
+        ttk.Label(main_frame, text="Options:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=row, column=0, columnspan=3, sticky=tk.W, pady=5
+        )
+        row += 1
+        
+        # Create two-column layout for checkboxes
+        options_frame = ttk.Frame(main_frame)
+        options_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        
+        # Left column
+        left_col = ttk.Frame(options_frame)
+        left_col.grid(row=0, column=0, sticky=(tk.W, tk.N), padx=(0, 20))
+        
+        ttk.Checkbutton(left_col, text="ZIP output", variable=self.zip_output_var,
+                       command=self.on_zip_output_changed).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Stream (large files)", variable=self.stream_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Pretty print", variable=self.pretty_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Strict mode", variable=self.strict_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="No backup (ZIP)", variable=self.no_backup_var).pack(anchor=tk.W, pady=2)
+        
+        # Right column
+        right_col = ttk.Frame(options_frame)
+        right_col.grid(row=0, column=1, sticky=(tk.W, tk.N))
+        
+        ttk.Checkbutton(right_col, text="Verbose logging", variable=self.verbose_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="Quiet mode", variable=self.quiet_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="No merge to files", variable=self.no_merge_to_files_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="Keep invalid messages", variable=self.keep_invalid_var).pack(anchor=tk.W, pady=2)
+        
+        row += 1
+        
+        # Separator
+        ttk.Separator(main_frame, orient='horizontal').grid(
+            row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10
+        )
+        row += 1
+        
+        # Buttons section
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=row, column=0, columnspan=3, pady=10)
+        
+        self.run_button = ttk.Button(button_frame, text="Run", command=self.run_processing, width=15)
+        self.run_button.pack(side=tk.LEFT, padx=5)
+        
+        self.open_output_button = ttk.Button(
+            button_frame, text="Open Output", command=self.open_output, width=15, state='disabled'
+        )
+        self.open_output_button.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=self.root.quit, width=15).pack(side=tk.LEFT, padx=5)
+        
+        row += 1
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
+        self.progress.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        row += 1
+        
+        # Log output section
+        ttk.Label(main_frame, text="Log Output:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5)
+        )
+        row += 1
+        
+        # Text area with scrollbar
+        log_frame = ttk.Frame(main_frame)
+        log_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(row, weight=1)
+        
+        self.log_text = tk.Text(log_frame, height=15, width=80, wrap=tk.WORD, state='disabled')
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        scrollbar = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_text.yview)
+        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.log_text['yscrollcommand'] = scrollbar.set
+        
+        # Update button states
+        self.update_button_states()
+    
+    def setup_logging(self) -> None:
+        """Set up logging to queue.""" self.queue_handler = QueueHandler(self.log_queue)
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
+        self.queue_handler.setFormatter(formatter)
+        
+        # Get root logger and add our handler
+        logger = logging.getLogger()
+        logger.addHandler(self.queue_handler)
+        logger.setLevel(logging.INFO)
+    
+    def poll_log_queue(self) -> None:
+        """Poll the log queue and update the text widget.""" while True:
+            try:
+                message = self.log_queue.get_nowait()
+                self.append_log(message + '\n')
+            except queue.Empty:
+                break
+        
+        # Schedule next poll
+        self.root.after(50, self.poll_log_queue)
+    
+    def append_log(self, message: str) -> None:
+        """Append message to log text area.""" self.log_text.config(state='normal')
+        self.log_text.insert(tk.END, message)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+    
+    def browse_input(self) -> None:
+        """Open file dialog for input file.""" filename = filedialog.askopenfilename(
+            title="Select Input File",
+            filetypes=[
+                ("Supported files", "*.json *.zip"),
+                ("JSON files", "*.json"),
+                ("ZIP files", "*.zip"),
+                ("All files", "*. *")
+            ]
+        )
+        
+        if filename:
+            self.input_path.set(filename)
+            self.update_projects_path()
+            self.suggest_output_path()
+            self.update_button_states()
+    
+    def browse_output(self) -> None:
+        """Open file dialog for output file.""" # Determine default extension based on zip_output checkbox
+        if self.zip_output_var.get():
+            default_ext = ".zip"
+            filetypes = [("ZIP files", "*.zip"), ("All files", "*. *")]
+        else:
+            default_ext = ".json"
+            filetypes = [("JSON files", "*.json"), ("All files", "*. *")]
+        
+        # Get initial filename
+        initial_file = ""
+        if self.input_path.get():
+            input_path = Path(self.input_path.get())
+            initial_file = str(input_path.stem + "_patched" + default_ext)
+        
+        filename = filedialog.asksaveasfilename(
+            title="Save Output File",
+            initialfile=initial_file,
+            defaultextension=default_ext,
+            filetypes=filetypes
+        )
+        
+        if filename:
+            self.output_path.set(filename)
+            self.update_button_states()
+    
+    def update_projects_path(self) -> None:
+        """Auto-detect projects.json next to input file.""" if not self.input_path.get():
+            self.projects_path.set("No input file selected")
+            return
+        
+        input_file = Path(self.input_path.get())
+        projects_file = input_file.parent / 'projects.json'
+        
+        if projects_file.exists():
+            self.projects_path.set(str(projects_file))
+        else:
+            self.projects_path.set("No projects.json found")
+    
+    def suggest_output_path(self) -> None:
+        """Suggest output path based on input and settings.""" if not self.input_path.get():
+            return
+        
+        suggested = _suggest_output_path(self.input_path.get(), self.zip_output_var.get())
+        self.output_path.set(suggested)
+    
+    def on_zip_output_changed(self) -> None:
+        """Handle zip-output checkbox change.""" # Update output path extension if it was auto-suggested
+        if self.output_path.get():
+            output_path = Path(self.output_path.get())
+            if output_path.stem.endswith("_patched"):
+                new_ext = ".zip" if self.zip_output_var.get() else ".json"
+                new_path = output_path.with_suffix(new_ext)
+                self.output_path.set(str(new_path))
+    
+    def update_button_states(self) -> None:
+        """Update button enabled/disabled states based on current state.""" # Check if we can run
+        can_run = False
+        
+        if self.input_path.get() and self.output_path.get():
+            input_file = Path(self.input_path.get())
+            output_file = Path(self.output_path.get())
+            
+            # Check input exists
+            if input_file.exists():
+                # Check output directory is writable
+                output_dir = output_file.parent
+                if output_dir.exists() and os.access(output_dir, os.W_OK):
+                    can_run = True
+        
+        # Update run button
+        if self.processing:
+            self.run_button.config(state='disabled')
+        else:
+            self.run_button.config(state='normal' if can_run else 'disabled')
+    
+    def run_processing(self) -> None:
+        """Start processing in a background thread.""" if self.processing:
+            return
+        
+        self.processing = True
+        self.last_output_path = None
+        self.update_button_states()
+        self.open_output_button.config(state='disabled')
+        
+        # Clear log
+        self.log_text.config(state='normal')
+        self.log_text.delete('1.0', tk.END)
+        self.log_text.config(state='disabled')
+        
+        # Start progress bar
+        self.progress.start(10)
+        
+        # Start processing thread
+        thread = threading.Thread(target=self.process_thread, daemon=True)
+        thread.start()
+    
+    def process_thread(self) -> None:
+        """Background thread for processing.""" try:
+            # Set logging level based on verbose/quiet
+            logger = logging.getLogger()
+            if self.quiet_var.get():
+                logger.setLevel(logging.ERROR)
+            elif self.verbose_var.get():
+                logger.setLevel(logging.DEBUG)
+            else:
+                logger.setLevel(logging.INFO)
+            
+            # Get projects path (only if it actually exists)
+            projects = None
+            projects_str = self.projects_path.get()
+            if projects_str and projects_str != "No projects.json found" and Path(projects_str).exists():
+                projects = projects_str
+            
+            # Call process_file
+            exit_code = process_file(
+                self.input_path.get(),
+                self.output_path.get(),
+                projects_path=projects,
+                zip_output=self.zip_output_var.get(),
+                stream=self.stream_var.get(),
+                pretty=self.pretty_var.get(),
+                strict=self.strict_var.get(),
+                verbose=self.verbose_var.get(),
+                quiet=self.quiet_var.get(),
+                no_backup=self.no_backup_var.get(),
+                no_merge_to_files=self.no_merge_to_files_var.get(),
+                keep_invalid=self.keep_invalid_var.get()
+            )
+            
+            # Report completion
+            if exit_code == 0:
+                self.last_output_path = self.output_path.get()
+                output_file = Path(self.output_path.get())
+                report_path = output_file.with_name(output_file.stem + '_report.csv')
+                
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✓ SUCCESS! Exit code: {exit_code}")
+                self.log_queue.put(f"Output file: {self.last_output_path}")
+                self.log_queue.put(f"Report file: {report_path}")
+                self.log_queue.put("="*60)
+                
+                # Enable "Open Output" button
+                self.root.after(0, lambda: self.open_output_button.config(state='normal'))
+            else:
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✗ FAILED! Exit code: {exit_code}")
+                self.log_queue.put("="*60)
+        
+        except Exception as e:
+            self.log_queue.put(f"\n✗ ERROR: {e}")
+            import traceback
+            self.log_queue.put(traceback.format_exc())
+        
+        finally:
+            # Stop progress bar and re-enable UI
+            self.root.after(0, self.progress.stop)
+            self.processing = False
+            self.root.after(0, self.update_button_states)
+    
+    def open_output(self) -> None:
+        """Open the output file with the default application (platform-specific).""" if not self.last_output_path:
+            logging.warning("No output path available")
+            return
+        
+        output_path = Path(self.last_output_path)
+        if not output_path.exists():
+            error_msg = f"Output file not found: {output_path}"
+            logging.error(error_msg)
+            messagebox.showerror("Error", error_msg)
+            return
+        
+        try:
+            system = platform.system()
+            logging.info(f"Opening output file: {output_path} (platform: {system})")
+            
+            if system == 'Windows':
+                os.startfile(str(output_path))
+            elif system == 'Darwin':  # macOS
+                subprocess.run(['open', str(output_path)], check=True)
+            else:  # Linux/Unix
+                subprocess.run(['xdg-open', str(output_path)], check=True)
+            
+            logging.info("Output file opened successfully")
+            
+        except Exception as e:
+            error_msg = f"Failed to open output: {e}"
+            logging.error(error_msg)
+            messagebox.showerror("Error", error_msg)
+
+
+def launch_gui() -> None:
+    """Launch the GUI application with headless safety.""" try:
+        root = tk.Tk()
+    except Exception as e:
+        print(
+            "ERROR: Could not initialize Tkinter (no display available). " "Use CLI mode instead: python patch_conversations.py <input> -o <output>",
+            file=sys.stderr
+        )
+        sys.exit(1)
+    
+    app = ClaudeExportFixerGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    launch_gui()
+
+
+```
+
+Perfect! Now let's update the README to document these improvements:
+
+```markdown
+# ClaudeExportFixer
+
+**Complete toolkit for Claude conversation exports:** Fix, validate, search, and build knowledge bases from your Claude.ai chat history. **Latest:** v1.2.0
+- ✅ Full osteele viewer compatibility (`content`, `model`, `index`, `model_slug` fields)
+- 🔍 NEW: Searchable knowledge base builder with semantic chunking
+- 📊 Tag extraction, full-text search, and analytics-ready SQLite database
+
+## Quick start (Windows)
+```bat
+cd C:\Dev\ClaudeExportFixer
+scripts\windows\create_venv.bat
+```
+
+## GUI Mode
+
+Launch a graphical interface (requires Tkinter, included in Python stdlib):
+
+```bat
+py patch_conversations.py --gui
+```
+
+Or directly:
+
+```bat
+py gui.py
+```
+
+Or use the convenient batch script:
+
+```bat
+scripts\windows\run_gui.bat
+```
+
+**Features:**
+- Select input (`conversations.json` or `.zip`) and output paths
+- Check options (e.g., `--pretty` is on by default)
+- Click "Run" to process; logs appear in real-time
+- On success, click **"Open Output"** to view the output file in your default application (Windows/macOS/Linux)
+- Processing runs in background thread - GUI stays responsive
+
+**Headless Environments:**
+If Tkinter cannot initialize (e.g., SSH session, Docker container), the GUI will fail with:
+```
+ERROR: Could not initialize Tkinter (no display available). Use CLI mode instead: python patch_conversations.py <input> -o <output>
+```
+In such cases, use CLI mode as shown above. ## Features
+
+### 🔧 Export Fixer (`patch_conversations.py`)
+- **Full osteele viewer compatibility** - Adds all required schema fields
+- **Rich attachment handling** - Merges `files` and `attachments`, preserves metadata
+- **Format normalization** - Handles both list and dict conversation formats
+- **ZIP support** - Process exports without extraction
+- **Streaming mode** - Handle large exports efficiently with `ijson`
+
+### 🔍 Knowledge Base Builder (`claude_knowledge_base.py`) **NEW! **
+- **Searchable database** - Convert exports to SQLite with full-text search (FTS5)
+- **Semantic chunking** - NLTK sentence-aware chunking (150 words max)
+- **Auto-tagging** - Extract tech keywords, date tags, content types
+- **File indexing** - Search attachment extracted content
+- **Analytics-ready** - Conversation stats, message counts, token estimates
+
+### 🖥️ GUI Mode (`gui.py`)
+- **Drag-and-drop** interface with Tkinter
+- **Real-time logs** - Watch processing progress
+- **One-click open** - Launch output in default app
+
+## CLI Usage
+
+### Fix Export for osteele Viewer
+
+Process a JSON:
+
+```bat
+python patch_conversations.py conversations.json -o fixed.json --pretty
+```
+
+Process a ZIP (streaming):
+
+```bat
+python patch_conversations.py export.zip -o export_patched.zip --zip-output --stream --pretty
+```
+
+### Build Knowledge Base
+
+Create searchable database from export:
+
+```bat
+python claude_knowledge_base.py conversations.json claude_kb.db
+```
+
+Or from ZIP:
+
+```bat
+python claude_knowledge_base.py export.zip my_knowledge_base.db
+```
+
+**Features:**
+- Full-text search across all conversations
+- Tag-based organization (auto-extracted)
+- Message and file content indexing
+- Analytics queries (conversation counts, date ranges, etc.) Run tests:
+
+```bat
+scripts\windows\run_tests.bat
+```
+
+## Building Executables
+
+### CLI only
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe.bat
+```
+
+### GUI (windowed)
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile --windowed patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe_gui.bat
+```
+
+Output: `dist/patch_conversations.exe`. Run GUI with `--gui` flag. **Note:** No additional dependencies required; Tkinter is part of Python stdlib. For GUI-only launch without console on Windows, build with `--windowed` and run `patch_conversations.exe --gui`. ## Updates
+
+### v1.2.0 (2025-10-27) - Knowledge Base & Full Schema Compliance
+* **NEW**: `claude_knowledge_base.py` - Convert exports to searchable SQLite database
+  - Semantic chunking with NLTK (150 words, sentence-aware)
+  - Auto-tag extraction (tech keywords, dates, content types)
+  - FTS5 full-text search across all conversations
+  - File/attachment content indexing
+* **CRITICAL**: Added all missing osteele viewer schema fields
+  - `content` array for all messages (required by viewer schema)
+  - `model` field for conversations
+  - `index` and `model_slug` for all messages
+  - Analyzed viewer source code from github.com/osteele/claude-chat-viewer
+* **Result**: 100% schema compliance (all 401 conversations, 10,369 messages)
+* **Tests**: 24/24 passing
+
+### v1.1.1 (2025-10-27) - Critical Fix Release
+* **Fixed**: Attachment merging for Claude's rich attachment format
+* **Fixed**: Support for Claude's list format conversations
+* **Added**: 10 comprehensive tests for rich attachment merging
+* **Tests**: 23/23 passing
+
+## Notes
+
+* `ijson` is optional but required for `--stream` support. * Tkinter (for GUI) is included in Python stdlib on Windows and macOS. * See `CHANGELOG.md` for version history and changes. * See `SUMMARY.md` for project overview. * See `.github/CONTRIBUTING.md` for contribution guidelines. ## Project Structure
+
+```
+ClaudeExportFixer/
+├── Core Scripts (v1.2.0)
+│   ├── patch_conversations.py      # Main export fixer (osteele compatibility)
+│   ├── gui.py                      # Optional Tkinter GUI
+│   ├── claude_knowledge_base.py    # 🆕 KB builder with semantic search
+│   └── GROK_KNOWLEDGE_BASE_PROMPT.md # 🆕 AI collaboration prompt
+│
+├── Documentation
+│   ├── README.md                   # This file (v1.2.0)
+│   ├── CHANGELOG.md                # Version history (v1.2.0)
+│   ├── SUMMARY.md                  # Project overview
+│   ├── LICENSE                     # MIT License
+│   ├── SECURITY.md                 # Security reporting
+│   ├── .gitattributes              # Line ending config
+│   └── .gitignore                  # Git ignore rules
+│
+├── Configuration
+│   ├── requirements.txt            # Runtime (ijson, pytest, nltk)
+│   └── requirements-build.txt      # Build (pyinstaller)
+│
+├── sample/                         # Example data
+│   ├── conversations.example.json
+│   └── projects.example.json
+│
+├── tests/                          # 24 tests passing ✅
+│   ├── test_smoke.py
+│   ├── test_merge_rich_attachments.py # 🆕 11 rich attachment tests
+│   ├── test_gui_import.py
+│   ├── test_gui_utils.py
+│   ├── test_gui_open_output.py
+│   └── test_print_logging_bridge.py
+│
+├── utils/                          # 20+ analysis tools 🔍
+│   ├── comprehensive_verification.py
+│   ├── verify_created_at.py
+│   ├── verify_v120_fix.py          # 🆕 v1.2.0 verification
+│   ├── check_common_schema_issues.py # 🆕 Schema validation
+│   ├── analyze_failing_conversations.py
+│   ├── strict_validator.py
+│   ├── diagnose_conversation_4.py
+│   ├── PROMPT_FOR_GROK.md
+│   └── (15+ more analysis scripts...)
+│
+├── scripts/windows/                # Windows automation scripts
+│   ├── create_venv.bat            # Setup virtual environment
+│   ├── run_tests.bat              # Run test suite
+│   ├── run_gui.bat                # Launch GUI
+│   ├── run_example_json.bat       # Process JSON example
+│   ├── run_example_zip_stream.bat # Process ZIP example
+│   ├── build_exe.bat              # Build CLI executable
+│   └── build_exe_gui.bat          # Build GUI executable
+│
+└── .github/                        # GitHub integration
+    ├── workflows/
+    │   ├── ci.yml                 # Continuous integration
+    │   └── release.yml            # Release automation
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.yml         # Bug report template
+    │   └── feature_request.yml    # Feature request template
+    ├── PULL_REQUEST_TEMPLATE.md   # PR template
+    └── CONTRIBUTING.md            # Contributing guidelines
+```
+
+## Key Files
+
+- **`patch_conversations.py`** (v1.2.0) - Export fixer with full osteele viewer compatibility
+- **`claude_knowledge_base.py`** (NEW) - Build searchable SQLite database from exports
+- **`gui.py`** - Standalone Tkinter GUI (optional, stdlib only)
+- **`GROK_KNOWLEDGE_BASE_PROMPT.md`** (NEW) - AI collaboration prompt for enhancements
+- **`CHANGELOG.md`** - Complete version history
+- **`LICENSE`** - MIT License
+- **`SECURITY.md`** - Security policy
+- **`requirements.txt`** - Runtime dependencies (ijson, pytest)
+- **`requirements-build.txt`** - Build dependencies (pyinstaller)
+- **`utils/`** - Analysis and troubleshooting tools
+- **`.github/`** - GitHub integration (workflows, issue templates, contributing guide)
+
+## Contributing
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for contribution guidelines. ## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. ```
+
+Now update the Building Executables section:
+
+```markdown
+# ClaudeExportFixer
+
+**Complete toolkit for Claude conversation exports:** Fix, validate, search, and build knowledge bases from your Claude.ai chat history. **Latest:** v1.2.0
+- ✅ Full osteele viewer compatibility (`content`, `model`, `index`, `model_slug` fields)
+- 🔍 NEW: Searchable knowledge base builder with semantic chunking
+- 📊 Tag extraction, full-text search, and analytics-ready SQLite database
+
+## Quick start (Windows)
+```bat
+cd C:\Dev\ClaudeExportFixer
+scripts\windows\create_venv.bat
+```
+
+## GUI Mode
+
+Launch a graphical interface (requires Tkinter, included in Python stdlib):
+
+```bat
+py patch_conversations.py --gui
+```
+
+Or directly:
+
+```bat
+py gui.py
+```
+
+Or use the convenient batch script:
+
+```bat
+scripts\windows\run_gui.bat
+```
+
+**Features:**
+- Select input (`conversations.json` or `.zip`) and output paths
+- Check options (e.g., `--pretty` is on by default)
+- Click "Run" to process; logs appear in real-time
+- On success, click **"Open Output"** to view the output file in your default application (Windows/macOS/Linux)
+- Processing runs in background thread - GUI stays responsive
+
+**Headless Environments:**
+If Tkinter cannot initialize (e.g., SSH session, Docker container), the GUI will fail with:
+```
+ERROR: Could not initialize Tkinter (no display available). Use CLI mode instead: python patch_conversations.py <input> -o <output>
+```
+In such cases, use CLI mode as shown above. ## Features
+
+### 🔧 Export Fixer (`patch_conversations.py`)
+- **Full osteele viewer compatibility** - Adds all required schema fields
+- **Rich attachment handling** - Merges `files` and `attachments`, preserves metadata
+- **Format normalization** - Handles both list and dict conversation formats
+- **ZIP support** - Process exports without extraction
+- **Streaming mode** - Handle large exports efficiently with `ijson`
+
+### 🔍 Knowledge Base Builder (`claude_knowledge_base.py`) **NEW! **
+- **Searchable database** - Convert exports to SQLite with full-text search (FTS5)
+- **Semantic chunking** - NLTK sentence-aware chunking (150 words max)
+- **Auto-tagging** - Extract tech keywords, date tags, content types
+- **File indexing** - Search attachment extracted content
+- **Analytics-ready** - Conversation stats, message counts, token estimates
+
+### 🖥️ GUI Mode (`gui.py`)
+- **Drag-and-drop** interface with Tkinter
+- **Real-time logs** - Watch processing progress
+- **One-click open** - Launch output in default app
+
+## CLI Usage
+
+### Fix Export for osteele Viewer
+
+Process a JSON:
+
+```bat
+python patch_conversations.py conversations.json -o fixed.json --pretty
+```
+
+Process a ZIP (streaming):
+
+```bat
+python patch_conversations.py export.zip -o export_patched.zip --zip-output --stream --pretty
+```
+
+### Build Knowledge Base
+
+Create searchable database from export:
+
+```bat
+python claude_knowledge_base.py conversations.json claude_kb.db
+```
+
+Or from ZIP:
+
+```bat
+python claude_knowledge_base.py export.zip my_knowledge_base.db
+```
+
+**Features:**
+- Full-text search across all conversations
+- Tag-based organization (auto-extracted)
+- Message and file content indexing
+- Analytics queries (conversation counts, date ranges, etc.) Run tests:
+
+```bat
+scripts\windows\run_tests.bat
+```
+
+## Building Executables
+
+### CLI only
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe.bat
+```
+
+### GUI (windowed, no console)
+
+For a GUI-only executable without the console window appearing:
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile --windowed patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe_gui.bat
+```
+
+Output: `dist/patch_conversations.exe`
+
+**To launch GUI:**
+```bat
+patch_conversations.exe --gui
+```
+
+**Important:** The `--windowed` flag (also called `--noconsole`) hides the console window, making it ideal for GUI-only distribution. However:
+- No console means no stderr output if GUI fails to initialize
+- Use CLI build (without `--windowed`) for debugging
+- Tkinter is included in Python stdlib - no additional dependencies needed
+
+## Updates
+
+### v1.2.0 (2025-10-27) - Knowledge Base & Full Schema Compliance
+* **NEW**: `claude_knowledge_base.py` - Convert exports to searchable SQLite database
+  - Semantic chunking with NLTK (150 words, sentence-aware)
+  - Auto-tag extraction (tech keywords, dates, content types)
+  - FTS5 full-text search across all conversations
+  - File/attachment content indexing
+* **CRITICAL**: Added all missing osteele viewer schema fields
+  - `content` array for all messages (required by viewer schema)
+  - `model` field for conversations
+  - `index` and `model_slug` for all messages
+  - Analyzed viewer source code from github.com/osteele/claude-chat-viewer
+* **Result**: 100% schema compliance (all 401 conversations, 10,369 messages)
+* **Tests**: 24/24 passing
+
+### v1.1.1 (2025-10-27) - Critical Fix Release
+* **Fixed**: Attachment merging for Claude's rich attachment format
+* **Fixed**: Support for Claude's list format conversations
+* **Added**: 10 comprehensive tests for rich attachment merging
+* **Tests**: 23/23 passing
+
+## Notes
+
+* `ijson` is optional but required for `--stream` support. * Tkinter (for GUI) is included in Python stdlib on Windows and macOS. * See `CHANGELOG.md` for version history and changes. * See `SUMMARY.md` for project overview. * See `.github/CONTRIBUTING.md` for contribution guidelines.

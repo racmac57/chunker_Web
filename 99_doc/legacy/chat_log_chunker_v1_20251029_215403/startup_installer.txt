@@ -1,0 +1,122 @@
+REM 🕒 2025-06-28-01-45-30
+REM chunker/install_startup.bat
+REM Author: R. A. Carucci
+REM Purpose: Install chunker as Windows startup service
+
+@echo off
+setlocal enabledelayedexpansion
+
+echo =====================================
+echo  Chunker Startup Installation
+echo =====================================
+echo.
+
+REM Get current directory
+set "CHUNKER_DIR=%~dp0"
+set "CHUNKER_DIR=%CHUNKER_DIR:~0,-1%"
+
+REM Check if chunker executable exists
+if not exist "%CHUNKER_DIR%\dist\chunker_hidden.exe" (
+    echo ERROR: chunker_hidden.exe not found
+    echo Please run build_and_run.bat first to create the executable
+    pause
+    exit /b 1
+)
+
+echo Found chunker executable at: %CHUNKER_DIR%\dist\chunker_hidden.exe
+echo.
+
+REM Get startup folder
+set "STARTUP_FOLDER=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
+echo Startup folder: %STARTUP_FOLDER%
+echo.
+
+REM Create enhanced launcher script in startup folder
+set "STARTUP_SCRIPT=%STARTUP_FOLDER%\chunker_autostart.vbs"
+
+echo Creating startup script...
+(
+echo ' Auto-generated chunker startup script
+echo ' Created: %date% %time%
+echo ' Source: %CHUNKER_DIR%
+echo '
+echo Set WshShell = CreateObject^("WScript.Shell"^)
+echo Set fso = CreateObject^("Scripting.FileSystemObject"^)
+echo.
+echo ' Chunker installation directory
+echo chunkerDir = "%CHUNKER_DIR%"
+echo exePath = chunkerDir ^& "\dist\chunker_hidden.exe"
+echo logsDir = chunkerDir ^& "\logs"
+echo.
+echo ' Ensure logs directory exists
+echo If Not fso.FolderExists^(logsDir^) Then
+echo     fso.CreateFolder^(logsDir^)
+echo End If
+echo.
+echo ' Log startup attempt
+echo On Error Resume Next
+echo logFile = logsDir ^& "\startup.log"
+echo Set logStream = fso.OpenTextFile^(logFile, 8, True^)
+echo logStream.WriteLine Now ^& " - Startup launch attempt"
+echo.
+echo ' Check if executable exists
+echo If fso.FileExists^(exePath^) Then
+echo     ' Launch silently
+echo     WshShell.Run """" ^& exePath ^& """", 0
+echo     logStream.WriteLine Now ^& " - Chunker launched successfully"
+echo Else
+echo     logStream.WriteLine Now ^& " - ERROR: Executable not found: " ^& exePath
+echo End If
+echo.
+echo logStream.Close
+echo Set logStream = Nothing
+echo Set WshShell = Nothing
+echo Set fso = Nothing
+echo On Error GoTo 0
+) > "%STARTUP_SCRIPT%"
+
+if exist "%STARTUP_SCRIPT%" (
+    echo ✅ Startup script created successfully!
+    echo    Location: %STARTUP_SCRIPT%
+) else (
+    echo ❌ Failed to create startup script
+    pause
+    exit /b 1
+)
+
+echo.
+echo =====================================
+echo  Installation Complete!
+echo =====================================
+echo.
+echo Chunker will now start automatically when you log into Windows.
+echo.
+echo Management commands:
+echo   - View startup script: notepad "%STARTUP_SCRIPT%"
+echo   - Remove from startup: del "%STARTUP_SCRIPT%"
+echo   - Test startup: "%STARTUP_SCRIPT%"
+echo.
+echo Verification:
+echo   - Check logs\startup.log for startup attempts
+echo   - Use .\test_chunker.ps1 -Diagnostics to verify service status
+echo.
+
+REM Offer to test the startup script
+set /p TEST_NOW="Test the startup script now? (y/n): "
+if /i "%TEST_NOW%"=="y" (
+    echo.
+    echo Testing startup script...
+    cscript //nologo "%STARTUP_SCRIPT%"
+    
+    REM Wait and check if chunker is running
+    timeout /t 3 /nobreak >nul
+    tasklist /fi "imagename eq chunker_hidden.exe" | find /i "chunker_hidden.exe" >nul
+    if not errorlevel 1 (
+        echo ✅ Test successful - Chunker is running!
+    ) else (
+        echo ⚠️ Test completed - Check logs\startup.log for details
+    )
+)
+
+echo.
+pause

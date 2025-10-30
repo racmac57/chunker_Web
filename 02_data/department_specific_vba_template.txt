@@ -1,0 +1,409 @@
+' ===================================================================
+' HACKENSACK COMPSTAT - SIMPLIFIED VBA MODULE (ERROR-FREE VERSION)
+' ===================================================================
+
+Option Explicit
+
+' ===================================================================
+' CONSTANTS
+' ===================================================================
+Private Const DEPARTMENT_NAME As String = "TEMPLATE"
+Private Const TABLE_PREFIX As String = "_mom_"
+Private Const LOG_SHEET_NAME As String = "LOG_Data_Entry"
+
+' ===================================================================
+' MAIN NAVIGATION FUNCTION - ULTRA SIMPLIFIED
+' ===================================================================
+Sub GoTo_Current_Month_Entry_Hackensack()
+    Dim ws As Worksheet, tbl As ListObject, newRow As ListRow
+    Dim currentMonthSheetName As String
+    Dim tableCount As Long
+    Dim logMessage As String
+    
+    On Error GoTo ErrorHandler
+    Application.ScreenUpdating = False
+    
+    ' Generate current month sheet name
+    currentMonthSheetName = Right(Year(Date), 2) & "_" & Format(Month(Date), "00")
+    
+    ' Find the current month sheet
+    Set ws = Nothing
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(currentMonthSheetName)
+    On Error GoTo ErrorHandler
+    
+    If ws Is Nothing Then
+        MsgBox "Sheet " & currentMonthSheetName & " not found. Please create it first.", vbExclamation
+        GoTo CleanExit
+    End If
+    
+    ws.Activate
+    
+    ' Count existing MoM tables
+    tableCount = 0
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, TABLE_PREFIX) > 0 Then
+            tableCount = tableCount + 1
+        End If
+    Next tbl
+    
+    ' If no tables, show message and exit
+    If tableCount = 0 Then
+        MsgBox "No MoM tables found in " & currentMonthSheetName & ". Please create tables first.", vbInformation
+        GoTo CleanExit
+    End If
+    
+    ' Add new rows to all MoM tables - with individual error handling
+    tableCount = 0
+    logMessage = ""
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, TABLE_PREFIX) > 0 Then
+            On Error Resume Next
+            
+            ' Add new row
+            Set newRow = tbl.ListRows.Add
+            
+            If Err.Number = 0 Then
+                ' Auto-populate basic fields
+                Call FillBasicFields(newRow, tbl)
+                
+                ' Count the table
+                tableCount = tableCount + 1
+                logMessage = logMessage & "Added row to: " & tbl.Name & vbCrLf
+                
+                ' Position cursor in first data entry cell
+                newRow.Range.Cells(1, 2).Select
+            Else
+                logMessage = logMessage & "Error with table: " & tbl.Name & " - " & Err.Description & vbCrLf
+                Err.Clear
+            End If
+            
+            On Error GoTo ErrorHandler
+        End If
+    Next tbl
+    
+    ' Log the activity
+    Call SimpleLog("Data Entry", logMessage)
+    
+    ' Show success message
+    MsgBox "✅ Ready for " & DEPARTMENT_NAME & " data entry in " & tableCount & " tables!", vbInformation
+
+CleanExit:
+    Application.ScreenUpdating = True
+    Exit Sub
+
+ErrorHandler:
+    Application.ScreenUpdating = True
+    MsgBox "Error: " & Err.Description, vbCritical
+    Exit Sub
+End Sub
+
+' ===================================================================
+' SIMPLE FIELD POPULATION - EXTRA SAFE
+' ===================================================================
+Private Sub FillBasicFields(newRow As ListRow, tbl As ListObject)
+    Dim i As Long, headerName As String
+    
+    On Error Resume Next
+    
+    ' Safety check
+    If newRow Is Nothing Or tbl Is Nothing Then Exit Sub
+    If tbl.HeaderRowRange Is Nothing Then Exit Sub
+    
+    For i = 1 To tbl.HeaderRowRange.Columns.Count
+        headerName = ""
+        headerName = LCase(Trim(tbl.HeaderRowRange.Cells(1, i).Value & ""))
+        
+        If headerName <> "" Then
+            Select Case headerName
+                Case "date"
+                    newRow.Range.Cells(1, i).Value = Date
+                Case "time"
+                    newRow.Range.Cells(1, i).Value = Time
+                Case "officer"
+                    newRow.Range.Cells(1, i).Value = Environ("USERNAME")
+                Case "shift"
+                    newRow.Range.Cells(1, i).Value = GetSimpleShift()
+                Case "department"
+                    newRow.Range.Cells(1, i).Value = DEPARTMENT_NAME
+            End Select
+        End If
+    Next i
+    
+    On Error GoTo 0
+End Sub
+
+' ===================================================================
+' SIMPLE SHIFT DETECTION
+' ===================================================================
+Private Function GetSimpleShift() As String
+    Dim currentHour As Integer
+    currentHour = Hour(Now)
+    
+    If currentHour >= 6 And currentHour < 14 Then
+        GetSimpleShift = "Day"
+    ElseIf currentHour >= 14 And currentHour < 22 Then
+        GetSimpleShift = "Evening"
+    Else
+        GetSimpleShift = "Night"
+    End If
+End Function
+
+' ===================================================================
+' SIMPLE LOGGING
+' ===================================================================
+Private Sub SimpleLog(activityType As String, details As String)
+    Dim logSheet As Worksheet, nextRow As Long
+    
+    On Error Resume Next
+    Set logSheet = ThisWorkbook.Sheets(LOG_SHEET_NAME)
+    
+    If logSheet Is Nothing Then
+        Set logSheet = ThisWorkbook.Sheets.Add
+        logSheet.Name = LOG_SHEET_NAME
+        logSheet.Cells(1, 1).Value = "Timestamp"
+        logSheet.Cells(1, 2).Value = "Activity"
+        logSheet.Cells(1, 3).Value = "Details"
+        logSheet.Range("A1:C1").Font.Bold = True
+    End If
+    
+    nextRow = logSheet.Cells(logSheet.Rows.Count, 1).End(xlUp).Row + 1
+    logSheet.Cells(nextRow, 1).Value = Now
+    logSheet.Cells(nextRow, 2).Value = activityType
+    logSheet.Cells(nextRow, 3).Value = details
+    
+    On Error GoTo 0
+End Sub
+
+' ===================================================================
+' BASIC DATA VALIDATION
+' ===================================================================
+Sub RunBasicValidation()
+    Dim ws As Worksheet, tbl As ListObject
+    Dim currentMonthSheetName As String
+    Dim errorCount As Long
+    
+    currentMonthSheetName = Right(Year(Date), 2) & "_" & Format(Month(Date), "00")
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(currentMonthSheetName)
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        MsgBox "Current month sheet not found.", vbExclamation
+        Exit Sub
+    End If
+    
+    errorCount = 0
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, TABLE_PREFIX) > 0 Then
+            errorCount = errorCount + ValidateTableBasic(tbl)
+        End If
+    Next tbl
+    
+    If errorCount = 0 Then
+        MsgBox "✅ All validation checks passed!", vbInformation
+    Else
+        MsgBox "⚠️ Found " & errorCount & " validation issues.", vbExclamation
+    End If
+End Sub
+
+' ===================================================================
+' BASIC TABLE VALIDATION
+' ===================================================================
+Private Function ValidateTableBasic(tbl As ListObject) As Long
+    Dim col As Long, row As Long, cell As Range
+    Dim errorCount As Long
+    
+    If tbl.DataBodyRange Is Nothing Then
+        ValidateTableBasic = 0
+        Exit Function
+    End If
+    
+    On Error Resume Next
+    
+    ' Check for empty required fields
+    For row = 1 To tbl.DataBodyRange.Rows.Count
+        For col = 1 To tbl.HeaderRowRange.Columns.Count
+            Set cell = tbl.DataBodyRange.Cells(row, col)
+            
+            ' Check date column
+            If InStr(LCase(tbl.HeaderRowRange.Cells(1, col).Value), "date") > 0 Then
+                If IsEmpty(cell.Value) Or Not IsDate(cell.Value) Then
+                    cell.Interior.Color = RGB(255, 200, 200)
+                    errorCount = errorCount + 1
+                End If
+            End If
+        Next col
+    Next row
+    
+    ValidateTableBasic = errorCount
+    On Error GoTo 0
+End Function
+
+' ===================================================================
+' DEBUG INCIDENTS TABLE SPECIFICALLY
+' ===================================================================
+Sub DebugIncidentsTableSpecific()
+    Dim ws As Worksheet, tbl As ListObject, newRow As ListRow
+    Dim currentMonthSheetName As String
+    Dim debugMsg As String
+    
+    currentMonthSheetName = Right(Year(Date), 2) & "_" & Format(Month(Date), "00")
+    Set ws = ThisWorkbook.Sheets(currentMonthSheetName)
+    
+    debugMsg = "INCIDENTS TABLE DEBUG:" & vbCrLf & vbCrLf
+    
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, "incidents") > 0 Then
+            debugMsg = debugMsg & "Found incidents table: " & tbl.Name & vbCrLf
+            debugMsg = debugMsg & "Range: " & tbl.Range.Address & vbCrLf
+            debugMsg = debugMsg & "Header Range: " & tbl.HeaderRowRange.Address & vbCrLf
+            
+            If tbl.DataBodyRange Is Nothing Then
+                debugMsg = debugMsg & "DataBodyRange: NULL (empty table)" & vbCrLf
+            Else
+                debugMsg = debugMsg & "DataBodyRange: " & tbl.DataBodyRange.Address & vbCrLf
+                debugMsg = debugMsg & "Current Rows: " & tbl.DataBodyRange.Rows.Count & vbCrLf
+            End If
+            
+            ' Try to add a row and see what happens
+            On Error Resume Next
+            Set newRow = tbl.ListRows.Add
+            
+            If Err.Number = 0 Then
+                debugMsg = debugMsg & "✅ Successfully added new row!" & vbCrLf
+                debugMsg = debugMsg & "New row range: " & newRow.Range.Address & vbCrLf
+                
+                ' Try to populate a field
+                newRow.Range.Cells(1, 1).Value = "TEST"
+                debugMsg = debugMsg & "✅ Successfully added test data!" & vbCrLf
+            Else
+                debugMsg = debugMsg & "❌ Error adding row: " & Err.Description & vbCrLf
+            End If
+            
+            Err.Clear
+            On Error GoTo 0
+            Exit For
+        End If
+    Next tbl
+    
+    If InStr(debugMsg, "Found incidents table") = 0 Then
+        debugMsg = debugMsg & "❌ No incidents table found!" & vbCrLf
+    End If
+    
+    MsgBox debugMsg, vbInformation, "Incidents Table Debug"
+End Sub
+
+' ===================================================================
+' CHECK WHAT'S BLOCKING INCIDENTS TABLE
+' ===================================================================
+Sub CheckWhatsBlockingIncidents()
+    Dim ws As Worksheet
+    Dim currentMonthSheetName As String
+    Dim checkMsg As String
+    Dim r As Long, c As Long
+    
+    currentMonthSheetName = Right(Year(Date), 2) & "_" & Format(Month(Date), "00")
+    Set ws = ThisWorkbook.Sheets(currentMonthSheetName)
+    
+    checkMsg = "CHECKING AREA AROUND INCIDENTS TABLE:" & vbCrLf & vbCrLf
+    
+    ' Check rows 42-50 for any content
+    For r = 42 To 50
+        For c = 1 To 15  ' Columns A to O
+            If ws.Cells(r, c).Value <> "" Or ws.Cells(r, c).HasFormula Then
+                checkMsg = checkMsg & "Content found at " & ws.Cells(r, c).Address & ": " & ws.Cells(r, c).Value & vbCrLf
+            End If
+            
+            If ws.Cells(r, c).Interior.Color <> RGB(255, 255, 255) Then
+                checkMsg = checkMsg & "Formatting at " & ws.Cells(r, c).Address & vbCrLf
+            End If
+        Next c
+    Next r
+    
+    ' Check for merged cells
+    On Error Resume Next
+    If ws.Range("A42:K50").MergeCells Then
+        checkMsg = checkMsg & "Merged cells detected in A42:K50" & vbCrLf
+    End If
+    On Error GoTo 0
+    
+    ' Check for other tables in the area
+    Dim tbl As ListObject
+    For Each tbl In ws.ListObjects
+        If Not (tbl.Range.Row > 50 Or tbl.Range.Row + tbl.Range.Rows.Count < 42) Then
+            checkMsg = checkMsg & "Table conflict: " & tbl.Name & " at " & tbl.Range.Address & vbCrLf
+        End If
+    Next tbl
+    
+    If checkMsg = "CHECKING AREA AROUND INCIDENTS TABLE:" & vbCrLf & vbCrLf Then
+        checkMsg = checkMsg & "✅ No obvious blockages found - might be hidden formatting"
+    End If
+    
+    MsgBox checkMsg, vbInformation, "Area Check"
+End Sub
+
+' ===================================================================
+' EASY ACCESS FUNCTIONS - USE ALT+F8 TO FIND THESE
+' ===================================================================
+Sub TEST_Main_Navigation()
+    Call GoTo_Current_Month_Entry_Hackensack
+End Sub
+
+Sub TEST_Validation()
+    Call RunBasicValidation
+End Sub
+
+Sub TEST_Template_Working()
+    MsgBox "✅ Template is working! All functions accessible via Alt+F8", vbInformation
+End Sub
+Sub CleanupAndRecreateIncidents()
+    Dim ws As Worksheet, tbl As ListObject
+    Dim currentMonthSheetName As String
+    Dim headers As Variant
+    Dim i As Long, tableCount As Long
+    
+    currentMonthSheetName = Right(Year(Date), 2) & "_" & Format(Month(Date), "00")
+    Set ws = ThisWorkbook.Sheets(currentMonthSheetName)
+    
+    ' Delete ALL incidents tables (there might be multiple)
+    tableCount = 0
+    On Error Resume Next
+    For Each tbl In ws.ListObjects
+        If InStr(tbl.Name, "incidents") > 0 Then
+            MsgBox "Deleting table: " & tbl.Name & " at " & tbl.Range.Address, vbInformation
+            tbl.Delete
+            tableCount = tableCount + 1
+        End If
+    Next tbl
+    On Error GoTo 0
+    
+    ' Clear the entire area where incidents tables were
+    ws.Range("A40:K50").Clear
+    ws.Range("A40:K50").ClearFormats
+    
+    ' Create fresh incidents table at row 80 (well away from everything)
+    headers = Array("Date", "Time", "Officer", "Shift", "Location", "Notes", "Incident_Type", "Severity", "Response_Time", "Resolution_Status", "Follow_Up_Required")
+    
+    For i = LBound(headers) To UBound(headers)
+        ws.Cells(80, i + 1).Value = headers(i)
+    Next i
+    
+    ' Create single incidents table
+    Set tbl = ws.ListObjects.Add(xlSrcRange, ws.Range("A80:K81"), , xlYes)
+    tbl.Name = "_mom_incidents_25_05"
+    
+    ' Format
+    With tbl.HeaderRowRange
+        .Font.Bold = True
+        .Interior.Color = RGB(79, 129, 189)
+        .Font.Color = RGB(255, 255, 255)
+    End With
+    
+    tbl.TableStyle = "TableStyleMedium2"
+    
+    MsgBox "✅ Deleted " & tableCount & " old incidents tables. Created new one at A80!", vbInformation
+End Sub

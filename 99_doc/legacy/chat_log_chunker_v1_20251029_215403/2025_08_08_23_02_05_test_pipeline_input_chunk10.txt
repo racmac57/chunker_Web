@@ -1,0 +1,270 @@
+You said:
+PS C:\Users\carucci_r\Documents\chunker> # Create fresh test and monitor
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1
+
+Test file created: test_full_conversation.txt (239 bytes)
+PS C:\Users\carucci_r\Documents\chunker> # Rename to match the watcher pattern
+PS C:\Users\carucci_r\Documents\chunker> copy "2025_06_27_17_08_32_policy_train_01.txt" "policy_train_01_full_conversation.txt"
+PS C:\Users\carucci_r\Documents\chunker> # Open separate PowerShell window for real-time logs
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1 -MonitorOnly
+
+Monitoring logs... (Press Ctrl+C to stop)
+2025-06-28 00:53:19,077 [ERROR] Failed to write chunk 5 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,079 [ERROR] Failed to write chunk 6 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,081 [ERROR] Failed to write chunk 7 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,084 [ERROR] Failed to write chunk 8 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,085 [ERROR] Failed to write chunk 9 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,087 [ERROR] Failed to write chunk 10 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,090 [ERROR] Failed to write chunk 11 for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+2025-06-28 00:53:19,091 [ERROR] No chunk files were created for policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,094 [INFO] \u2705 Moved to processed: policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,094 [INFO] \u2705 Successfully processed: policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,625 [WARNING] File disappeared during stability check: C:\Users\carucci_r\Documents\chunker\policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,625 [ERROR] File not stable, skipping: policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,625 [ERROR] Failed to process: policy_train_01_full_conversation.txt
+2025-06-28 00:53:19,625 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:53:19,625 [INFO] files_processed: 1
+2025-06-28 00:53:19,625 [INFO] chunks_created: 1
+2025-06-28 00:53:19,625 [INFO] zero_byte_prevented: 0
+2025-06-28 00:53:19,625 [INFO] errors: 361
+2025-06-28 00:53:24,097 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:29,098 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:34,100 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:39,103 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:44,105 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:49,108 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:54,111 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:53:59,113 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:54:04,116 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:54:09,118 [INFO] Found 2 .txt files in watch folder
+ChatGPT said:
+The error messages you're seeing indicate a bug in your watcher_splitter.py script — specifically a missing variable definition for original_filename when writing certain chunks. 🔍 Key Error
+[ERROR] Failed to write chunk X for policy_train_01_full_conversation.txt: name 'original_filename' is not defined
+This means somewhere in the code, you're referencing original_filename without defining it in the current scope. ✅ How to Fix It
+Open watcher_splitter.py
+
+Search for:
+
+original_filename
+You’ll likely see a line like this:
+
+chunk_file = Path(output_folder) / f"{timestamp}_{original_filename}_chunk{i+1}.txt"
+But original_filename wasn't defined earlier. ✅ Fix: Define it above where it's used:
+
+original_filename = input_path.stem
+So your chunk-writing loop might look like:
+
+original_filename = input_path.stem  # <-- Add this line
+
+for i, chunk in enumerate(chunks):
+    try:
+        chunk_file = Path(output_folder) / f"{timestamp}_{original_filename}_chunk{i+1}.txt"
+        chunk_file.write_text(chunk, encoding="utf-8")
+        ...
+🧪 After You Fix It
+Once you've saved the corrected version of watcher_splitter.py:
+
+Re-run python watcher_splitter.py
+
+Drop your test file (policy_train_01_full_conversation.txt) again
+
+Use:
+
+.\test_chunker.ps1 -MonitorOnly
+...to verify that no [ERROR] name 'original_filename' is not defined appears again. Would you like me to review the whole chunk-writing function to ensure it's robust? You said:
+PS C:\Users\carucci_r\Documents\chunker> Get-ChildItem output\*.txt | Where-Object { $_.Length -eq 0 } | Remove-Item -Verbose
+
+VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk1.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk10.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk11.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk2.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk3.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk4.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk5.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk6.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk7.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk8.txt". VERBOSE: Performing the operation "Remove File" on target
+
+"C:\Users\carucci_r\Documents\chunker\output\2025_06_27_21_55_26_2025_06_27_17_08_32_policy_train_01_chunk9.txt". PS C:\Users\carucci_r\Documents\chunker>
+
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1
+
+Test file created: test_full_conversation.txt (239 bytes)
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1 -MonitorOnly
+
+Monitoring logs... (Press Ctrl+C to stop)
+2025-06-28 00:55:39,155 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:55:44,157 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:55:49,159 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:55:54,162 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:55:59,164 [INFO] Found 2 .txt files in watch folder
+2025-06-28 00:55:59,668 [INFO] Enhanced watcher started - monitoring: C:/Users/carucci_r/Documents/chunker
+2025-06-28 00:55:59,668 [INFO] Target pattern: *_full_conversation.txt
+2025-06-28 00:55:59,669 [INFO] Found 1 new files to process
+2025-06-28 00:55:59,669 [INFO] Processing file: test_full_conversation.txt
+2025-06-28 00:56:00,671 [INFO] File stable after 1.0s: test_full_conversation.txt
+2025-06-28 00:56:00,706 [INFO] Created 1 chunks from 4 sentences
+2025-06-28 00:56:00,707 [INFO] Created chunk: 2025_06_28_00_56_00_test_full_conversation_chunk1.txt (232 chars)
+2025-06-28 00:56:00,712 [INFO] Copied 1/1 files to cloud
+2025-06-28 00:56:00,713 [INFO] Cloud sync successful: C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Ai_Chats\Cleaned\2025_06_28_00_56_00_test_full_conversation
+2025-06-28 00:56:00,716 [INFO] Moved file to processed: processed\test_full_conversation_3.txt
+2025-06-28 00:56:00,716 [INFO] File processing complete: test_full_conversation.txt \u2192 1 chunks
+2025-06-28 00:56:00,716 [INFO] Successfully processed: test_full_conversation.txt
+2025-06-28 00:56:04,166 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:09,166 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:14,168 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:19,169 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:19,666 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:56:19,666 [INFO] files_processed: 1
+2025-06-28 00:56:19,666 [INFO] chunks_created: 1
+2025-06-28 00:56:19,666 [INFO] zero_byte_prevented: 0
+2025-06-28 00:56:19,666 [INFO] errors: 361
+2025-06-28 00:56:24,172 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:29,174 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:34,175 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:39,178 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:44,180 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:49,182 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:54,186 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:56:55,726 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:56:55,726 [INFO] files_processed: 1
+2025-06-28 00:56:55,727 [INFO] chunks_created: 1
+2025-06-28 00:56:55,727 [INFO] zero_byte_prevented: 0
+2025-06-28 00:56:55,727 [INFO] errors: 0
+2025-06-28 00:56:59,188 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:57:04,190 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:57:09,191 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:57:14,191 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:57:19,193 [INFO] Found 1 .txt files in watch folder
+2025-06-28 00:57:19,678 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:57:19,678 [INFO] files_processed: 1
+2025-06-28 00:57:19,678 [INFO] chunks_created: 1
+2025-06-28 00:57:19,678 [INFO] zero_byte_prevented: 0
+2025-06-28 00:57:19,678 [INFO] errors: 361
+ChatGPT said:
+You're extremely close to having a clean, stable system. Here's what we know from your latest run:
+
+✅ What Went Right:
+✔️ test_chunker.ps1 successfully created a valid test file. ✔️ Watcher detected and processed the file smoothly. ✔️ Only one valid chunk was created, no zero-byte chunks. ✔️ File was copied to the cloud and archived into the processed folder. ✔️ No new errors occurred in this last processing event (errors: 0). ⚠️ What Still Needs Attention:
+2025-06-28 00:56:19,666 [INFO] errors: 361
+This high error count is left over from a previous failed run — likely when original_filename was not defined. It is not growing, which means your fix worked ✅. The watcher logs multiple session statistics every 20 seconds — the older logs are persisting until you restart the script. 🧼 Clean-Up Suggestion
+To reset error tracking and remove confusion:
+
+🔁 Stop the running watcher (Ctrl + C)
+
+🧹 Clear or rotate logs (optional):
+
+Remove-Item .\logs\watcher.log
+or rename:
+
+Rename-Item .\logs\watcher.log watcher_old.log
+▶️ Re-run the watcher:
+
+python watcher_splitter.py
+After that, you'll see only new stats for fresh files — and errors: 0 should stay clean if everything is fixed. Would you like help adding automatic log rotation to avoid manual clearing in the future? You said:
+At line:1 char:1
++ Rename-Item .\logs\watcher.log watcher_old_$(Get-Date -Format 'MMdd_H ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\carucc...ogs\watcher.log:String) [Rename-Item], IOException
+    + FullyQualifiedErrorId : RenameItemIOError,Microsoft.PowerShell.Commands.RenameItemCommand
+Rename-Item : The process cannot access the file because it is being used by another process. At line:1 char:1
++ Rename-Item .\logs\watcher.log watcher_old_$(Get-Date -Format 'MMdd_H ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\carucc...ogs\watcher.log:String) [Rename-Item], IOException
+    + FullyQualifiedErrorId : RenameItemIOError,Microsoft.PowerShell.Commands.RenameItemCommand
+
+PS C:\Users\carucci_r\Documents\chunker>
+Rename-Item : The process cannot access the file because it is being used by another process. At line:1 char:1
++ Rename-Item .\logs\watcher.log watcher_old_$(Get-Date -Format 'MMdd_H ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : WriteError: (C:\Users\carucc...ogs\watcher.log:String) [Rename-Item], IOException
+    + FullyQualifiedErrorId : RenameItemIOError,Microsoft.PowerShell.Commands.RenameItemCommand
+
+PS C:\Users\carucci_r\Documents\chunker>
+ChatGPT said:
+You're seeing this error because the watcher_splitter.py script is still running and has an open handle on watcher.log, so PowerShell can't rename or delete the file. ✅ To Resolve:
+Stop the watcher process:
+
+If it's running in a separate PowerShell window, press Ctrl + C in that window. If you closed the window but the process is still running, you can stop it using Task Manager (python.exe). Then run:
+
+Rename-Item .\logs\watcher.log watcher_old_$(Get-Date -Format 'MMdd_HHmmss').log
+✅ Optional: To Avoid This in the Future
+You could add log rotation logic directly in the Python script, or adjust it to use something like Python’s , which automatically rolls over log files when they get too large or after a certain number of runs. Would you like help adding log rotation in watcher_splitter.py? You said:
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1 -MonitorOnly
+
+Monitoring logs... (Press Ctrl+C to stop)
+2025-06-28 01:03:45,624 [INFO] Target pattern: *_full_conversation.txt
+2025-06-28 01:04:17,082 [INFO] === SESSION STATISTICS ===
+2025-06-28 01:04:17,083 [INFO] files_processed: 0
+2025-06-28 01:04:17,083 [INFO] chunks_created: 0
+2025-06-28 01:04:17,083 [INFO] zero_byte_prevented: 0
+2025-06-28 01:04:17,083 [INFO] errors: 0
+2025-06-28 01:05:14,303 [INFO] Enhanced watcher started - monitoring: C:/Users/carucci_r/Documents/chunker
+2025-06-28 01:05:14,303 [INFO] Target pattern: *_full_conversation.txt
+2025-06-28 01:05:17,096 [INFO] === SESSION STATISTICS ===
+2025-06-28 01:05:17,096 [INFO] files_processed: 0
+2025-06-28 01:05:17,096 [INFO] chunks_created: 0
+2025-06-28 01:05:17,096 [INFO] zero_byte_prevented: 0
+2025-06-28 01:05:17,096 [INFO] errors: 0
+2025-06-28 01:06:08,709 [INFO] Enhanced watcher started - monitoring: C:/Users/carucci_r/Documents/chunker
+2025-06-28 01:06:08,710 [INFO] Target pattern: *_full_conversation.txt
+2025-06-28 01:07:03,705 [INFO] === SESSION STATISTICS ===
+2025-06-28 01:07:03,705 [INFO] files_processed: 0
+2025-06-28 01:07:03,705 [INFO] chunks_created: 0
+2025-06-28 01:07:03,705 [INFO] zero_byte_prevented: 0
+2025-06-28 01:07:03,705 [INFO] errors: 0
+2025-06-28 01:07:38,697 [INFO] Found 1 new files to process
+2025-06-28 01:07:38,697 [INFO] Processing file: policy_train_01_full_conversation.txt
+2025-06-28 01:07:41,698 [INFO] File stable after 3s: policy_train_01_full_conversation.txt
+2025-06-28 01:07:41,773 [INFO] Created 11 chunks from 1089 sentences
+2025-06-28 01:07:41,774 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk1.txt (44960 chars)
+2025-06-28 01:07:41,775 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk2.txt (25571 chars)
+2025-06-28 01:07:41,777 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk3.txt (42194 chars)
+2025-06-28 01:07:41,779 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk4.txt (4592 chars)
+2025-06-28 01:07:41,780 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk5.txt (13372 chars)
+2025-06-28 01:07:41,780 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk6.txt (25944 chars)
+2025-06-28 01:07:41,781 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk7.txt (16658 chars)
+2025-06-28 01:07:41,782 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk8.txt (27461 chars)
+2025-06-28 01:07:41,782 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk9.txt (30671 chars)
+2025-06-28 01:07:41,783 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk10.txt (14115 chars)
+2025-06-28 01:07:41,784 [INFO] Created chunk: 2025_06_28_01_07_41_policy_train_01_full_conversation_chunk11.txt (14843 chars)
+2025-06-28 01:07:42,216 [INFO] Copied 11/11 files to cloud
+2025-06-28 01:07:42,217 [INFO] Cloud sync successful: C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Ai_Chats\Cleaned\2025_06_28_01_07_41_policy_train_01_full_conversation
+2025-06-28 01:07:42,218 [INFO] Moved file to processed: processed\policy_train_01_full_conversation_1.txt
+2025-06-28 01:07:42,219 [INFO] File processing complete: policy_train_01_full_conversation.txt \u2192 11 chunks
+2025-06-28 01:07:42,219 [INFO] Successfully processed: policy_train_01_full_conversation.txt
+2025-06-28 01:08:07,213 [INFO] === SESSION STATISTICS ===
+2025-06-28 01:08:07,213 [INFO] files_processed: 1
+2025-06-28 01:08:07,214 [INFO] chunks_created: 11
+2025-06-28 01:08:07,214 [INFO] zero_byte_prevented: 0
+2025-06-28 01:08:07,214 [INFO] errors: 0
+ChatGPT said:
+✅ Great news! Everything is working correctly now:
+
+The enhanced watcher successfully detected and processed policy_train_01_full_conversation.txt. It generated 11 valid chunk files from 1089 sentences. All chunks were non-zero, synced to cloud storage, and the original file was archived to the processed folder. No errors, and zero_byte_prevented count is 0, confirming the latest patch is working as intended. 🔄 Summary of Resolved Issues:
+Issue	Status
+Zero-byte chunks	✅ Eliminated
+original_filename undefined	✅ Fixed
+watcher.log rename access	✅ Workaround noted (stop process first)
+PowerShell test script errors	✅ Cleaned/fixed script and confirmed -MonitorOnly and -CheckResults now work
+Log confirms proper processing	✅ Yes
+If you’d like to:
+
+add log rotation,
+
+generate a report of processed files,
+
+or schedule this to run daily/weekly via Task Scheduler or cron,
+
+Let me know — happy to assist!

@@ -28,6 +28,10 @@
 - **04_output/** - Generated chunks and transcripts (organized by source file)
 - **05_logs/** - Application logs and tracking
 - **06_config/** - Configuration files
+- **99_doc/legacy/** - Consolidated legacy docs (latest snapshot per project)
+- **06_config/legacy/** - Consolidated legacy config (latest snapshot per project)
+- **05_logs/legacy/** - Consolidated legacy logs (latest snapshot per project)
+- **03_archive/legacy/** - Consolidated legacy db/backups (latest snapshot per project)
 - **faiss_index/** - FAISS vector database storage
 - **evaluations/** - RAG evaluation results
 - **reports/** - Automated evaluation reports
@@ -145,6 +149,19 @@ For high-volume processing and advanced task management:
 - [x] **Performance Monitoring** - System metrics and performance tracking
 - [x] **Security Redaction** - PII masking in metadata
 - [x] **Modular Architecture** - Clean separation of concerns
+
+## 🔄 Consolidation (2025-10-29)
+
+- Older project iterations (e.g., ClaudeExportFixer, chat_log_chunker_v1, chat_watcher) were unified under `C:\_chunker`.
+- Historical outputs migrated to `C:\_chunker\04_output\<ProjectName>_<timestamp>`.
+- Legacy artifacts captured once per project (latest snapshot only):
+  - Docs → `99_doc\legacy\<ProjectName>_<timestamp>`
+  - Config → `06_config\legacy\<ProjectName>_<timestamp>`
+  - Logs → `05_logs\legacy\<ProjectName>_<timestamp>`
+  - DB/Backups → `03_archive\legacy\<ProjectName>_<timestamp>`
+- Script backups stored with timestamp prefixes at
+  `C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\backup_scripts\<ProjectName>\`.
+- Policy: keep only the latest legacy snapshot per project (older snapshots pruned).
 
 ## ⚙️ Configuration
 
@@ -329,7 +346,7 @@ results = langsmith.run_evaluation(test_queries, rag_function)
 |------|------------|------------------|-------------------|
 | **Text** | .txt, .md, .log | Direct text processing | Word count, sentences, keywords |
 | **Structured** | .json, .csv, .yaml, .xml | Parsed structure | Schema, data types, samples |
-| **Office** | .xlsx, .docx | Library extraction | Sheets, formulas, formatting |
+| **Office** | .xlsx, .xlsm, .docx | Library extraction | Sheets, formulas, formatting |
 | **Code** | .py | AST parsing | Functions, classes, imports, docstrings |
 | **Documents** | .pdf | Text extraction | Pages, metadata, text content |
 

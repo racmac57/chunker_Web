@@ -1,0 +1,732 @@
+Respond with: ACCURATE, INACCURATE, or UNCLEAR
+        """
+        
+        response = self.llm.generate(prompt)
+        
+        if "ACCURATE" in response.upper():
+            return 1.0
+        elif "INACCURATE" in response.upper():
+            return 0.0
+        else:
+            return 0.5  # UNCLEAR
+    
+    def detect_hallucinations(self, answer, context):
+        """Detect if answer contains information not in context"""
+        answer_sentences = nltk.sent_tokenize(answer)
+        context_sentences = nltk.sent_tokenize(context)
+        
+        hallucination_scores = []
+        
+        for answer_sent in answer_sentences:
+            # Check if sentence is supported by context
+            max_similarity = 0
+            for context_sent in context_sentences:
+                similarity = self.calculate_semantic_similarity(answer_sent, context_sent)
+                max_similarity = max(max_similarity, similarity)
+            
+            # If similarity is too low, it might be hallucination
+            if max_similarity < 0.3:
+                hallucination_scores.append(0.0)  # Likely hallucination
+            else:
+                hallucination_scores.append(1.0)  # Supported by context
+        
+        return np.mean(hallucination_scores)
+```
+
+```python
+from llama_index.core import VectorStoreIndex, Document, Settings
+from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.llms.ollama import Ollama
+from llama_index.core.evaluation import FaithfulnessEvaluator, RelevancyEvaluator
+import chromadb
+
+class LlamaIndexRAG:
+    def __init__(self, persist_dir="./llama_chroma_db"):
+        # Initialize ChromaDB
+        self.chroma_client = chromadb.PersistentClient(path=persist_dir)
+        self.chroma_collection = self.chroma_client.get_or_create_collection("llama_knowledge")
+        
+        # Initialize LlamaIndex components
+        Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        Settings.llm = Ollama(model="llama3.2")
+        
+        # Create vector store
+        self.vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
+        
+        # Initialize evaluators
+        self.faithfulness_evaluator = FaithfulnessEvaluator()
+        self.relevancy_evaluator = RelevancyEvaluator()
+    
+    def add_documents(self, file_paths):
+        """Add documents to the knowledge base"""
+        documents = []
+        
+        for file_path in file_paths:
+            # Process different file types
+            if file_path.suffix == '.xlsx':
+                content = self.process_excel_file(file_path)
+            elif file_path.suffix == '.pdf':
+                content = self.process_pdf_file(file_path)
+            elif file_path.suffix == '.py':
+                content = self.process_python_file(file_path)
+            else:
+                content = self.process_text_file(file_path)
+            
+            # Create document with metadata
+            doc = Document(
+                text=content,
+                metadata={
+                    "file_name": file_path.name,
+                    "file_type": file_path.suffix,
+                    "file_size": file_path.stat().st_size,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+            documents.append(doc)
+        
+        # Create index
+        self.index = VectorStoreIndex.from_documents(
+            documents, 
+            vector_store=self.vector_store
+        )
+        
+        return len(documents)
+    
+    def query_with_evaluation(self, query, top_k=5):
+        """Query with comprehensive evaluation"""
+        
+        # Create query engine
+        query_engine = self.index.as_query_engine(
+            similarity_top_k=top_k,
+            response_mode="compact"
+        )
+        
+        # Execute query
+        response = query_engine.query(query)
+        
+        # Evaluate response
+        evaluation_results = self.evaluate_response(query, response)
+        
+        return {
+            "query": query,
+            "answer": str(response),
+            "sources": [node.metadata for node in response.source_nodes],
+            "evaluation": evaluation_results
+        }
+    
+    def evaluate_response(self, query, response):
+        """Comprehensive evaluation using LlamaIndex evaluators"""
+        
+        # Faithfulness evaluation
+        faithfulness_result = self.faithfulness_evaluator.evaluate_response(
+            response=response
+        )
+        
+        # Relevancy evaluation
+        relevancy_result = self.relevancy_evaluator.evaluate_response(
+            query=query,
+            response=response
+        )
+        
+        # Custom evaluation
+        custom_eval = self.custom_evaluation(query, response)
+        
+        return {
+            "faithfulness": faithfulness_result.score,
+            "relevancy": relevancy_result.score,
+            "custom_metrics": custom_eval
+        }
+    
+    def custom_evaluation(self, query, response):
+        """Custom evaluation metrics"""
+        
+        # Source diversity
+        sources = [node.metadata["file_name"] for node in response.source_nodes]
+        source_diversity = len(set(sources)) / len(sources) if sources else 0
+        
+        # Answer length appropriateness
+        answer_length = len(str(response))
+        length_score = 1.0 if 50 <= answer_length <= 500 else 0.5
+        
+        # Technical accuracy (for code-related queries)
+        technical_score = self.evaluate_technical_accuracy(query, str(response))
+        
+        return {
+            "source_diversity": source_diversity,
+            "length_appropriateness": length_score,
+            "technical_accuracy": technical_score
+        }
+    
+    def process_excel_file(self, file_path):
+        """Process Excel files with metadata extraction"""
+        import pandas as pd
+        
+        # Read Excel file
+        excel_data = pd.read_excel(file_path, sheet_name=None)
+        
+        content_parts = []
+        
+        for sheet_name, df in excel_data.items():
+            # Extract sheet content
+            content_parts.append(f"Sheet: {sheet_name}")
+            content_parts.append(f"Columns: {', '.join(df.columns)}")
+            content_parts.append(f"Data types: {df.dtypes.to_dict()}")
+            
+            # Extract formulas if any
+            formulas = self.extract_formulas(df)
+            if formulas:
+                content_parts.append(f"Formulas: {formulas}")
+            
+            # Sample data
+            content_parts.append(f"Sample data:\n{df.head().to_string()}")
+        
+        return "\n".join(content_parts)
+    
+    def process_python_file(self, file_path):
+        """Process Python files with code analysis"""
+        import ast
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read()
+        
+        try:
+            tree = ast.parse(code)
+            
+            # Extract functions, classes, imports
+            functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+            classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+            imports = [node.names[0].name for node in ast.walk(tree) if isinstance(node, ast.Import)]
+            
+            content_parts = [
+                f"Python file: {file_path.name}",
+                f"Functions: {', '.join(functions)}",
+                f"Classes: {', '.join(classes)}",
+                f"Imports: {', '.join(imports)}",
+                f"Code:\n{code}"
+            ]
+            
+            return "\n".join(content_parts)
+            
+        except SyntaxError:
+            return f"Python file: {file_path.name}\nCode:\n{code}"
+```
+
+```python
+def integrate_llamaindex_with_watcher():
+    """Integrate LlamaIndex with existing watcher system"""
+    
+    # Initialize LlamaIndex RAG
+    llama_rag = LlamaIndexRAG()
+    
+    def process_file_with_llamaindex(file_path, config):
+        """Enhanced file processing with LlamaIndex"""
+        
+        # Process file (existing logic)
+        chunks = process_file_enhanced(file_path, config)
+        
+        # Add to LlamaIndex knowledge base
+        documents_added = llama_rag.add_documents([file_path])
+        
+        # Log processing
+        logger.info(f"Added {documents_added} documents to LlamaIndex knowledge base")
+        
+        return True
+    
+    def query_knowledge_base(query):
+        """Query the knowledge base with evaluation"""
+        return llama_rag.query_with_evaluation(query)
+```
+
+---
+
+**User**
+
+You are enhancing my enterprise-grade file chunker system (Chunker_v2) in Python. The system monitors a directory, chunks files (.txt, .md, .json, .csv, and expand to .xlsx, .pdf, .py), extracts metadata, builds a searchable knowledge base for AI-assisted coding/problem-solving. Integrate RAG with LangChain, vector DB (FAISS/Chroma), local embeddings (Ollama with nomic-embed-text), hybrid search (semantic + keyword). Add RAG evaluation metrics and LangSmith for observability, tracing, feedback, and quality assurance, with concrete LangSmith tracing examples and RAG evaluation tools. Use ChromaDB for vector storage with CRUD operations. Implement faithfulness scoring for answer quality. Key expansions:
+- Support new file types: .xlsx (use openpyxl: sheets, formulas, data types, charts, pivots), .pdf (PyPDF2/PDFMiner: text, images, tables, metadata), .py (ast: functions, classes, imports, docstrings, comments), plus .docx, .sql, .yaml, .xml, .log. - Extract max metadata: file_info (name, type, size, created/modified, encoding), content_metadata (per type specifics), extracted_data (samples, summaries), tags/keywords (NLTK/auto-extract), ai_context (summary). - Output structure: JSON with above sections for AI optimization. - Knowledge base: Vector DB for semantic search, tags/indexes by problem/tech, versioned/timestamped. - Blind spots: Handle large files (streaming), encoding/errors, performance (batch), security (redact sensitive), updates (re-embed on changes), context loss (overlap chunks). - Integration: LangChain RAG for queries, hybrid search (vectors + BM25), AI tools (VS Code ext for queries). - RAG evaluation metrics: Retrieval (Precision@K, Recall@K, MRR, nDCG); Generation (ROUGE-1/2/L, BLEU, BERTScore); End-to-end (Faithfulness, Answer Relevancy, Context Precision/Relevancy); Relevance (semantic similarity, keyword overlap); Latency (query/embedding/generation time); Cost tracking. - LangSmith integration: Tracing for RAG pipeline; Feedback collection; A/B testing; Evaluation datasets; Dashboards; Automated evaluations; Regression detection; Performance thresholds; Quality alerts. Why LangSmith + RAG metrics:
+1. LangSmith benefits: Tracing (query flow through retrieval/generation); Feedback loops (user ratings/corrections); A/B testing (retrieval strategies); Cost tracking (embedding/LLM usage); Debugging (step-by-step traces). 2. RAG metrics: Retrieval (Precision@K, Recall@K, MRR); Relevance (semantic similarity, keyword overlap); Answer quality (Faithfulness, relevance, context utilization); Latency (query time, embedding time, generation time). Implementation phases:
+1. Enhanced chunking: In watcher_splitter.py, add embeddings during chunking, store in FAISS/Chroma. 2. RAG search: New rag_search.py for semantic/hybrid queries with citations. 3. Ollama integration: Local embeddings, no API costs. 4. Core metrics: New eval_rag.py - Implement retrieval metrics (precision@k, recall@k, MRR); Add semantic similarity scoring; Track latency and token usage; Export to CSV/JSON. 5. LangSmith integration: New langsmith_integration.py - Add tracing to RAG pipeline; Implement feedback collection; Set up evaluation datasets; Create dashboards. 6. Automated evaluation: New automated_eval.py - Run evaluations on schedule; Compare baselines; Alert regressions; Generate reports. 7. Faithfulness scoring: Implement FaithfulnessScorer class for answer quality. 8. ChromaDB: Use ChromaRAG class for vector DB with add/search/update/delete/stats. Recommended setup:
+1. LangSmith configuration: Add to config.json - {"langsmith": {"api_key": "your_key", "project": "chunker-rag-eval", "tracing_enabled": true, "evaluation_enabled": true}}. 2. Evaluation datasets: test_queries.json - [{"query": "How do I fix vlookup errors in Excel? ", "expected_answer": "Check data types and table references", "expected_sources": ["excel_troubleshooting.md", "vlookup_guide.xlsx"], "category": "excel"}]. 3. Metrics tracking: In database - Query performance, retrieval quality, user feedback, cost per query. What to implement:
+1. RAG evaluation framework: Retrieval metrics (precision@k, recall@k, MRR); Answer quality metrics (faithfulness, relevance); Latency and cost tracking; Automated evaluation pipeline. 2. LangSmith integration: Tracing decorators for RAG pipeline; Custom evaluation functions; Feedback collection system; Evaluation dataset management; Performance dashboards. 3. Monitoring and alerting: Regression detection; Performance thresholds; Cost monitoring; Quality alerts. LangSmith tracing examples:
+1. Basic RAG tracing:
+from langsmith import traceable
+from langchain.schema import Document
+
+@traceable
+def rag_query(query: str, vector_store, llm):
+    # Trace retrieval
+    docs = vector_store.similarity_search(query, k=5)
+    
+    # Trace generation
+    context = "\n".join([doc.page_content for doc in docs])
+    response = llm.invoke(f"Context: {context}\nQuery: {query}")
+    
+    return response
+
+2. Custom evaluation metrics:
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Run, Example
+
+def evaluate_retrieval(run: Run, example: Example):
+    # Check if retrieved docs are relevant
+    retrieved_docs = run.outputs.get("retrieved_docs", [])
+    expected_sources = example.outputs.get("expected_sources", [])
+    
+    # Calculate precision@k
+    relevant_docs = [doc for doc in retrieved_docs 
+                    if doc.metadata.get("source") in expected_sources]
+    precision = len(relevant_docs) / len(retrieved_docs) if retrieved_docs else 0
+    
+    return {"precision": precision}
+
+# Run evaluation
+evaluate(
+    lambda x: rag_query(x["query"], vector_store, llm),
+    data=test_dataset,
+    evaluators=[evaluate_retrieval]
+)
+
+3. Feedback collection:
+from langsmith import Client
+
+client = Client()
+
+# Collect user feedback
+def collect_feedback(run_id: str, rating: int, comment: str):
+    client.create_feedback(
+        run_id=run_id,
+        key="user_rating",
+        score=rating,
+        comment=comment
+    )
+
+RAG evaluation tools:
+1. Retrieval metrics:
+def calculate_retrieval_metrics(retrieved_docs, relevant_docs, k=5):
+    # Precision@K
+    precision_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / k
+    
+    # Recall@K
+    recall_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / len(relevant_docs)
+    
+    # MRR (Mean Reciprocal Rank)
+    mrr = 0
+    for i, doc in enumerate(retrieved_docs):
+        if doc in relevant_docs:
+            mrr = 1 / (i + 1)
+            break
+    
+    return {
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+        "mrr": mrr
+    }
+
+2. Answer quality metrics:
+def evaluate_answer_quality(generated_answer, expected_answer, context):
+    # Faithfulness (answer grounded in context)
+    faithfulness_score = calculate_faithfulness(generated_answer, context)
+    
+    # Answer relevance (answer matches query)
+    relevance_score = calculate_relevance(generated_answer, expected_answer)
+    
+    # Context utilization (how much context was used)
+    context_utilization = calculate_context_utilization(generated_answer, context)
+    
+    return {
+        "faithfulness": faithfulness_score,
+        "relevance": relevance_score,
+        "context_utilization": context_utilization
+    }
+
+3. Automated evaluation pipeline:
+def run_evaluation_pipeline(test_queries, vector_store, llm):
+    results = []
+    
+    for query in test_queries:
+        # Run RAG query
+        response = rag_query(query["text"], vector_store, llm)
+        
+        # Calculate metrics
+        retrieval_metrics = calculate_retrieval_metrics(
+            response["retrieved_docs"], 
+            query["relevant_docs"]
+        )
+        
+        answer_metrics = evaluate_answer_quality(
+            response["answer"], 
+            query["expected_answer"], 
+            response["context"]
+        )
+        
+        results.append({
+            "query": query["text"],
+            "retrieval_metrics": retrieval_metrics,
+            "answer_metrics": answer_metrics,
+            "latency": response["latency"]
+        })
+    
+    return results
+
+Faithfulness Scoring Implementation:
+import re
+import nltk
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+class FaithfulnessScorer:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.stop_words = set(nltk.corpus.stopwords.words('english'))
+    
+    def extract_claims(self, answer):
+        """Extract factual claims from the answer"""
+        # Split into sentences and filter out questions/opinions
+        sentences = nltk.sent_tokenize(answer)
+        claims = []
+        
+        for sentence in sentences:
+            # Remove questions and opinion indicators
+            if not re.search(r'\?|I think|I believe|in my opinion', sentence, re.IGNORECASE):
+                # Extract factual statements
+                if re.search(r'\b(is|are|was|were|has|have|will|can|should)\b', sentence, re.IGNORECASE):
+                    claims.append(sentence.strip())
+        
+        return claims
+    
+    def calculate_faithfulness(self, answer, context, threshold=0.7):
+        """
+        Calculate faithfulness score (0-1) based on how well answer claims
+        are supported by the context
+        """
+        claims = self.extract_claims(answer)
+        if not claims:
+            return 1.0  # No claims to verify
+        
+        # Get embeddings for claims and context
+        claim_embeddings = self.model.encode(claims)
+        context_embeddings = self.model.encode([context])
+        
+        faithfulness_scores = []
+        
+        for claim_emb in claim_embeddings:
+            # Find best matching context sentence
+            similarities = cosine_similarity([claim_emb], context_embeddings)[0]
+            max_similarity = np.max(similarities)
+            
+            # Check if claim is supported by context
+            if max_similarity >= threshold:
+                faithfulness_scores.append(1.0)
+            else:
+                # Check for partial support
+                faithfulness_scores.append(max_similarity)
+        
+        return np.mean(faithfulness_scores)
+    
+    def detailed_faithfulness_analysis(self, answer, context):
+        """Provide detailed analysis of faithfulness"""
+        claims = self.extract_claims(answer)
+        analysis = {
+            "total_claims": len(claims),
+            "supported_claims": 0,
+            "unsupported_claims": 0,
+            "claim_details": []
+        }
+        
+        for claim in claims:
+            claim_emb = self.model.encode([claim])
+            context_emb = self.model.encode([context])
+            similarity = cosine_similarity(claim_emb, context_emb)[0][0]
+            
+            is_supported = similarity >= 0.7
+            if is_supported:
+                analysis["supported_claims"] += 1
+            else:
+                analysis["unsupported_claims"] += 1
+            
+            analysis["claim_details"].append({
+                "claim": claim,
+                "similarity": float(similarity),
+                "supported": is_supported
+            })
+        
+        analysis["faithfulness_score"] = analysis["supported_claims"] / analysis["total_claims"] if analysis["total_claims"] > 0 else 1.0
+        
+        return analysis
+
+# Usage example
+scorer = FaithfulnessScorer()
+answer = "The vlookup function requires exact matches. You should use FALSE for exact matching." context = "VLOOKUP syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches, TRUE for approximate matches." faithfulness_score = scorer.calculate_faithfulness(answer, context)
+print(f"Faithfulness Score: {faithfulness_score:.2f}")
+
+detailed_analysis = scorer.detailed_faithfulness_analysis(answer, context)
+print(f"Supported claims: {detailed_analysis['supported_claims']}/{detailed_analysis['total_claims']}")
+
+ChromaDB Integration:
+import chromadb
+from chromadb.config import Settings
+import uuid
+from datetime import datetime
+import json
+
+class ChromaRAG:
+    def __init__(self, persist_directory="./chroma_db"):
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        
+        # Create or get collection
+        self.collection = self.client.get_or_create_collection(
+            name="chunker_knowledge_base",
+            metadata={"description": "Enterprise chunker knowledge base"}
+        )
+    
+    def add_chunk(self, chunk_text, metadata):
+        """Add a chunk to the vector database"""
+        chunk_id = f"{metadata['timestamp']}_{metadata['file_name']}_chunk{metadata['chunk_index']}"
+        
+        # Prepare metadata for ChromaDB
+        chroma_metadata = {
+            "file_name": metadata["file_name"],
+            "file_type": metadata["file_type"],
+            "chunk_index": metadata["chunk_index"],
+            "timestamp": metadata["timestamp"],
+            "department": metadata.get("department", "admin"),
+            "keywords": json.dumps(metadata.get("keywords", [])),
+            "file_size": metadata.get("file_size", 0),
+            "processing_time": metadata.get("processing_time", 0)
+        }
+        
+        # Add to collection
+        self.collection.add(
+            documents=[chunk_text],
+            metadatas=[chroma_metadata],
+            ids=[chunk_id]
+        )
+        
+        return chunk_id
+    
+    def search_similar(self, query, n_results=5, file_type=None, department=None):
+        """Search for similar chunks"""
+        where_clause = {}
+        
+        if file_type:
+            where_clause["file_type"] = file_type
+        if department:
+            where_clause["department"] = department
+        
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where_clause if where_clause else None
+        )
+        
+        return self._format_results(results)
+    
+    def search_by_keywords(self, keywords, n_results=5):
+        """Search by specific keywords"""
+        # Convert keywords to query string
+        query = " ".join(keywords)
+        return self.search_similar(query, n_results)
+    
+    def get_chunk_by_id(self, chunk_id):
+        """Retrieve specific chunk by ID"""
+        results = self.collection.get(ids=[chunk_id])
+        return self._format_results(results)
+    
+    def update_chunk(self, chunk_id, new_text, new_metadata):
+        """Update existing chunk"""
+        self.collection.update(
+            ids=[chunk_id],
+            documents=[new_text],
+            metadatas=[new_metadata]
+        )
+    
+    def delete_chunk(self, chunk_id):
+        """Delete chunk from database"""
+        self.collection.delete(ids=[chunk_id])
+    
+    def get_collection_stats(self):
+        """Get statistics about the collection"""
+        count = self.collection.count()
+        return {
+            "total_chunks": count,
+            "collection_name": self.collection.name,
+            "last_updated": datetime.now().isoformat()
+        }
+    
+    def _format_results(self, results):
+        """Format ChromaDB results for easier use"""
+        formatted_results = []
+        
+        if results.get("documents"):
+            for i, doc in enumerate(results["documents"][0]):
+                formatted_results.append({
+                    "id": results["ids"][0][i],
+                    "document": doc,
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i] if results.get("distances") else None
+                })
+        
+        return formatted_results
+
+# Integration with watcher_splitter.py
+def integrate_chroma_with_watcher():
+    """Example of how to integrate ChromaDB with the existing watcher"""
+    
+    # Initialize ChromaDB
+    chroma_rag = ChromaRAG()
+    
+    def process_file_with_chroma(file_path, config):
+        """Enhanced file processing with ChromaDB integration"""
+        # ... existing processing code ...
+        
+        # After creating chunks, add them to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = {
+                "file_name": file_path.name,
+                "file_type": file_path.suffix,
+                "chunk_index": i + 1,
+                "timestamp": datetime.now().isoformat(),
+                "department": department,
+                "keywords": extract_keywords(chunk),
+                "file_size": file_path.stat().st_size,
+                "processing_time": time.time() - start_time
+            }
+            
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+        
+        return True
+
+# Usage examples
+def example_usage():
+    # Initialize
+    rag = ChromaRAG()
+    
+    # Add chunks
+    metadata = {
+        "file_name": "excel_guide.md",
+        "file_type": ".md",
+        "chunk_index": 1,
+        "timestamp": "2025-10-27T12:00:00Z",
+        "department": "admin",
+        "keywords": ["excel", "vlookup", "formulas"]
+    }
+    
+    chunk_id = rag.add_chunk(
+        "VLOOKUP is used to find values in a table. Syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])",
+        metadata
+    )
+    
+    # Search
+    results = rag.search_similar("How do I use vlookup in Excel? ", n_results=3)
+    print(f"Found {len(results)} similar chunks")
+    
+    # Search by keywords
+    keyword_results = rag.search_by_keywords(["vlookup", "excel"])
+    print(f"Found {len(keyword_results)} chunks with keywords")
+    
+    # Get stats
+    stats = rag.get_collection_stats()
+    print(f"Total chunks in database: {stats['total_chunks']}")
+
+Concrete Examples:
+1. Complete RAG Pipeline:
+def complete_rag_example():
+    """Complete RAG pipeline with evaluation"""
+    
+    # Initialize components
+    chroma_rag = ChromaRAG()
+    faithfulness_scorer = FaithfulnessScorer()
+    
+    # Query
+    query = "How do I fix Power BI query errors?" # Retrieve relevant chunks
+    retrieved_chunks = chroma_rag.search_similar(query, n_results=5)
+    
+    # Generate answer (simplified)
+    context = "\n".join([chunk["document"] for chunk in retrieved_chunks])
+    answer = f"Based on the context: {context[:500]}..."
+    
+    # Evaluate faithfulness
+    faithfulness_score = faithfulness_scorer.calculate_faithfulness(answer, context)
+    
+    # Return results
+    return {
+        "query": query,
+        "answer": answer,
+        "sources": [chunk["metadata"]["file_name"] for chunk in retrieved_chunks],
+        "faithfulness_score": faithfulness_score,
+        "retrieved_chunks": len(retrieved_chunks)
+    }
+
+2. Batch Processing:
+def batch_process_files(file_paths):
+    """Process multiple files and add to ChromaDB"""
+    chroma_rag = ChromaRAG()
+    
+    for file_path in file_paths:
+        # Process file (existing logic)
+        chunks = process_file_enhanced(file_path, config)
+        
+        # Add each chunk to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = extract_metadata(file_path, chunk, i)
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            print(f"Added {chunk_id} to knowledge base")
+    
+    # Get final stats
+    stats = chroma_rag.get_collection_stats()
+    print(f"Knowledge base now contains {stats['total_chunks']} chunks")
+
+3. Evaluation Pipeline:
+def evaluate_rag_performance():
+    """Evaluate RAG performance with test queries"""
+    
+    test_queries = [
+        {
+            "query": "How do I fix vlookup errors? ",
+            "expected_answer": "Check data types and table references",
+            "expected_sources": ["excel_guide.md", "troubleshooting.xlsx"]
+        },
+        {
+            "query": "What is Power BI query syntax? ",
+            "expected_answer": "Use M language for Power Query",
+            "expected_sources": ["power_bi_guide.md"]
+        }
+    ]
+    
+    chroma_rag = ChromaRAG()
+    faithfulness_scorer = FaithfulnessScorer()
+    
+    results = []
+    
+    for test_case in test_queries:
+        # Retrieve
+        retrieved = chroma_rag.search_similar(test_case["query"], n_results=5)
+        
+        # Generate answer
+        context = "\n".join([chunk["document"] for chunk in retrieved])
+        answer = generate_answer(test_case["query"], context)
+        
+        # Evaluate
+        faithfulness = faithfulness_scorer.calculate_faithfulness(answer, context)
+        
+        # Check source relevance
+        retrieved_sources = [chunk["metadata"]["file_name"] for chunk in retrieved]
+        source_relevance = len(set(retrieved_sources) & set(test_case["expected_sources"])) / len(test_case["expected_sources"])
+        
+        results.append({
+            "query": test_case["query"],
+            "faithfulness_score": faithfulness,
+            "source_relevance": source_relevance,
+            "retrieved_sources": retrieved_sources
+        })
+    
+    return results
+
+Benefits:
+1. Quality assurance: Catch bad retrievals; Identify problematic chunks/queries; Track improvements. 2. Optimization: Tune chunk sizes; Adjust retrieval; Improve metadata. 3. User experience: Faster/accurate answers; Better citations; Reduced hallucination. Next steps:
+1. Set up LangSmith account and get API key. 2.

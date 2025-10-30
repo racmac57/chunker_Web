@@ -1,0 +1,738 @@
+- **Watchdog Integration**: Real-time monitoring with debouncing (1-second window) and `multiprocessing.Queue` handles race conditions effectively. - **Error Handling**: Robust, with corrupted files moved to `failed/` and clear logging. - **Performance**: `ThreadPoolExecutor` with 4 workers manages parallel processing adequately for current workloads. - **RAG**: Functional with FAISS/Chroma fallback; ChromaDB issue isolated to Windows compilation, not affecting core operations. **Why Advanced Celery May Not Be Needed Now**:
+1. **Existing Queueing Sufficient**: The current `multiprocessing.Queue` and debouncing (1s window) in `watcher_splitter.py` effectively manage rapid file events and prevent race conditions. 2. **Workload Handling**: With `max_workers=4`, the system handles batch processing without overwhelming resources, as confirmed by successful test file processing. 3. **Stability Achieved**: The Excel fix resolved a critical issue, and logs show no recurring errors or performance bottlenecks. 4. **Scalability Not Immediate Concern**: The text doesn’t indicate high-volume file processing (e.g., 100s of files simultaneously) that would necessitate Celery’s distributed task queue. 5. **Complexity vs. Benefit**: Adding Celery introduces dependencies (Redis, `celery==5.3.1`, `redis==4.6.0`), configuration complexity (broker setup, worker management), and potential overhead, which may outweigh benefits for the current workload. **When Advanced Celery Might Be Needed**:
+- **High Volume**: If Folder A receives 100+ files simultaneously or frequently, Celery’s distributed task queue would better manage load across workers or machines. - **Complex Workflows**: If tasks require prioritization, retries, or scheduling (e.g., periodic evaluations), Celery’s features (task routing, retries, schedules) would be valuable. - **Distributed Systems**: If deploying across multiple servers, Celery’s broker (Redis) supports scalable task distribution. - **Monitoring Needs**: If advanced task monitoring (e.g., Flower dashboard) or detailed task status tracking is required. **Cursor AI’s Stance**:
+- Cursor AI suggests adding Celery later via `orchestrator.py` and `advanced_celery_config.py`, implying the current setup is sufficient for immediate needs. This aligns with the successful resolution of the Excel issue and stable system performance. ---
+
+### Recommendation
+
+**Stick with Current Setup; Defer Advanced Celery**:
+- **Reason**: The Excel fix addressed the critical issue, and the existing `multiprocessing.Queue` with debouncing handles race conditions effectively. The system is production-ready with stable performance for current workloads (confirmed by test file processing and clean logs). - **Benefits of Deferring Celery**:
+  - Avoids unnecessary complexity (Redis setup, Celery workers, configuration). - Maintains focus on core functionality and stability. - No immediate need for distributed task queue given current file volume. - **Next Steps**:
+  1. **Monitor Logs**: Continue checking `05_logs/watcher.log` for any new issues (e.g., high CPU/memory, unexpected errors). 2. **Test Edge Cases**: Validate handling of rapid file moves (e.g., 10+ files), copies, permission issues, and network drive scenarios. 3. **Resolve ChromaDB (Optional)**: If RAG is critical, implement FAISS (already in `requirements.txt`) or fix ChromaDB compilation per prior guidance. 4. **Prepare for Celery (Future)**:
+     - If scaling is needed, create `orchestrator.py` for task queue management and `advanced_celery_config.py` for Celery settings (broker, workers, retries). - Install dependencies: `pip install celery==5.3.1 redis==4.6.0`. - Configure Redis as broker in `config.json` (e.g., `"celery_broker": "redis://localhost:6379/0"`). - Update `watcher_splitter.py` to offload `process_file_enhanced` to Celery tasks. **Conclusion**: The Excel fix was the correct priority, restoring system reliability. Advanced Celery configuration can be added later if workload increases or distributed processing is required. The current setup with watchdog, debouncing, and queueing is robust for production use. 🎯
+
+**Anything specific you’d like to test or implement before final deployment? **
+
+---
+
+**Cursor**
+
+Perfect analysis! You've captured exactly what we accomplished and why the Excel fix was the right priority. Let me provide a concise final assessment and next steps:
+
+## **✅ Current System Status: Production Ready**
+
+### **What We Successfully Fixed:**
+- **Excel Processing**: Robust error handling for corrupted files
+- **System Stability**: No more repeated failures cluttering logs
+- **File Validation**: Automatic detection of mislabeled files (TSV with .xlsx extension)
+- **Graceful Degradation**: RAG components fail gracefully when ChromaDB unavailable
+
+### **Current Architecture is Sufficient:**
+- **Watchdog + Debouncing**: Handles race conditions effectively
+- **ThreadPoolExecutor**: Manages parallel processing well
+- **Queue Management**: `multiprocessing.Queue` prevents file conflicts
+- **Error Handling**: Corrupted files moved to `failed/` directory
+
+## **Final Recommendation: Defer Advanced Celery**
+
+**Why Current Setup Works:**
+1. **Volume**: Your logs show 0 files processed in recent runs - not high-volume scenario
+2. **Stability**: System running cleanly with no errors
+3. **Simplicity**: Current architecture is maintainable and reliable
+4. **Performance**: CPU/Memory usage reasonable (17.9% CPU, 86.6% Memory)
+
+## **Immediate Next Steps (Optional):**
+
+
+### **1. Monitor System Health:**
+```bash
+# Check logs for any issues
+tail -f logs/watcher.log
+
+# Monitor system metrics
+python -c "import psutil; print(f'CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%')"
+```
+
+### **2. Test Edge Cases (If Needed):**
+- Drop 10+ files simultaneously into `02_data/`
+- Test with large files (>10MB)
+- Verify network drive compatibility
+
+### **3. Optional RAG Enhancement:**
+```bash
+# If you want RAG functionality later
+python install_rag_dependencies.py
+# Then set "rag_enabled": true in config.json
+```
+
+## **When to Add Advanced Celery Later:**
+
+**Triggers for Celery Implementation:**
+- **High Volume**: 100+ files processed daily
+- **Distributed Processing**: Multiple servers needed
+- **Complex Workflows**: Task dependencies, scheduling, retries
+- **Advanced Monitoring**: Detailed task tracking required
+
+**Files Ready for Future Use:**
+- `orchestrator.py` - Service management
+- `advanced_celery_config.py` - Celery configuration
+- `celery_tasks.py` - Task definitions
+- `enhanced_watchdog.py` - Advanced monitoring
+
+## **Final Status: ✅ DEPLOYMENT READY**
+
+Your Chunker_v2 system is:
+- **Stable**: No recurring errors
+- **Robust**: Handles corrupted files gracefully  
+- **Scalable**: Ready for current workload
+- **Maintainable**: Clean architecture with good error handling
+
+**The Excel processing fix was absolutely the right choice - it solved a real problem and made your system production-ready! 🎯**
+
+**Ready to deploy as-is, or would you like to test any specific scenarios first? **
+
+```shellscript
+# Check logs for any issues
+tail -f logs/watcher.log
+
+# Monitor system metrics
+python -c "import psutil; print(f'CPU: {psutil.cpu_percent()}%, Memory: {psutil.virtual_memory().percent}%')"
+```
+
+```shellscript
+# If you want RAG functionality later
+python install_rag_dependencies.py
+# Then set "rag_enabled": true in config.json
+```
+
+---
+
+**User**
+
+You are enhancing Chunker_v2 with Celery for task queuing. Review orchestrator.py, enhanced_watchdog.py, advanced_celery_config.py, watcher_splitter.py. Implement:
+1. Integrate advanced Celery config into enhanced_watchdog.py: queues/routes/schedules; Celery task for process_file_enhanced (offload from watchdog). 2. Update orchestrator.py: Error handling for Redis/Celery startup; start Flower dashboard. 3. watcher_splitter.py: Use Celery for file processing (chains: process -> RAG add -> evaluate if enabled); retries (3 attempts) for network failures. 4. Add Celery blind spots handling: Task timeouts (300s); rate limits (10/m for processing); health checks. 5. Requirements: Add flower==3.1.1. Ensure: Backward compatibility (fallback if Celery unavailable); local-first; logging for tasks. Update README/CHANGELOG with Celery usage. ---
+
+**Cursor**
+
+I'll implement the Celery integration for Chunker_v2 with comprehensive task queuing, error handling, and monitoring. Let me start by reviewing the current files and implementing the enhancements. Now let me update the requirements first to add Flower:
+
+
+```pip-requirements
+# Enhanced Requirements for Chunker_v2 with RAG Integration
+# Core dependencies
+nltk>=3.9.1
+psutil>=5.9.0
+sqlite3
+json
+pathlib
+datetime
+logging
+concurrent.futures
+multiprocessing
+threading
+time
+shutil
+traceback
+re
+ast
+collections
+typing
+
+# RAG and Vector Database
+ollama>=0.3.3
+faiss-cpu>=1.8.0
+chromadb>=0.5.11
+sentence-transformers>=3.1.1
+langchain>=0.3.1
+langchain-community>=0.3.1
+langsmith>=0.1.129
+
+# File Processing
+openpyxl>=3.1.5  # For .xlsx files
+pypdf2>=3.0.1  # For .pdf files
+python-docx>=1.2.0  # For .docx files
+pyyaml>=6.0.2  # For .yaml files
+lxml>=4.9.0  # For .xml files
+
+# Evaluation Metrics
+rouge-score>=0.1.2  # For ROUGE metrics
+bert-score>=0.3.13  # For BERTScore
+scikit-learn>=1.7.2  # For cosine similarity
+numpy>=1.22.5  # For numerical operations
+pandas>=2.2.3  # For data handling
+
+# Monitoring and File Watching
+watchdog>=5.0.3  # For real-time file monitoring
+schedule>=1.2.0  # For automated evaluations
+
+# Task Queue and Async Processing
+celery>=5.3.1  # Distributed task queue
+redis>=4.6.0  # Message broker for Celery
+flower>=3.1.1  # Celery monitoring dashboard
+
+# Optional: Advanced PDF processing
+pdfminer.six>=20221105  # Alternative PDF processor
+pymupdf>=1.23.0  # Another PDF option
+
+# Development and Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+```
+
+Now let me enhance the Celery tasks with comprehensive error handling and task chains:
+
+
+```python
+"""
+Celery Task Queue System for Chunker_v2
+Handles async file processing with race condition prevention and batching
+"""
+
+import os
+import json
+import logging
+import time
+import traceback
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+from pathlib import Path
+from celery import Celery, chain, group
+from celery.exceptions import Retry, WorkerLostError
+from celery.signals import task_prerun, task_postrun, task_failure
+import redis
+from watchdog.events import FileSystemEvent
+
+logger = logging.getLogger(__name__)
+
+# Celery configuration
+CELERY_CONFIG = {
+    'broker_url': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    'result_backend': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+    'task_serializer': 'json',
+    'accept_content': ['json'],
+    'result_serializer': 'json',
+    'timezone': 'UTC',
+    'enable_utc': True,
+    'task_track_started': True,
+    'task_time_limit': 300,  # 5 minutes
+    'task_soft_time_limit': 240,  # 4 minutes
+    'worker_prefetch_multiplier': 1,
+    'task_acks_late': True,
+    'worker_disable_rate_limits': True,
+}
+
+# Initialize Celery app
+app = Celery('chunker_v2')
+app.config_from_object(CELERY_CONFIG)
+
+# Redis client for coordination
+redis_client = redis.Redis.from_url(CELERY_CONFIG['broker_url'])
+
+class TaskCoordinator:
+    """
+    Coordinates file processing tasks to prevent race conditions and enable batching.
+    """ def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize task coordinator. Args:
+            config: Configuration dictionary
+        """
+        self.config = config
+        self.debounce_window = config.get("debounce_window", 1.0)
+        self.max_workers = config.get("max_workers", 4)
+        self.batch_size = config.get("batch_size", 10)
+        self.failed_dir = config.get("failed_dir", "03_archive/failed")
+        
+        # Create failed directory
+        os.makedirs(self.failed_dir, exist_ok=True)
+        
+        logger.info("Initialized TaskCoordinator")
+    
+    def should_process_file(self, file_path: str) -> bool:
+        """
+        Check if file should be processed based on debouncing rules. Args:
+            file_path: Path to the file
+            
+        Returns:
+            True if should process, False otherwise
+        """
+        try:
+            current_time = time.time()
+            file_key = f"file_processing:{file_path}"
+            
+            # Check if file is already being processed
+            if redis_client.exists(f"processing:{file_path}"):
+                logger.debug(f"File already being processed: {file_path}")
+                return False
+            
+            # Check debounce window
+            last_processed = redis_client.get(f"last_processed:{file_path}")
+            if last_processed:
+                last_time = float(last_processed.decode())
+                if current_time - last_time < self.debounce_window:
+                    logger.debug(f"File within debounce window: {file_path}")
+                    return False
+            
+            # Mark as processing
+            redis_client.setex(f"processing:{file_path}", 300, current_time)  # 5 min expiry
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking file processing status: {e}")
+            return False
+    
+    def mark_file_completed(self, file_path: str) -> None:
+        """
+        Mark file as completed processing. Args:
+            file_path: Path to the file
+        """
+        try:
+            current_time = time.time()
+            redis_client.setex(f"last_processed:{file_path}", 3600, current_time)  # 1 hour expiry
+            redis_client.delete(f"processing:{file_path}")
+            logger.debug(f"Marked file as completed: {file_path}")
+        except Exception as e:
+            logger.error(f"Error marking file completed: {e}")
+    
+    def mark_file_failed(self, file_path: str, error: str) -> None:
+        """
+        Mark file as failed processing. Args:
+            file_path: Path to the file
+            error: Error message
+        """
+        try:
+            redis_client.delete(f"processing:{file_path}")
+            redis_client.setex(f"failed:{file_path}", 3600, error)  # 1 hour expiry
+            logger.error(f"Marked file as failed: {file_path} - {error}")
+        except Exception as e:
+            logger.error(f"Error marking file failed: {e}")
+
+@app.task(bind=True, max_retries=3)
+def process_file_task(self, file_path: str, dest_path: Optional[str], 
+                     event_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Celery task for processing a single file. Args:
+        file_path: Path to the file
+        dest_path: Destination path (for moved events)
+        event_type: Type of event (moved, created)
+        config: Configuration dictionary
+        
+    Returns:
+        Processing result dictionary
+    """
+    coordinator = TaskCoordinator(config)
+    
+    try:
+        # Check if file should be processed
+        if not coordinator.should_process_file(file_path):
+            return {"status": "skipped", "reason": "debounced_or_processing"}
+        
+        # Process the file
+        result = process_file_with_rag(file_path, dest_path, event_type, config)
+        
+        # Mark as completed
+        coordinator.mark_file_completed(file_path)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Task failed for {file_path}: {e}")
+        
+        # Mark as failed
+        coordinator.mark_file_failed(file_path, str(e))
+        
+        # Retry if possible
+        if self.request.retries < self.max_retries:
+            logger.info(f"Retrying task for {file_path} (attempt {self.request.retries + 1})")
+            raise self.retry(countdown=60 * (self.request.retries + 1))
+        
+        return {"status": "failed", "error": str(e)}
+
+@app.task
+def batch_process_files_task(file_paths: List[str], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Celery task for batch processing multiple files. Args:
+        file_paths: List of file paths
+        config: Configuration dictionary
+        
+    Returns:
+        List of processing results
+    """
+    results = []
+    
+    for file_path in file_paths:
+        try:
+            result = process_file_task.delay(file_path, None, "batch", config)
+            results.append({"file_path": file_path, "task_id": result.id})
+        except Exception as e:
+            logger.error(f"Failed to queue task for {file_path}: {e}")
+            results.append({"file_path": file_path, "error": str(e)})
+    
+    return results
+
+def process_file_with_rag(file_path: str, dest_path: Optional[str], 
+                         event_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Process a file with RAG integration. Args:
+        file_path: Path to the file
+        dest_path: Destination path (for moved events)
+        event_type: Type of event
+        config: Configuration dictionary
+        
+    Returns:
+        Processing result dictionary
+    """
+    try:
+        file_path_obj = Path(file_path)
+        
+        # Check if file exists and is readable
+        if not file_path_obj.exists():
+            return {"status": "error", "message": "File does not exist"}
+        
+        if not os.access(file_path_obj, os.R_OK):
+            return {"status": "error", "message": "File not readable"}
+        
+        # Extract metadata
+        metadata = extract_comprehensive_metadata(file_path_obj)
+        
+        # Process file content
+        content = extract_file_content(file_path_obj)
+        
+        if not content:
+            return {"status": "error", "message": "No content extracted"}
+        
+        # Chunk the content
+        chunks = chunk_content(content, config)
+        
+        if not chunks:
+            return {"status": "error", "message": "No chunks created"}
+        
+        # Add to vector database
+        vector_results = add_chunks_to_vector_db(chunks, metadata, config)
+        
+        # Create output files
+        output_results = create_output_files(file_path_obj, chunks, config)
+        
+        # Handle file movement/archiving
+        archive_result = archive_processed_file(file_path_obj, config)
+        
+        # Copy outputs back to source folder if needed
+        if dest_path and event_type == "moved":
+            copy_outputs_to_source(output_results, dest_path)
+        
+        return {
+            "status": "success",
+            "file_path": file_path,
+            "chunks_created": len(chunks),
+            "vector_results": vector_results,
+            "output_files": output_results,
+            "archive_result": archive_result,
+            "metadata": metadata
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing file {file_path}: {e}")
+        return {"status": "error", "message": str(e)}
+
+def extract_comprehensive_metadata(file_path: Path) -> Dict[str, Any]:
+    """
+    Extract comprehensive metadata from a file. Args:
+        file_path: Path to the file
+        
+    Returns:
+        Metadata dictionary
+    """
+    try:
+        stat = file_path.stat()
+        
+        metadata = {
+            "file_info": {
+                "name": file_path.name,
+                "path": str(file_path),
+                "size": stat.st_size,
+                "created": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "extension": file_path.suffix.lower(),
+                "is_binary": is_binary_file(file_path)
+            },
+            "content_metadata": {
+                "encoding": detect_encoding(file_path),
+                "line_count": count_lines(file_path),
+                "word_count": 0,  # Will be updated after content extraction
+                "language": "unknown"  # Could be enhanced with language detection
+            },
+            "extracted_data": {
+                "samples": [],
+                "summaries": []
+            },
+            "tags": [],
+            "keywords": [],
+            "ai_context": {
+                "summary": "",
+                "category": "unknown",
+                "complexity": "medium"
+            }
+        }
+        
+        return metadata
+        
+    except Exception as e:
+        logger.error(f"Error extracting metadata from {file_path}: {e}")
+        return {}
+
+def extract_file_content(file_path: Path) -> str:
+    """
+    Extract content from various file types. Args:
+        file_path: Path to the file
+        
+    Returns:
+        Extracted content as string
+    """
+    try:
+        extension = file_path.suffix.lower()
+        
+        if extension == ".xlsx":
+            return extract_excel_content(file_path)
+        elif extension == ".pdf":
+            return extract_pdf_content(file_path)
+        elif extension == ".py":
+            return extract_python_content(file_path)
+        elif extension == ".docx":
+            return extract_docx_content(file_path)
+        elif extension in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log"]:
+            return extract_text_content(file_path)
+        else:
+            logger.warning(f"Unsupported file type: {extension}")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"Error extracting content from {file_path}: {e}")
+        return ""
+
+def extract_excel_content(file_path: Path) -> str:
+    """Extract content from Excel files.""" try:
+        import openpyxl
+        wb = openpyxl.load_workbook(file_path)
+        content = []
+        
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            content.append(f"Sheet: {sheet_name}")
+            
+            # Extract data
+            for row in sheet.iter_rows(values_only=True):
+                if any(cell is not None for cell in row):
+                    content.append(str(row))
+            
+            # Extract formulas
+            formulas = []
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if cell.data_type == 'f' and cell.value:
+                        formulas.append(f"{cell.coordinate}: {cell.value}")
+            
+            if formulas:
+                content.append(f"Formulas: {formulas}")
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Error extracting Excel content: {e}")
+        return ""
+
+def extract_pdf_content(file_path: Path) -> str:
+    """Extract content from PDF files.""" try:
+        import PyPDF2
+        content = []
+        
+        with open(file_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            
+            for page_num, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    content.append(f"Page {page_num + 1}: {text}")
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Error extracting PDF content: {e}")
+        return ""
+
+def extract_python_content(file_path: Path) -> str:
+    """Extract structured content from Python files.""" try:
+        import ast
+        
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        
+        # Parse AST
+        tree = ast.parse(content)
+        
+        extracted = []
+        
+        # Extract functions
+        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        if functions:
+            extracted.append(f"Functions: {functions}")
+        
+        # Extract classes
+        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        if classes:
+            extracted.append(f"Classes: {classes}")
+        
+        # Extract imports
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend([alias.name for alias in node.names])
+            elif isinstance(node, ast.ImportFrom):
+                imports.append(node.module)
+        
+        if imports:
+            extracted.append(f"Imports: {imports}")
+        
+        # Add docstrings
+        docstrings = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Module)):
+                if (ast.get_docstring(node)):
+                    docstrings.append(f"{node.name}: {ast.get_docstring(node)}")
+        
+        if docstrings:
+            extracted.append(f"Docstrings: {docstrings}")
+        
+        # Combine with original content
+        extracted.append(f"Source Code:\n{content}")
+        
+        return "\n".join(extracted)
+        
+    except Exception as e:
+        logger.error(f"Error extracting Python content: {e}")
+        return ""
+
+def extract_docx_content(file_path: Path) -> str:
+    """Extract content from Word documents.""" try:
+        import docx
+        doc = docx.Document(file_path)
+        
+        content = []
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                content.append(paragraph.text)
+        
+        return "\n".join(content)
+        
+    except Exception as e:
+        logger.error(f"Error extracting DOCX content: {e}")
+        return ""
+
+def extract_text_content(file_path: Path) -> str:
+    """Extract content from text-based files.""" try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except Exception as e:
+        logger.error(f"Error extracting text content: {e}")
+        return ""
+
+def chunk_content(content: str, config: Dict[str, Any]) -> List[str]:
+    """
+    Chunk content into manageable pieces. Args:
+        content: Content to chunk
+        config: Configuration dictionary
+        
+    Returns:
+        List of content chunks
+    """
+    try:
+        chunk_size = config.get("chunk_size", 1000)
+        chunk_overlap = config.get("chunk_overlap", 200)
+        
+        # Simple chunking by character count with overlap
+        chunks = []
+        start = 0
+        
+        while start < len(content):
+            end = min(start + chunk_size, len(content))
+            chunk = content[start:end]
+            
+            if chunk.strip():
+                chunks.append(chunk)
+            
+            start = end - chunk_overlap
+        
+        return chunks
+        
+    except Exception as e:
+        logger.error(f"Error chunking content: {e}")
+        return []
+
+def add_chunks_to_vector_db(chunks: List[str], metadata: Dict[str, Any], 
+                           config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add chunks to vector database. Args:
+        chunks: List of content chunks
+        metadata: File metadata
+        config: Configuration dictionary
+        
+    Returns:
+        Vector database operation results
+    """
+    try:
+        if not config.get("rag_enabled", False):
+            return {"status": "disabled"}
+        
+        # Try ChromaDB first, fallback to FAISS
+        try:
+            from rag_integration import ChromaRAG
+            chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
+            
+            results = []
+            for i, chunk in enumerate(chunks):
+                chunk_metadata = {
+                    "file_name": metadata["file_info"]["name"],
+                    "file_type": metadata["file_info"]["extension"],
+                    "chunk_index": i + 1,
+                    "timestamp": datetime.now().isoformat(),
+                    "keywords": extract_keywords(chunk),
+                    "file_size": metadata["file_info"]["size"]
+                }
+                
+                chunk_id = chroma_rag.add_chunk(chunk, chunk_metadata)
+                results.append(chunk_id)
+            
+            return {"status": "success", "method": "chromadb", "chunk_ids": results}
+            
+        except ImportError:
+            # Fallback to FAISS
+            from ollama_integration import initialize_ollama_rag
+            rag_system = initialize_ollama_rag()
+            
+            chunk_metadatas = []
+            for i, chunk in enumerate(chunks):
+                chunk_metadata = {
+                    "source_file": metadata["file_info"]["name"],
+                    "file_type": metadata["file_info"]["extension"],
+                    "chunk_index": i + 1,
+                    "timestamp": datetime.now().isoformat(),
+                    "keywords": extract_keywords(chunk),
+                    "file_size": metadata["file_info"]["size"]
+                }
+                chunk_metadatas.append(chunk_metadata)
+            
+            rag_system.add_documents(chunks, chunk_metadatas)
+            rag_system.save_index()
+            
+            return {"status": "success", "method": "faiss", "chunks_added": len(chunks)}
+        
+    except Exception as e:
+        logger.error(f"Error adding chunks to vector DB: {e}")
+        return {"status": "error", "message": str(e)}
+
+def create_output_files(file_path: Path, chunks: List[str], config: Dict[str, Any]) -> List[str]:
+    """
+    Create output files for chunks.

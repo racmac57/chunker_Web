@@ -1,0 +1,850 @@
+**`C:\Users\carucci_r\Documents\chat_watcher`** - Related project? 8. **`C:\Users\carucci_r\Documents\chunker`** - Yet another copy? ---
+
+## 🚨 Your Blind Spots & Key Questions
+
+### Blind Spot #1: **Data Loss Risk**
+**Question:** Which directories contain PROCESSED OUTPUT that you need to keep? - `C:\_chunker\04_output\` - Has processed chunks
+- Other directories may also have valuable processed data
+
+### Blind Spot #2: **Unprocessed Files**
+**Question:** Are there unprocessed files waiting in any `02_data` folders? - We found 4 files in `C:\_chunker\02_data\` waiting to be processed
+- Other directories might have unprocessed input files
+
+### Blind Spot #3: **GitHub Repository Status**
+**Question:** Which of these directories are Git repositories? - `C:\_chunker` → GitHub: `racmac57/chunker_Web.git`
+- `C:\Dev\ClaudeExportFixer` → GitHub: `racmac57/ClaudeExportFixer.git`
+- Others: Unknown
+
+### Blind Spot #4: **Configuration & Customizations**
+**Question:** Do you have custom configurations that need to be preserved? - Department-specific rules
+- Custom exclude patterns
+- Specialized file processors
+
+### Blind Spot #5: **Knowledge Bases**
+**Question:** Are there SQLite knowledge bases in these directories? - Look for `*.db` files
+- ChromaDB vector stores
+- These contain searchable indexes of your conversations
+
+---
+
+## 📋 Recommended Cleanup Strategy
+
+### Phase 1: **DISCOVERY** (Do this first!) Before deleting anything, create an inventory:
+
+```powershell
+# Create inventory of all chunker-related directories
+$dirs = @(
+    "C:\_chunker",
+    "C:\Claude_Archive",
+    "C:\Dev\chat_log_chunker_v1",
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+foreach ($dir in $dirs) {
+    if (Test-Path $dir) {
+        Write-Host "`n========== $dir ==========" -ForegroundColor Cyan
+        
+        # Check if it's a git repo
+        if (Test-Path "$dir\.git") {
+            Write-Host "   [GIT REPO]" -ForegroundColor Yellow
+            cd $dir
+            git remote -v | Out-String
+        }
+        
+        # Check for important folders
+        @("02_data", "04_output", "03_archive") | ForEach-Object {
+            $subdir = Join-Path $dir $_
+            if (Test-Path $subdir) {
+                $count = (Get-ChildItem $subdir -Recurse -File -ErrorAction SilentlyContinue).Count
+                Write-Host "   $_ : $count files" -ForegroundColor Green
+            }
+        }
+        
+        # Check for database files
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        if ($dbs) {
+            Write-Host "   [DATABASES FOUND]" -ForegroundColor Magenta
+            $dbs | ForEach-Object { Write-Host "      - $($_.FullName)" }
+        }
+        
+        # Check for unprocessed files
+        $dataDir = Join-Path $dir "02_data"
+        if (Test-Path $dataDir) {
+            $unprocessed = (Get-ChildItem $dataDir -File -ErrorAction SilentlyContinue).Count
+            if ($unprocessed -gt 0) {
+                Write-Host "   [UNPROCESSED FILES: $unprocessed]" -ForegroundColor Red
+            }
+        }
+    } else {
+        Write-Host "$dir - NOT FOUND" -ForegroundColor Gray
+    }
+}
+```
+
+### Phase 2: **CONSOLIDATE** (After inventory)
+
+Based on what you find, consolidate data:
+
+#### Option A: Keep Processed Output Organized
+```powershell
+# Create archive directory
+$archiveRoot = "C:\Chunker_Archive_2025_10_29"
+New-Item -ItemType Directory -Path $archiveRoot -Force
+
+# For each old directory, preserve processed output
+foreach ($oldDir in $dirs) {
+    if (Test-Path $oldDir) {
+        $dirName = Split-Path $oldDir -Leaf
+        $archivePath = Join-Path $archiveRoot $dirName
+        
+        # Copy only valuable folders
+        Copy-Item -Path "$oldDir\04_output" -Destination "$archivePath\04_output" -Recurse -ErrorAction SilentlyContinue
+        Copy-Item -Path "$oldDir\03_archive" -Destination "$archivePath\03_archive" -Recurse -ErrorAction SilentlyContinue
+        Copy-Item -Path "$oldDir\*.db" -Destination $archivePath -ErrorAction SilentlyContinue
+        
+        # Copy documentation
+        Copy-Item -Path "$oldDir\*.md" -Destination $archivePath -ErrorAction SilentlyContinue
+        Copy-Item -Path "$oldDir\99_doc" -Destination "$archivePath\docs" -Recurse -ErrorAction SilentlyContinue
+    }
+}
+```
+
+#### Option B: Process Remaining Files First
+```powershell
+# Find all unprocessed files
+$unprocessedFiles = @()
+foreach ($oldDir in $dirs) {
+    $dataDir = Join-Path $oldDir "02_data"
+    if (Test-Path $dataDir) {
+        $files = Get-ChildItem $dataDir -File -ErrorAction SilentlyContinue
+        if ($files) {
+            $unprocessedFiles += $files
+        }
+    }
+}
+
+# Copy to ClaudeExportFixer for processing
+foreach ($file in $unprocessedFiles) {
+    Copy-Item $file.FullName -Destination "C:\Dev\ClaudeExportFixer\01_input\"
+}
+
+# Then run the new unified system
+cd C:\Dev\ClaudeExportFixer
+python process_workflow.py
+```
+
+### Phase 3: **CLEAN UP** (Final step)
+
+After consolidating data:
+
+```powershell
+# Move old directories to archive (don't delete yet!) $trashDir = "C:\OldChunkerProjects_Archive_2025_10_29"
+New-Item -ItemType Directory -Path $trashDir -Force
+
+foreach ($oldDir in $dirs) {
+    if ($oldDir -ne "C:\Dev\ClaudeExportFixer") {  # Don't archive the new system! if (Test-Path $oldDir) {
+            $dirName = Split-Path $oldDir -Leaf
+            Move-Item -Path $oldDir -Destination "$trashDir\$dirName" -Force
+        }
+    }
+}
+```
+
+---
+
+## 🎯 Specific Actions for `C:\_chunker`
+
+This directory has active data. Here's what to do:
+
+### Step 1: Process Remaining Files
+```powershell
+cd C:\_chunker
+
+# Check what's waiting
+Get-ChildItem 02_data -File
+
+# Option A: Process with old chunker
+python watcher_splitter.py
+
+# Option B: Move to new system
+Copy-Item 02_data\* -Destination C:\Dev\ClaudeExportFixer\01_input\
+cd C:\Dev\ClaudeExportFixer
+python process_workflow.py
+```
+
+### Step 2: Preserve Documentation
+```powershell
+# Copy docs to new system
+Copy-Item C:\_chunker\99_doc\*.md -Destination C:\Dev\ClaudeExportFixer\docs\legacy_chunker\
+Copy-Item C:\_chunker\*.md -Destination C:\Dev\ClaudeExportFixer\docs\legacy_chunker\
+```
+
+### Step 3: Archive Processed Output
+```powershell
+# Option A: Keep in place for reference
+# Just leave it - disk space is cheap
+
+# Option B: Move to dated archive
+$archiveDate = Get-Date -Format "yyyy_MM_dd"
+Move-Item C:\_chunker -Destination "C:\Chunker_Archive_$archiveDate"
+```
+
+---
+
+## 💡 My Recommendation
+
+### **SAFEST APPROACH:**
+
+1. **DO NOT DELETE ANYTHING YET**
+2. **Run the discovery script first** (see Phase 1)
+3. **Review the inventory** - understand what's in each directory
+4. **Process any unprocessed files** - don't lose pending work
+5. **Move (don't delete) old directories** to a dated archive folder
+6. **Keep the archive for 30-60 days** - verify you don't need anything
+7. **Only then delete** the archive folder
+
+### **Going Forward:**
+
+- ✅ **Use ONLY:** `C:\Dev\ClaudeExportFixer` (v2.0.0 unified system)
+- ✅ **GitHub:** Keep pushing to `racmac57/ClaudeExportFixer.git`
+- ✅ **Clone on other machines** from GitHub
+- ❌ **Stop using:** All other chunker directories
+
+---
+
+## 🤖 Should Claude Code Handle This? **YES and NO:**
+
+### Claude Code CAN Help With:
+- ✅ Running the discovery script
+- ✅ Analyzing what's in each directory
+- ✅ Processing unprocessed files
+- ✅ Moving documentation files
+- ✅ Organizing the archive
+
+### Claude Code SHOULD NOT:
+- ❌ Delete directories without your explicit approval
+- ❌ Make decisions about which data to keep
+- ❌ Risk data loss
+
+### **My Recommendation:** 
+Use Claude Code to **gather information and prepare**, but YOU make the final decisions on what to archive/delete. ---
+
+## 📊 Next Steps
+
+1. **Run the discovery script** → Create inventory report
+2. **Review the report with me** → I'll help you decide what to keep
+3. **Process unprocessed files** → Don't lose pending work
+4. **Consolidate valuable data** → Move to archive
+5. **Clean up directories** → Move (not delete) old folders
+6. **Verify for 30 days** → Make sure nothing is missing
+7. **Final cleanup** → Delete old archives
+
+---
+
+## 🎯 Questions to Answer Before Cleanup
+
+1. **Which directory has your most recent processed output? **
+2. **Do you need the processed chunks from all directories? **
+3. **Are there knowledge bases (*.db files) you want to preserve? **
+4. **Do any directories have custom configurations you need? **
+5. **Are there unprocessed files waiting in ANY directory? **
+6. **Which GitHub repos do you want to keep active? **
+7. **Do you want to consolidate all processed output into one archive? **
+
+---
+
+**Would you like me to run the discovery script to create an inventory? **
+
+```
+
+---
+
+**User**
+
+make it into a prompt for Claude Code. ---
+
+**Cursor**
+
+```markdown
+# Claude Code: Chunker Project Cleanup & Consolidation
+
+## Context
+
+I have multiple chunker-related directories scattered across my Windows system that need to be consolidated. The `ClaudeExportFixer` v2.0.0 has successfully merged all chunker functionality into a unified system, making the old separate chunker directories obsolete. ## The Problem
+
+**Multiple directories with similar names/purposes:**
+
+### Primary Directories
+1. `C:\_chunker` - Old active chunker with processed data
+2. `C:\Claude_Archive` - Unknown contents
+3. `C:\Dev\ClaudeExportFixer` - ✅ **THE NEW UNIFIED SYSTEM (v2.0.0)** - Keep this! 4. `C:\Dev\chat_log_chunker_v1` - Old chunker project
+
+### User Profile Directories
+5. `C:\Users\carucci_r\chat_log_chunker_v1` - Possible duplicate
+6. `C:\Users\carucci_r\Documents\chat_log_chunker` - Another copy
+7. `C:\Users\carucci_r\Documents\chat_watcher` - Related project
+8. `C:\Users\carucci_r\Documents\chunker` - Yet another copy
+
+## My Concerns & Blind Spots
+
+1. **Data Loss** - Which directories have processed output I need to preserve? 2. **Unprocessed Files** - Are there files waiting to be processed in `02_data` folders? 3. **GitHub Repos** - Which are git repositories and what's their status? 4. **Knowledge Bases** - Are there SQLite `.db` files or ChromaDB stores I need? 5. **Configurations** - Any custom `config.json` files with special settings? 6. **Documentation** - `.md` files that should be preserved
+
+## Your Mission
+
+### Phase 1: DISCOVERY & INVENTORY (MANDATORY FIRST STEP)
+
+**DO NOT DELETE OR MOVE ANYTHING YET! **
+
+Create a comprehensive inventory report by analyzing each directory:
+
+```powershell
+# Run this discovery script
+$dirs = @(
+    "C:\_chunker",
+    "C:\Claude_Archive",
+    "C:\Dev\chat_log_chunker_v1",
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+$report = @()
+
+foreach ($dir in $dirs) {
+    if (Test-Path $dir) {
+        $info = [PSCustomObject]@{
+            Directory = $dir
+            Exists = $true
+            IsGitRepo = Test-Path "$dir\.git"
+            GitRemote = ""
+            OutputFiles = 0
+            ArchiveFiles = 0
+            UnprocessedFiles = 0
+            DatabaseFiles = @()
+            MarkdownFiles = 0
+            ConfigFiles = 0
+            TotalSizeMB = 0
+        }
+        
+        # Check git remote
+        if ($info.IsGitRepo) {
+            Push-Location $dir
+            $info.GitRemote = (git remote get-url origin 2>$null)
+            Pop-Location
+        }
+        
+        # Count files in key directories
+        $outputDir = Join-Path $dir "04_output"
+        if (Test-Path $outputDir) {
+            $info.OutputFiles = (Get-ChildItem $outputDir -Recurse -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        $archiveDir = Join-Path $dir "03_archive"
+        if (Test-Path $archiveDir) {
+            $info.ArchiveFiles = (Get-ChildItem $archiveDir -Recurse -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        $dataDir = Join-Path $dir "02_data"
+        if (Test-Path $dataDir) {
+            $info.UnprocessedFiles = (Get-ChildItem $dataDir -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        # Find database files
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        $info.DatabaseFiles = $dbs | ForEach-Object { $_.FullName }
+        
+        # Count markdown and config files
+        $info.MarkdownFiles = (Get-ChildItem $dir -Filter "*.md" -File -ErrorAction SilentlyContinue).Count
+        $info.ConfigFiles = (Get-ChildItem $dir -Filter "config.json" -Recurse -ErrorAction SilentlyContinue).Count
+        
+        # Calculate total size
+        $totalSize = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $info.TotalSizeMB = [math]::Round($totalSize / 1MB, 2)
+        
+        $report += $info
+    } else {
+        $report += [PSCustomObject]@{
+            Directory = $dir
+            Exists = $false
+        }
+    }
+}
+
+# Output the report
+$report | Format-Table -AutoSize -Wrap
+$report | Export-Csv "C:\Dev\ClaudeExportFixer\docs\CLEANUP_INVENTORY_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" -NoTypeInformation
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "📊 DISCOVERY COMPLETE" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "Report saved to: C:\Dev\ClaudeExportFixer\docs\" -ForegroundColor Yellow
+```
+
+**Expected Output:** Create `CLEANUP_INVENTORY_[timestamp].csv` with the complete inventory. ### Phase 2: ANALYSIS & RECOMMENDATIONS
+
+After running the inventory, analyze the results and provide:
+
+1. **High-Risk Items** - Files/data that MUST be preserved
+2. **Duplicate Detection** - Which directories appear to be duplicates
+3. **Unprocessed Files** - List files waiting in `02_data` folders
+4. **GitHub Status** - Which repos are active, which are abandoned
+5. **Size Analysis** - Which directories are taking up the most space
+6. **Recommendations** - What to keep, archive, or delete
+
+Create a report: `CLEANUP_ANALYSIS_REPORT.md`
+
+### Phase 3: PRESERVATION (If approved by me)
+
+**For `C:\_chunker` specifically:**
+
+1. **Process Unprocessed Files**
+```powershell
+# Copy unprocessed files to new unified system
+$unprocessed = Get-ChildItem "C:\_chunker\02_data" -File -ErrorAction SilentlyContinue
+if ($unprocessed) {
+    foreach ($file in $unprocessed) {
+        Copy-Item $file.FullName -Destination "C:\Dev\ClaudeExportFixer\01_input\" -Force
+        Write-Host "Copied: $($file.Name)" -ForegroundColor Green
+    }
+    
+    # Process with unified system
+    cd C:\Dev\ClaudeExportFixer
+    python process_workflow.py
+}
+```
+
+2. **Preserve Documentation**
+```powershell
+# Create legacy docs folder
+$legacyDocs = "C:\Dev\ClaudeExportFixer\docs\legacy_chunker"
+New-Item -ItemType Directory -Path $legacyDocs -Force
+
+# Copy from C:\_chunker
+Copy-Item "C:\_chunker\99_doc\*.md" -Destination $legacyDocs -Force -ErrorAction SilentlyContinue
+Copy-Item "C:\_chunker\*.md" -Destination $legacyDocs -Force -ErrorAction SilentlyContinue
+Copy-Item "C:\_chunker\config.json" -Destination "$legacyDocs\legacy_config.json" -Force -ErrorAction SilentlyContinue
+```
+
+3. **Preserve Databases**
+```powershell
+# Copy important databases
+$dbBackup = "C:\Dev\ClaudeExportFixer\docs\legacy_chunker\databases"
+New-Item -ItemType Directory -Path $dbBackup -Force
+
+Get-ChildItem "C:\_chunker" -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item $_.FullName -Destination $dbBackup -Force
+    Write-Host "Backed up database: $($_.Name)" -ForegroundColor Cyan
+}
+```
+
+### Phase 4: ARCHIVING (If approved by me)
+
+Create dated archive for old directories:
+
+```powershell
+$archiveDate = Get-Date -Format "yyyy_MM_dd_HHmmss"
+$archiveRoot = "C:\OldChunkerProjects_Archive_$archiveDate"
+New-Item -ItemType Directory -Path $archiveRoot -Force
+
+# List of directories to archive (excluding the new unified system)
+$toArchive = @(
+    "C:\_chunker",
+    "C:\Claude_Archive",
+    "C:\Dev\chat_log_chunker_v1",
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+foreach ($oldDir in $toArchive) {
+    if (Test-Path $oldDir) {
+        $dirName = Split-Path $oldDir -Leaf
+        $destPath = Join-Path $archiveRoot $dirName
+        
+        Write-Host "Moving: $oldDir -> $destPath" -ForegroundColor Yellow
+        Move-Item -Path $oldDir -Destination $destPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host "`n✅ All old directories moved to: $archiveRoot" -ForegroundColor Green
+Write-Host "⚠️  Keep this archive for 30-60 days before deleting" -ForegroundColor Yellow
+```
+
+### Phase 5: VERIFICATION & CLEANUP
+
+Create a summary report:
+
+```markdown
+# Cleanup Summary Report
+
+## Directories Archived
+- List each directory with size and file counts
+
+## Files Preserved
+- Documentation files copied
+- Database files backed up
+- Unprocessed files moved and processed
+
+## New Unified System
+- Location: C:\Dev\ClaudeExportFixer
+- Version: 2.0.0
+- Status: Production Ready
+- GitHub: racmac57/ClaudeExportFixer.git
+
+## Archive Location
+- Path: C:\OldChunkerProjects_Archive_[timestamp]
+- Total Size: [size]
+- Retention: Keep for 60 days
+- Delete After: [date]
+
+## Next Steps
+1. Verify new unified system works with your workflows
+2. Test that you have all needed documentation
+3. After 30-60 days, delete the archive folder
+4. Update any shortcuts/scripts pointing to old directories
+```
+
+## Safety Guidelines
+
+### ✅ YOU MAY:
+- Run the discovery script to gather information
+- Create inventory reports and analysis
+- Copy files to new locations
+- Create backups and archives
+- Move directories to a dated archive folder
+
+### ❌ YOU MUST NOT:
+- Delete any directories without my explicit approval
+- Overwrite files in `C:\Dev\ClaudeExportFixer` (except in `docs/legacy_chunker/`)
+- Process files without showing me what will be processed first
+- Make assumptions about which data I need
+
+### ⚠️ ASK ME FIRST BEFORE:
+- Moving any directory
+- Deleting any files
+- Processing unprocessed files
+- Modifying the new ClaudeExportFixer system
+
+## Success Criteria
+
+✅ **Phase 1 Complete:** Inventory CSV created and analyzed  
+✅ **Phase 2 Complete:** Analysis report with recommendations  
+✅ **Phase 3 Complete:** Important data preserved in ClaudeExportFixer  
+✅ **Phase 4 Complete:** Old directories moved to dated archive  
+✅ **Phase 5 Complete:** Summary report created  
+
+## Deliverables
+
+1. `CLEANUP_INVENTORY_[timestamp].csv` - Complete inventory
+2. `CLEANUP_ANALYSIS_REPORT.md` - Analysis and recommendations
+3. `CLEANUP_SUMMARY_REPORT.md` - Final summary of actions taken
+4. `legacy_chunker/` folder in ClaudeExportFixer with preserved docs/configs/dbs
+5. `C:\OldChunkerProjects_Archive_[timestamp]\` - Archived old directories
+
+## My Questions for You (After Phase 1)
+
+Before proceeding with archiving, I need you to help me answer:
+
+1. Do I need the processed output from all directories or just the most recent? 2. Are there custom configurations in any old directories I should merge into v2.0.0? 3. Should unprocessed files be processed with the old system or new unified system? 4. Do I want to consolidate all knowledge bases (*.db files) into one? 5. Are there any directories that are actually current projects I'm actively using? ## Start Here
+
+**Step 1:** Run the discovery script (Phase 1)  
+**Step 2:** Show me the inventory results  
+**Step 3:** Wait for my approval before proceeding to Phase 3  
+
+Let's be methodical and safe. Data loss is unacceptable. ---
+
+**BEGIN WITH PHASE 1: Run the discovery script and show me the inventory. **
+
+```
+
+Perfect! I've created a comprehensive prompt for Claude Code. Let me also create a quick reference file for you:
+
+```markdown
+# Quick Start: Cleanup with Claude Code
+
+## 🎯 What This Does
+
+Safely consolidates 8+ scattered chunker directories into the new unified `ClaudeExportFixer` v2.0.0 system. ## 📋 Directories to Clean Up
+
+1. `C:\_chunker`
+2. `C:\Claude_Archive`
+3. `C:\Dev\chat_log_chunker_v1`
+4. `C:\Users\carucci_r\chat_log_chunker_v1`
+5. `C:\Users\carucci_r\Documents\chat_log_chunker`
+6. `C:\Users\carucci_r\Documents\chat_watcher`
+7. `C:\Users\carucci_r\Documents\chunker`
+
+**Keep:** `C:\Dev\ClaudeExportFixer` (v2.0.0 - The new unified system)
+
+## 🚀 How to Use with Claude Code
+
+### Step 1: Point Claude Code to the Right Directory
+```
+C:\Dev\ClaudeExportFixer
+```
+
+### Step 2: Give Claude Code the Prompt
+Open and copy this file:
+```
+C:\Dev\ClaudeExportFixer\docs\prompts\CLAUDE_CODE_CLEANUP_CONSOLIDATION_PROMPT.md
+```
+
+Paste it into Claude Code. ### Step 3: Let Claude Code Run Phase 1 (Discovery)
+Claude Code will:
+- Scan all directories
+- Create an inventory CSV
+- Show you what's in each directory
+- **NOT delete anything yet! **
+
+### Step 4: Review the Inventory
+Claude Code will show you:
+- Which directories have processed output
+- Where unprocessed files are waiting
+- Which are Git repositories
+- Database files found
+- Total sizes
+
+### Step 5: Approve Next Steps
+Based on the inventory, you'll decide:
+- What to preserve
+- What to archive
+- What can be deleted (after 30-60 days)
+
+## ⚡ Expected Timeline
+
+- **Phase 1 (Discovery):** 2-5 minutes
+- **Phase 2 (Analysis):** 2-3 minutes
+- **Phase 3 (Preservation):** 5-10 minutes
+- **Phase 4 (Archiving):** 5-15 minutes (depending on sizes)
+- **Phase 5 (Verification):** 2-3 minutes
+
+**Total:** 15-35 minutes for complete cleanup
+
+## 🎯 What You'll Get
+
+### Files Created
+1. `CLEANUP_INVENTORY_[timestamp].csv` - Complete scan results
+2. `CLEANUP_ANALYSIS_REPORT.md` - Recommendations
+3. `CLEANUP_SUMMARY_REPORT.md` - Final summary
+4. `docs/legacy_chunker/` - Preserved docs, configs, databases
+
+### Directories Moved
+- All old chunker directories → `C:\OldChunkerProjects_Archive_[timestamp]\`
+- Keep archive for 30-60 days, then delete
+
+### End Result
+- ✅ Only ONE active directory: `C:\Dev\ClaudeExportFixer`
+- ✅ All important data preserved
+- ✅ No data loss
+- ✅ Clean, organized system
+
+## 🛡️ Safety Features
+
+- ✅ Discovery phase runs FIRST (no deletions)
+- ✅ Everything moves to archive (not deleted)
+- ✅ You approve each phase
+- ✅ Backups created before moving
+- ✅ 60-day retention before final deletion
+
+## 📞 If Something Goes Wrong
+
+The archive folder has EVERYTHING. You can restore any directory:
+```powershell
+# Example: Restore C:\_chunker
+$archiveFolder = "C:\OldChunkerProjects_Archive_[timestamp]"
+Copy-Item "$archiveFolder\_chunker" -Destination "C:\_chunker" -Recurse -Force
+```
+
+## 🎓 Why This Approach? 1. **No Data Loss** - Everything preserved in archive first
+2. **Informed Decisions** - See what's there before moving
+3. **Reversible** - Can restore from archive
+4. **Organized** - Dated archive folder for easy tracking
+5. **Safe** - 60-day retention period
+
+---
+
+## 🚦 Ready to Start? 1. Open Claude Code
+2. Point to: `C:\Dev\ClaudeExportFixer`
+3. Copy/paste: `CLAUDE_CODE_CLEANUP_CONSOLIDATION_PROMPT.md`
+4. Let it run Phase 1
+5. Review and approve
+
+**Let's clean up your system! 🧹**
+
+```
+
+Now let me commit these cleanup planning documents:
+
+---
+
+**User**
+
+is the command hung up ? ---
+
+**Cursor**
+
+Let me try again with a fresh shell:
+
+---
+
+**User**
+
+1. "C:\_chunker" has the most recient output
+2. Yes I need all processed chunks
+3. please preserve the knowledge base files move them to _chunker
+4. I do not know if the directory have custom config. Please review and see if the different configs are worth folding into _chunker
+5. If there are unprocessed files move them to "C:\_chunker\02_data"
+6. Only keep the _chunker repos active. 7. I want all processed outputs consolidated to C:\_chunker\04_output
+
+---
+
+**Cursor**
+
+Perfect! Now I have clear direction. Let me create an updated, focused prompt for Claude Code based on your specific requirements:
+
+```markdown
+# Claude Code: Chunker Consolidation - User Requirements
+
+## 🎯 User's Clear Requirements
+
+Based on explicit user instructions, here's what needs to happen:
+
+### Primary Decision: Keep `C:\_chunker` as the Active System
+
+**User has decided:**
+1. ✅ `C:\_chunker` has the most recent output - **KEEP THIS AS PRIMARY**
+2. ✅ Need ALL processed chunks from all directories
+3. ✅ Consolidate knowledge bases to `C:\_chunker`
+4. ✅ Only keep `C:\_chunker` repo active
+5. ✅ Consolidate all processed outputs to `C:\_chunker\04_output`
+
+### Secondary: What to Do with ClaudeExportFixer
+
+`C:\Dev\ClaudeExportFixer` v2.0.0 contains the NEW unified system code, but user wants to keep using `C:\_chunker` structure. **Solution:** Merge the NEW code into `C:\_chunker` while preserving the data structure. ---
+
+## 📋 Your Mission
+
+### Phase 1: DISCOVERY & CONFIG ANALYSIS
+
+#### Task 1A: Scan All Directories
+```powershell
+$dirs = @(
+    "C:\_chunker",
+    "C:\Claude_Archive",
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\chat_log_chunker_v1",
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+$report = @()
+
+foreach ($dir in $dirs) {
+    if (Test-Path $dir) {
+        $info = [PSCustomObject]@{
+            Directory = $dir
+            OutputFiles = 0
+            ArchiveFiles = 0
+            UnprocessedFiles = 0
+            DatabaseFiles = @()
+            HasConfig = $false
+            ConfigPath = ""
+            TotalSizeMB = 0
+        }
+        
+        # Count output files
+        $outputDir = Join-Path $dir "04_output"
+        if (Test-Path $outputDir) {
+            $info.OutputFiles = (Get-ChildItem $outputDir -Recurse -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        # Count archive files
+        $archiveDir = Join-Path $dir "03_archive"
+        if (Test-Path $archiveDir) {
+            $info.ArchiveFiles = (Get-ChildItem $archiveDir -Recurse -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        # Count unprocessed files
+        $dataDir = Join-Path $dir "02_data"
+        if (Test-Path $dataDir) {
+            $info.UnprocessedFiles = (Get-ChildItem $dataDir -File -ErrorAction SilentlyContinue).Count
+        }
+        
+        # Find databases
+        $dbs = Get-ChildItem $dir -Filter "*.db" -Recurse -ErrorAction SilentlyContinue
+        $info.DatabaseFiles = $dbs | ForEach-Object { $_.FullName }
+        
+        # Check for config.json
+        $configPath = Join-Path $dir "config.json"
+        if (Test-Path $configPath) {
+            $info.HasConfig = $true
+            $info.ConfigPath = $configPath
+        }
+        
+        # Calculate size
+        $totalSize = (Get-ChildItem $dir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $info.TotalSizeMB = [math]::Round($totalSize / 1MB, 2)
+        
+        $report += $info
+    }
+}
+
+# Save report
+$report | Export-Csv "C:\_chunker\99_doc\CLEANUP_INVENTORY_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" -NoTypeInformation
+$report | Format-Table -AutoSize -Wrap
+```
+
+#### Task 1B: Compare Config Files
+
+For each directory with `config.json`, analyze the differences:
+
+```powershell
+# Get all config files
+$configs = @()
+foreach ($dir in $dirs) {
+    $configPath = Join-Path $dir "config.json"
+    if (Test-Path $configPath) {
+        $configs += [PSCustomObject]@{
+            Source = $dir
+            Path = $configPath
+            Content = Get-Content $configPath -Raw | ConvertFrom-Json
+        }
+    }
+}
+
+# Compare configurations
+# Look for:
+# - Different supported_extensions
+# - Different exclude_patterns
+# - Custom chunking parameters
+# - Department-specific settings
+# - Performance tuning differences
+
+# Create comparison report
+$configComparison = @"
+# Config File Comparison Report
+
+## Configs Found
+$($configs | ForEach-Object { "- $($_.Source)" } | Out-String)
+
+## Key Differences to Consider
+
+[You need to analyze and document the differences here]
+
+## Recommendation
+Which config settings should be merged into C:\_chunker\config.json? "@
+
+$configComparison | Out-File "C:\_chunker\99_doc\CONFIG_COMPARISON_$(Get-Date -Format 'yyyyMMdd_HHmmss').md"
+```
+
+**STOP HERE AND SHOW ME:**
+1. The inventory CSV results
+2. The config comparison report
+3.

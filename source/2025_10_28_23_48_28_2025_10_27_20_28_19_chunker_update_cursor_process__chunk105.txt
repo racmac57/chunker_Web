@@ -1,0 +1,588 @@
+try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as file:
+            source = file.read()
+        
+        if not source.strip():
+            logger.warning(f"Empty Python file: {file_path}")
+            return {"blocks": [], "metadata": {}}
+        
+        # Parse AST
+        tree = ast.parse(source)
+        blocks = []
+        
+        # Extract imports
+        imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+        if imports:
+            import_text = "\n".join(ast.get_source_segment(source, node) for node in imports)
+            blocks.append({
+                "type": "imports",
+                "content": import_text,
+                "description": "Module imports",
+                "name": None,
+                "docstring": None
+            })
+        
+        # Extract functions
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                blocks.append({
+                    "type": "function",
+                    "content": ast.get_source_segment(source, node),
+                    "description": f"Function: {node.name}",
+                    "name": node.name,
+                    "docstring": ast.get_docstring(node) or "No docstring"
+                })
+        
+        # Extract classes
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                blocks.append({
+                    "type": "class",
+                    "content": ast.get_source_segment(source, node),
+                    "description": f"Class: {node.name}",
+                    "name": node.name,
+                    "docstring": ast.get_docstring(node) or "No docstring"
+                })
+        
+        # Extract other code (top-level code, not imports/functions/classes)
+        other_nodes = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef))]
+        if other_nodes:
+            other_text = "\n".join(ast.get_source_segment(source, node) for node in other_nodes)
+            blocks.append({
+                "type": "other",
+                "content": other_text,
+                "description": "Top-level code",
+                "name": None,
+                "docstring": None
+            })
+        
+        # Generate metadata
+        metadata = {
+            "file_name": Path(file_path).name,
+            "file_type": ".py",
+            "file_size": Path(file_path).stat().st_size,
+            "created": datetime.fromtimestamp(Path(file_path).stat().st_ctime).isoformat(),
+            "modified": datetime.fromtimestamp(Path(file_path).stat().st_mtime).isoformat(),
+            "block_count": len(blocks),
+            "block_types": list(set(block["type"] for block in blocks))
+        }
+        
+        logger.info(f"Processed Python file {file_path}: {len(blocks)} blocks")
+        return {"blocks": blocks, "metadata": metadata}
+    
+    except SyntaxError as e:
+        logger.error(f"Syntax error in Python file {file_path}: {e}")
+        return {"blocks": [], "metadata": {"error": f"SyntaxError: {e}"}}
+    except Exception as e:
+        logger.error(f"Error processing Python file {file_path}: {e}")
+        return {"blocks": [], "metadata": {"error": str(e)}}
+```
+
+#### 2. `watcher_splitter.py`
+Update `process_file_enhanced` to handle Python blocks and copy to source folder. ```python
+# (Existing imports unchanged, adding only necessary changes)
+from datetime import datetime
+import shutil
+from pathlib import Path
+from typing import Dict, List, Optional
+from file_processors import process_python_file
+# ... other imports ...
+
+def process_file_enhanced(file_path: Path, config: Dict, source_path: Optional[Path] = None) -> bool:
+    """
+    Process a file with enhanced chunking and RAG integration, copying outputs to source. Args:
+        file_path: Path to the file. config: Configuration dictionary. source_path: Original source path for copying outputs (optional). Returns:
+        True if successful, False otherwise.
+    """ start_time = time.time()
+    logger.info(f"Processing file: {file_path.name} - Size: {file_path.stat().st_size} bytes")
+    
+    if file_path.is_symlink():
+        logger.warning(f"Skipping symlink: {file_path.name}")
+        return False
+    
+    if not check_permissions(file_path, source_path):
+        logger.error(f"Insufficient permissions for {file_path.name}")
+        archive_dir = Path(config['archive_dir']) / "failed"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(file_path), str(archive_dir / file_path.name))
+        return False
+    
+    try:
+        file_type = file_path.suffix.lower()
+        text = ""
+        blocks = []
+        
+        if file_type == ".py":
+            result = process_python_file("", str(file_path))
+            blocks = result["blocks"]
+            metadata = result["metadata"]
+            if not blocks and metadata.get("error"):
+                logger.error(f"Failed to process Python file: {metadata['error']}")
+                archive_dir = Path(config['archive_dir']) / "failed"
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(file_path), str(archive_dir / file_path.name))
+                return False
+        else:
+            if file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log"] and file_path.stat().st_size > 1024 * 1024:
+                text = stream_large_file(file_path)
+            elif file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log"]:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    text = f.read()
+            
+            if file_type == ".xlsx":
+                text = process_excel_file(text, str(file_path))
+            elif file_type == ".pdf":
+                text = process_pdf_file(text, str(file_path))
+            elif file_type == ".docx":
+                text = process_docx_file(text, str(file_path))
+            elif file_type == ".yaml":
+                text = process_yaml_file(text, str(file_path))
+            elif file_type == ".xml":
+                text = process_xml_file(text, str(file_path))
+            elif file_type == ".log":
+                text = process_log_file(text, str(file_path))
+            elif file_type == ".sql":
+                text = process_sql_file(text, str(file_path))
+        
+        logger.info(f"Read {len(text)} characters from file" if text else f"Processed {len(blocks)} Python blocks")
+        
+        if not text.strip() and not blocks:
+            logger.warning(f"Empty file after processing: {file_path.name}")
+            session_stats['zero_byte_prevented'] += 1
+            return False
+        
+        dept_config = get_department_config(file_path)
+        timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+        output_dir = Path(config['output_dir']) / f'{timestamp}_{file_path.stem}'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created output directory: {output_dir}")
+        
+        chunk_files = []
+        if file_type == ".py":
+            for i, block in enumerate(blocks, 1):
+                chunk_file = output_dir / f'{timestamp}_block_{i}_{block["type"]}.txt'
+                with open(chunk_file, 'w', encoding='utf-8') as f:
+                    f.write(f"# {block['description']}\n\n{block['content']}")
+                chunk_files.append(chunk_file)
+        else:
+            chunks = chunk_text_enhanced(text, dept_config['chunk_size'], dept_config)
+            for i, chunk in enumerate(chunks, 1):
+                chunk_file = output_dir / f'{timestamp}_chunk_{i}.txt'
+                with open(chunk_file, 'w', encoding='utf-8') as f:
+                    f.write(chunk)
+                chunk_files.append(chunk_file)
+        
+        session_stats['chunks_created'] += len(chunk_files)
+        session_stats['total_sentences_processed'] += len(sent_tokenize(text)) if text else len(blocks)
+        session_stats['total_bytes_created'] += sum(len(block["content"]) for block in blocks) if blocks else sum(len(chunk) for chunk in chunks)
+        
+        dept = dept_config['department']
+        if dept not in session_stats['department_breakdown']:
+            session_stats['department_breakdown'][dept] = {'files': 0, 'chunks': 0}
+        session_stats['department_breakdown'][dept]['files'] += 1
+        session_stats['department_breakdown'][dept]['chunks'] += len(chunk_files)
+        
+        if db:
+            try:
+                db.log_processing(file_path.name, dept, len(chunk_files), len(text) if text else len(blocks), time.time() - start_time, str(source_path) if source_path else "")
+            except Exception as db_error:
+                logger.warning(f"Failed to log processing to database: {db_error}")
+        
+        notifications.send_file_processed_notification(file_path.name, len(chunk_files), dept)
+        
+        if config.get("rag_enabled") and RAG_AVAILABLE:
+            try:
+                chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
+                chunks_or_blocks = blocks if file_type == ".py" else chunks
+                for i, item in enumerate(chunks_or_blocks, 1):
+                    content = item["content"] if file_type == ".py" else item
+                    metadata = {
+                        "file_name": file_path.name,
+                        "file_type": file_type,
+                        "chunk_index": i,
+                        "timestamp": datetime.now().isoformat(),
+                        "department": dept,
+                        "keywords": apply_redaction_rules(extract_keywords(content)),
+                        "file_size": file_path.stat().st_size,
+                        "processing_time": time.time() - start_time,
+                        "source_path": str(source_path) if source_path else "",
+                        "block_type": item["type"] if file_type == ".py" else None,
+                        "block_name": item["name"] if file_type == ".py" else None,
+                        "block_description": item["description"] if file_type == ".py" else None
+                    }
+                    chunk_id = chroma_rag.add_chunk(content, metadata)
+                    logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+            except Exception as e:
+                logger.warning(f"Failed to add to ChromaDB: {e}")
+        
+        # Copy output files to source folder (Folder B)
+        if source_path:
+            try:
+                source_dir = source_path.parent
+                source_dir.mkdir(parents=True, exist_ok=True)
+                if not os.access(source_dir, os.W_OK):
+                    logger.error(f"No write permissions for source {source_dir}")
+                    raise PermissionError(f"No write permissions for {source_dir}")
+                
+                for chunk_file in chunk_files:
+                    dest_file = source_dir / f"{chunk_file.name}_processed.txt"
+                    shutil.copy2(chunk_file, dest_file)
+                    logger.info(f"Copied output to source: {dest_file}")
+            except Exception as e:
+                logger.error(f"Failed to copy outputs to {source_path.parent}: {e}")
+        
+        archive_dir = Path(config['archive_dir'])
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / file_path.name
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                shutil.move(str(file_path), str(archive_path))
+                logger.info(f"Archived file to: {archive_path}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retry {attempt + 1} for archiving {file_path}: {e}")
+                    time.sleep(1)
+                else:
+                    logger.error(f"Failed to archive {file_path}: {e}")
+                    archive_dir = Path(config['archive_dir']) / "failed"
+                    archive_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(file_path), str(archive_dir / file_path.name))
+                    logger.info(f"Moved failed file to: {archive_dir / file_path.name}")
+        
+        processing_time = time.time() - start_time
+        session_stats['performance_metrics']['avg_processing_time'] = (
+            session_stats['performance_metrics']['avg_processing_time'] * session_stats['files_processed'] + processing_time
+        ) / (session_stats['files_processed'] + 1)
+        session_stats['files_processed'] += 1
+        return True
+    
+    except Exception as e:
+        logger.exception(f"Error processing file {file_path.name}: {e}")
+        session_stats['errors'] += 1
+        if db:
+            try:
+                db.log_error('ProcessingError', str(e), traceback.format_exc(), file_path.name)
+            except Exception as db_error:
+                logger.warning(f"Failed to log error to database: {db_error}")
+        try:
+            notifications.send_error_alert(str(e), file_path.name, traceback.format_exc())
+        except Exception as notify_error:
+            logger.warning(f"Failed to send error alert: {notify_error}")
+        
+        archive_dir = Path(config['archive_dir']) / "failed"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(file_path), str(archive_dir / file_path.name))
+        logger.info(f"Moved failed file to: {archive_dir / file_path.name}")
+        return False
+
+# ... rest of watcher_splitter.py unchanged ...
+```
+
+#### 3. `README.md`
+Update to document Python block processing. ```markdown
+# Chunker Project - Final Migration
+
+This project has been migrated to C:/_chunker on 2025-08-25 18:58:28. ## Directory Structure
+- **C:/_chunker** - Main project directory with scripts
+- **02_data/** - Input files to be processed (watch folder, Folder A)
+- **03_archive/** - Archived original files and processed source files
+- **04_output/** - Generated chunks and transcripts (organized by source file)
+- **05_logs/** - Application logs and tracking
+- **06_config/** - Configuration files
+
+## Quick Start
+1. Place files to process in `02_data/` folder (Folder A) by moving them from any source folder (Folder B)
+2. Run the watcher: `python watcher_splitter.py`
+3. Check `04_output/` for processed chunks and transcripts
+4. Original files are moved to `03_archive/` after processing
+5. Processed chunks are copied back to the source folder (Folder B)
+
+## Features
+- [x] Watchdog-based monitoring of Folder A (`02_data/`)
+- [x] Automatic processing of moved files with source tracking
+- [x] Output copying to source folder (Folder B)
+- [x] Debouncing for rapid file events (1-second window)
+- [x] Python file processing: Breaks .py files into blocks (imports, functions, classes, other) with descriptions
+- [x] Organized output by source file name
+- [x] Admin files output as .md with headers
+- [x] All other files output as .txt
+- [x] Automatic file organization and archiving
+- [x] Database tracking and logging
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters
+- [x] **Timestamp-organized output** - Output folders with YYYY_MM_DD_HH_MM_SS_ prefix
+- [x] **RAG Integration** - ChromaDB vector database for semantic search (optional)
+- [x] **Multi-file type support** - Processes .txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log
+- [x] **Faithfulness scoring** - Evaluates answer grounding
+- [x] **RAG evaluation metrics** - Precision@K, Recall@K, MRR, ROUGE, BLEU scores
+- [x] **LangSmith integration** - Tracing and evaluation (optional)
+- [x] **Celery integration** - Task queuing with retries, monitoring via Flower dashboard
+
+## Configuration
+Edit `config.json` to customize:
+- File filter modes (all, patterns, suffix)
+- Supported file extensions
+- Chunk sizes and processing options
+- Notification settings
+- RAG settings (ChromaDB, LangSmith)
+- Default source folder for copied files (`default_source_folder`)
+- Celery settings (`celery_enabled`, `celery_broker`)
+
+## Python File Processing
+- Breaks `.py` files into blocks: imports, functions, classes, and top-level code. - Generates descriptions: e.g., "Function: my_func", "Class: MyClass". - Includes docstrings and metadata (block type, name, file info). - Outputs blocks as separate files with descriptions in `04_output/`. ## RAG Usage
+### Setup
+1. Install RAG dependencies: `python install_rag_dependencies.py`
+2. Enable RAG in `config.json`: Set `"rag_enabled": true`
+3. Start the watcher: `python watcher_splitter.py`
+
+### Search Knowledge Base
+```bash
+# Interactive search
+python rag_search.py
+
+# Command line search
+python rag_search.py "How do I fix vlookup errors?" ```
+
+### Example Query Output
+```bash
+$ python rag_search.py "How do I use vlookup in Excel?" Found 3 similar chunks:
+1. ID: 2025-10-27T12:00:00Z_excel_troubleshooting.md_chunk1
+   Content: VLOOKUP syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches...
+   Metadata: {"file_name": "excel_troubleshooting.md", "file_type": ".md", "department": "admin"}
+   Distance: 0.12
+
+2. ID: 2025-10-27T12:00:00Z_vlookup_guide.xlsx_chunk1
+   Content: Sheet: VLOOKUP Guide - (lookup_value, table_array, col_index_num, FALSE)...
+   Metadata: {"file_name": "vlookup_guide.xlsx", "file_type": ".xlsx", "department": "admin"}
+   Distance: 0.15
+
+3. ID: 2025-10-27T12:00:00Z_excel_guide.md_chunk2
+   Content: Common VLOOKUP errors: incorrect data types, missing table references...
+   Metadata: {"file_name": "excel_guide.md", "file_type": ".md", "department": "admin"}
+   Distance: 0.18
+```
+
+### Evaluation
+```python
+from rag_evaluation import RAGEvaluator
+from rag_integration import ChromaRAG, FaithfulnessScorer
+
+# Evaluate retrieval quality
+evaluator = RAGEvaluator()
+metrics = evaluator.evaluate_retrieval(ground_truth, retrieved)
+
+# Evaluate answer faithfulness
+scorer = FaithfulnessScorer()
+score = scorer.calculate_faithfulness(answer, context)
+```
+
+### Testing
+```bash
+# Run automated RAG tests
+python rag_test.py
+
+# Run Celery integration tests
+python test_celery_integration.py
+```
+
+### Supported File Types
+- **Text files**: .txt, .md, .json, .csv, .sql, .log
+- **Office files**: .xlsx (Excel), .docx (Word)
+- **Code files**: .py (Python with AST parsing into blocks)
+- **Data files**: .yaml, .xml
+- **Documents**: .pdf (text extraction)
+
+### RAG Features
+- **Semantic search** using ChromaDB vector database
+- **Hybrid search** combining semantic and keyword matching
+- **Faithfulness scoring** to evaluate answer grounding
+- **Comprehensive evaluation** with multiple metrics
+- **LangSmith integration** for tracing and monitoring (optional)
+
+### Celery Usage
+1. Install dependencies: `pip install celery redis flower`
+2. Start Redis: `redis-server`
+3. Start services: `python orchestrator.py`
+4. Monitor tasks: Visit `http://localhost:5555` (Flower dashboard)
+```
+
+#### 4. `CHANGELOG.md`
+Update for version 2.1.1 with Python block processing. ```markdown
+# Changelog
+
+All notable changes to the Enterprise Chunker system will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). ## [Version 2.1.1] - 2025-10-27 - Python Block Processing
+
+### Added
+- **Python File Processing**: Breaks `.py` files into blocks (imports, functions, classes, top-level code) using `ast` module. - **Block Descriptions**: Generates descriptions (e.g., "Function: my_func", "Class: MyClass") with docstrings and metadata. - **Output Format**: Saves blocks as separate files with descriptions in `04_output/`. - **RAG Integration**: Stores block metadata (type, name, description) in vector DB. - **Metadata Extraction**: Includes file info, block count, and block types. ### Fixed
+- **Syntax Errors**: Graceful handling of malformed Python files, moving to `03_archive/failed/`. - **Empty Files**: Skips empty or invalid `.py` files with logging. ### Implementation Files
+- Updated `file_processors.py`: Added enhanced `process_python_file` with AST parsing. - Updated `watcher_splitter.py`: Integrated Python block processing and RAG metadata. - Updated `README.md`: Added Python block processing documentation. - Updated `CHANGELOG.md`: Documented v2.1.1 enhancements. ### Technical Details
+- Uses `ast` module to parse Python code into logical blocks. - Generates JSON metadata with block type, name, description, and docstring. - Integrates with existing watchdog and Celery workflows. - Outputs blocks as timestamped files with descriptive headers. ### Usage
+- Move `.py` files to `02_data/` (Folder A) from any source (Folder B). - Run: `python watcher_splitter.py`
+- Check outputs in `04_output/` (e.g., `2025_10_27_XX_XX_XX_block_1_function.txt`). - Outputs copied to source folder (Folder B). ## [Version 2.1.0] - 2025-10-27 - Celery Integration
+...
+
+## [Version 1.2.2] - 2025-10-27 - Watchdog Integration
+...
+```
+
+---
+
+### Enhancements Applied
+- **Python Block Processing**: Parses `.py` files into imports, functions, classes, and top-level code using `ast`. - **Descriptions**: Generates descriptive headers (e.g., "Function: my_func") and includes docstrings. - **Metadata**: Stores block type, name, description, and file info in JSON format for RAG. - **Output**: Saves blocks as separate `.txt` files with descriptions in `04_output/`. - **Error Handling**: Handles syntax errors, empty files, and malformed code by logging and moving to `failed/`. - **Integration**: Seamlessly works with watchdog, Celery, and RAG; copies outputs to source folder. ---
+
+### Testing Instructions
+1. **Install Dependencies** (already in `requirements.txt`): Ensure `nltk==3.8.1` for tokenization. 2. **Test Python File**:
+   - Create a test `.py` file (e.g., `test.py`):
+     ```python
+     import os
+     def my_func(x):
+         """Calculate square.""" return x * x
+     class MyClass:
+         """A test class.""" pass
+     print("Hello")
+     ```
+   - Move to `02_data/` from a source folder (e.g., `source/`). 3. **Run Watcher**:
+   ```bash
+   python orchestrator.py
+   ```
+4. **Verify Output**:
+   - Check `04_output/2025_10_27_XX_XX_XX_test/` for files like `block_1_imports.txt`, `block_2_function.txt`, `block_3_class.txt`, `block_4_other.txt`. - Confirm descriptions (e.g., `# Function: my_func`). - Check `source/` for copied outputs. - Verify `03_archive/test.py` and logs in `05_logs/watcher.log`. 5. **Test RAG (if enabled)**:
+   ```bash
+   python rag_search.py "What does my_func do?" ```
+   - Confirm results include block metadata (e.g., `block_type: function`, `block_name: my_func`). 6. **Test Edge Cases**:
+   - Try a malformed `.py` file (e.g., syntax error), empty file, or large file (>1MB). ---
+
+### Final Notes
+- **Production Readiness**: The `.py` block processing integrates seamlessly with existing watchdog, Celery, and RAG workflows, maintaining stability and scalability. - **Backward Compatibility**: Non-`.py` files are unaffected; existing functionality preserved. - **Blind Spots Handled**: Syntax errors, empty files, and large files are managed with logging and archiving to `failed/`. The system is enhanced and ready for production use with robust Python file handling. 🎉 Let me know if you need further tweaks or testing support! ---
+
+**Cursor**
+
+Looking at Grok's additional edits, I can see there's a **critical issue** that needs to be fixed first, and then I'll evaluate whether Grok's enhancements are worth adding. ## **🚨 Critical Issue - Fix Required**
+
+The watcher is currently failing with a `NameError` because `Dict` is not imported:
+
+
+```python
+from typing import Dict, List, Optional
+```
+
+Let me check the current imports:
+
+
+Let me find where the imports are:
+
+
+I need to add the typing import. Let me add it after the existing imports:
+
+
+```python
+# 🕒 2025-06-28-01-55-30
+# chunker/watcher_splitter_enterprise.py
+# Author: R. A. Carucci  
+# Purpose: Enterprise-grade chunker with database tracking, notifications, and parallel processing
+
+import os
+import sys
+import time 
+import shutil
+import logging
+import traceback
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional
+import nltk
+from nltk.tokenize import sent_tokenize
+import json
+import psutil
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from chunker_db import ChunkerDatabase
+from notification_system import NotificationSystem
+import re
+import openpyxl
+import PyPDF2
+import ast
+import docx
+import yaml
+# Graceful RAG imports with error handling
+try:
+    from rag_integration import ChromaRAG, extract_keywords
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"RAG components not available: {e}")
+    print("Continuing with core chunking functionality...")
+    RAG_AVAILABLE = False
+    ChromaRAG = None
+    extract_keywords = None
+
+# Graceful Celery imports with error handling
+try:
+    from celery_tasks import process_file_with_celery_chain, app as celery_app
+    CELERY_AVAILABLE = True
+    print("Celery integration available")
+except ImportError as e:
+    print(f"Celery components not available: {e}")
+    print("Continuing with direct processing...")
+    CELERY_AVAILABLE = False
+    process_file_with_celery_chain = None
+    celery_app = None
+from file_processors import get_file_processor, check_processor_dependencies, redact_sensitive_data
+
+# Graceful RAG imports with error handling
+try:
+    from langchain_rag_handler import LangChainRAGHandler, graceful_rag_handler, check_rag_dependencies
+    RAG_DEPENDENCIES_AVAILABLE = True
+except ImportError:
+    # Logger not yet defined, use print for now
+    print("LangChain RAG handler not available - using basic RAG only")
+    RAG_DEPENDENCIES_AVAILABLE = False
+
+def validate_config(config):
+    """Validate configuration parameters"""
+    errors = []
+    
+    # Check required fields
+    required_fields = ["watch_folder", "output_dir", "archive_dir"]
+    for field in required_fields:
+        if field not in config:
+            errors.append(f"Missing required field: {field}")
+    
+    # Check data types
+    if "rag_enabled" in config and not isinstance(config["rag_enabled"], bool):
+        errors.append("rag_enabled must be boolean")
+    
+    if "chunk_size" in config and not isinstance(config["chunk_size"], int):
+        errors.append("chunk_size must be integer")
+    
+    if "chroma_persist_dir" in config and not isinstance(config["chroma_persist_dir"], str):
+        errors.append("chroma_persist_dir must be string")
+    
+    # Check LangSmith config
+    if "langsmith" in config:
+        langsmith_config = config["langsmith"]
+        if not isinstance(langsmith_config, dict):
+            errors.append("langsmith config must be dictionary")
+        else:
+            if "project" in langsmith_config and not isinstance(langsmith_config["project"], str):
+                errors.append("langsmith.project must be string")
+    
+    if errors:
+        logger.error("Configuration validation errors:")
+        for error in errors:
+            logger.error(f"  - {error}")
+        return False
+    
+    logger.info("Configuration validation passed")
+    return True
+
+def safe_chroma_add(chunk, metadata, config):
+    """Safely add chunk to ChromaDB with error handling"""
+    try:
+        if not config.get("rag_enabled", False):
+            return None
+        
+        if not RAG_AVAILABLE:
+            logger.warning("RAG is enabled in config but ChromaDB is not available. Skipping RAG integration.")

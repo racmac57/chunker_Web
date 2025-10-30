@@ -1,0 +1,365 @@
+Test it again:
+
+Drop a .txt file into your watch folder. Confirm: no error logs about punkt_tab. If everything works as expected now, your app is fully functional and hidden from view! 🎉
+
+a. Add logging to confirm nltk.tokenize runs successfully
+b. Use logging.exception inside the try/except for stack trace logging
+
+You said:
+Uploaded image
+"C:\Users\carucci_r\Documents\chunker\dist\launch_chunker.vbs"
+C:\Users\carucci_r\Documents\chunker\dist
+ChatGPT said:
+You're 99% there, just one final fix:
+
+✅ Correct Edit Action Settings
+Field	Value
+Program/script	wscript
+Add arguments	"C:\Users\carucci_r\Documents\chunker\dist\launch_chunker.vbs"
+Start in	C:\Users\carucci_r\Documents\chunker\dist
+✅ The quotes around the .vbs path in "Add arguments" are required if the path contains spaces (which yours does). Once done, click OK, then restart the task and drop a .txt file to confirm it silently runs as intended. a. Create log output file to confirm silent launch ran
+b. Add an audible/log confirmation line in .vbs for testing
+
+You said:
+Uploaded image
+Uploaded image
+upon restart the the chunker window opened, I added a .txt file and got below
+025-06-27 14:34:17,449 [INFO] Starting folder watcher...
+2025-06-27 14:36:10,952 [INFO] Detected new file: 2025_06_25_20_11_19_chatgpt_cad_rns_code_01_x.txt
+2025-06-27 14:36:12,238 [ERROR] Failed to process 2025_06_25_20_11_19_chatgpt_cad_rns_code_01_x.txt:
+**********************************************************************
+
+Looks like it was added to the output folder 
+the C:\Users\carucci_r\Documents\chunker folder has the file in it
+looks like the file 
+  Resource punkt_tab not found. Please use the NLTK Downloader to obtain the resource:
+
+  >>> import nltk
+  >>> nltk.download('punkt_tab')
+
+  For more information see: https://www.nltk.org/data.html
+
+  Attempted to load tokenizers/punkt_tab/english/
+
+  Searched in:
+    - 'C:\\Users\\carucci_r/nltk_data'
+    - 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\nltk_data'
+    - 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\share\\nltk_data'
+    - 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\lib\\nltk_data'
+    - 'C:\\Users\\carucci_r\\AppData\\Roaming\\nltk_data'
+    - 'C:\\nltk_data'
+    - 'D:\\nltk_data'
+    - 'E:\\nltk_data'
+**********************************************************************
+
+
+
+
+
+
+ChatGPT said:
+Your app is successfully processing .txt files and writing split results to the output folder — but it's crashing due to a missing NLTK resource:
+
+Resource punkt_tab not found. This is likely due to a bug or typo in the code where it incorrectly tries to load "punkt_tab" instead of the correct "punkt". ✅ Fix: Code-level Correction
+Open your Python script (likely watcher_splitter.py or whatever module does tokenizing) and search for this line:
+
+nltk.data.load("tokenizers/punkt_tab/english.pickle")
+Replace it with:
+
+nltk.data.load("tokenizers/punkt/english.pickle")
+OR even better, change to the recommended API:
+
+from nltk.tokenize import sent_tokenize
+sentences = sent_tokenize(text)
+This ensures punkt is correctly referenced and avoids using internal paths directly. 🧪 Verify Installation (optional)
+You've already verified punkt is installed via:
+
+import nltk
+nltk.download('punkt')
+So you don’t need to re-run it. ✅ Next Steps
+Open the Python source file used in chunker_hidden.exe. Fix the invalid 'punkt_tab' reference. Rebuild the .exe using:
+
+pyinstaller chunker_hidden.spec
+Let me know if you want me to patch the script directly. a. Want me to scan your script(s) and patch the punkt_tab bug? b. Ready to add automatic retry or logging for failed chunks? You said:
+look for me
+ChatGPT said:
+You're very close — the error message about punkt_tab is misleading. Your code is correctly set to load:
+
+'tokenizers/punkt': 'punkt'
+But your error log says:
+
+Resource punkt_tab not found. That suggests NLTK is being told to look for punkt_tab, which doesn't exist. However, your script explicitly asks for just 'punkt'. ✅ What You Should Do
+Since the watcher_splitter.py already ensures the punkt tokenizer is present via this function:
+
+def ensure_nltk_data():
+    required = {
+        'corpora/stopwords': 'stopwords',
+        'tokenizers/punkt': 'punkt'
+    }
+And you're running this at startup:
+
+ensure_nltk_data()
+The root issue may be:
+
+An older .pyc or cached compiled .exe still trying to reference punkt_tab. A frozen .exe (PyInstaller) binary that was created before you added or fixed the ensure_nltk_data() logic. ✅ Solution: Clean + Rebuild the .exe
+Run this:
+
+pyinstaller --clean chunker_hidden.spec
+This forces PyInstaller to fully rebuild without cached bytecode. ✅ Optional: Manually Clean .pyc Files
+Delete all __pycache__ folders in your chunker/ directory (and subfolders) if you're running this from source. ✅ Sanity Check
+You do not need to install punkt_tab — it doesn't exist in NLTK. If pyinstaller --clean works, it means you're now running the correct updated script logic that includes the ensure_nltk_data(). Let me know if you want me to:
+
+Add a fallback logger error if punkt is still not found after downloading. Integrate a command-line test harness. a. Add error handling to verify punkt is successfully loaded at runtime
+b. Create a standalone script that tests ensure_nltk_data() logic in isolation
+
+You said:
+walk me through running 
+pyinstaller --clean chunker_hidden.spec
+ChatGPT said:
+Let's walk through step-by-step how to run:
+
+pyinstaller --clean chunker_hidden.spec
+This rebuilds your .exe from scratch, ensuring no old cache is causing punkt_tab issues. ✅ STEP-BY-STEP GUIDE
+1. Open Command Prompt
+Press Win + S, type cmd, press Enter. 2. Navigate to your chunker directory
+Type:
+
+cd C:\Users\carucci_r\Documents\chunker
+Hit Enter. 3. Run clean build command
+Type:
+
+pyinstaller --clean chunker_hidden.spec
+Hit Enter. This will:
+
+Delete old build cache. Re-run all dependency analysis. Rebuild your .exe from the .spec file. You should see messages like:
+
+Building EXE from EXE-00.toc completed successfully. Build complete! The results are available in: C:\Users\carucci_r\Documents\chunker\dist
+4. Verify new build
+Go to:
+
+C:\Users\carucci_r\Documents\chunker\dist
+You should see a fresh chunker_hidden.exe. This is your invisible, clean copy. 5. (Optional) Double-click chunker_hidden.exe to test it runs without opening a window and waits for files. Once confirmed, you're ready to:
+
+Re-link Task Scheduler to use this updated .exe
+
+Restart your system to verify everything is smooth
+
+Let me know once you’ve run the command, and I’ll help verify the build or patch the script if needed. a. Show me the new dist/ folder contents after rebuild
+b. Want to auto-log errors to a file instead of showing in console? You said:
+the command is starting att U:\>
+ChatGPT said:
+Perfect — you're currently in the U:\ drive. Let's get you into the correct folder and run the build. ✅ Step-by-step from U:\>
+1. Switch to C: drive:
+Type and press Enter:
+
+C:
+2. Change directory to your chunker folder:
+cd \Users\carucci_r\Documents\chunker
+If successful, your prompt should look like:
+
+C:\Users\carucci_r\Documents\chunker>
+3. Now run the clean PyInstaller build:
+pyinstaller --clean chunker_hidden.spec
+This ensures you're starting from a clean state and will rebuild your .exe. Once that finishes:
+
+Navigate to C:\Users\carucci_r\Documents\chunker\dist
+
+You should see a freshly built chunker_hidden.exe
+
+Let me know what the last few lines of output say, or if you see Build complete!. a. Want to test this new build without Task Scheduler first? b. Want to log processing output to a .log file silently? You said:
+Microsoft Windows [Version 10.0.26100.4484]
+(c) Microsoft Corporation. All rights reserved. U:\>C:
+
+C:\>cd \Users\carucci_r\Documents\chunker
+
+C:\Users\carucci_r\Documents\chunker>pyinstaller --clean chunker_hidden.spec
+171 INFO: PyInstaller: 6.14.1, contrib hooks: 2025.5
+173 INFO: Python: 3.12.4
+202 INFO: Platform: Windows-11-10.0.26100-SP0
+202 INFO: Python environment: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312
+204 INFO: Removing temporary files and cleaning cache in C:\Users\carucci_r\AppData\Local\pyinstaller
+237 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\pyinstaller.exe',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\setuptools\\_vendor',
+ 'C:\\Users\\carucci_r\\Documents\\chunker']
+704 INFO: checking Analysis
+704 INFO: Building Analysis because Analysis-00.toc is non existent
+704 INFO: Running Analysis Analysis-00.toc
+704 INFO: Target bytecode optimization level: 0
+704 INFO: Initializing module dependency graph...
+705 INFO: Initializing module graph hook caches...
+766 INFO: Analyzing modules for base_library.zip ...
+1911 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3052 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3774 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4228 INFO: Caching module dependency graph...
+4249 INFO: Looking for Python shared library...
+4258 INFO: Using Python shared library: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\python312.dll
+4258 INFO: Analyzing C:\Users\carucci_r\Documents\chunker\watcher_splitter.py
+4444 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4474 INFO: Processing standard module hook 'hook-nltk.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+5213 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5233 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5769 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5928 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6399 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6962 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+7965 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+8065 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+8069 INFO: SetuptoolsInfo: initializing cached setuptools info...
+10603 INFO: Setuptools: 'typing_extensions' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.typing_extensions'! 10608 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+10623 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10649 INFO: Processing pre-safe-import-module hook 'hook-jaraco.functools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10651 INFO: Setuptools: 'jaraco.functools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.functools'! 10658 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10659 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'! 10792 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10966 INFO: Processing pre-safe-import-module hook 'hook-jaraco.text.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10969 INFO: Setuptools: 'jaraco.text' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.text'! 10975 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+10977 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10979 INFO: Processing pre-safe-import-module hook 'hook-jaraco.context.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10981 INFO: Setuptools: 'jaraco.context' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.context'! 10988 INFO: Processing pre-safe-import-module hook 'hook-backports.tarfile.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+10991 INFO: Setuptools: 'backports.tarfile' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.backports.tarfile'! 11036 INFO: Processing standard module hook 'hook-backports.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+11092 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11094 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'! 11107 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+11110 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11111 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'! 11295 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11297 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'! 11617 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11619 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'! 12352 INFO: Processing standard module hook 'hook-pandas.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+14779 INFO: Processing standard module hook 'hook-pytz.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+15050 INFO: Processing standard module hook 'hook-pyarrow.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+17346 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+19079 INFO: Processing standard module hook 'hook-pandas.plotting.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+19485 INFO: Processing standard module hook 'hook-openpyxl.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+20923 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+21274 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+21420 INFO: Processing standard module hook 'hook-dateutil.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+21521 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+21762 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+22226 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+22228 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+22485 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+22802 INFO: Processing standard module hook 'hook-regex.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+24773 INFO: Processing module hooks (post-graph stage)...
+24846 INFO: Processing standard module hook 'hook-pycparser.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+25358 WARNING: Hidden import "jinja2" not found! 25385 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+25407 INFO: Performing binary vs. data reclassification (2316 entries)
+26555 INFO: Looking for ctypes DLLs
+26585 INFO: Analyzing run-time hooks ...
+26590 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+26592 INFO: Including run-time hook 'pyi_rth_nltk.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+26593 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+26594 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+26595 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+26597 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+26641 INFO: Creating base_library.zip...
+26705 INFO: Looking for dynamic libraries
+C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\nltk\app\__init__.py:45: UserWarning: nltk.app.wordfreq not loaded (requires the matplotlib library). warnings.warn("nltk.app.wordfreq not loaded (requires the matplotlib library).") 28531 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\numpy.libs', 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\pandas.libs', 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\pyarrow.libs']
+28531 INFO: Extra DLL search directories (PATH): []
+29618 INFO: Warnings written to C:\Users\carucci_r\Documents\chunker\build\chunker_hidden\warn-chunker_hidden.txt
+29701 INFO: Graph cross-reference written to C:\Users\carucci_r\Documents\chunker\build\chunker_hidden\xref-chunker_hidden.html
+29752 INFO: checking Tree
+29752 INFO: Building Tree because Tree-00.toc is non existent
+29752 INFO: Building Tree Tree-00.toc
+29766 INFO: checking PYZ
+29766 INFO: Building PYZ because PYZ-00.toc is non existent
+29766 INFO: Building PYZ (ZlibArchive) C:\Users\carucci_r\Documents\chunker\build\chunker_hidden\PYZ-00.pyz
+31107 INFO: Building PYZ (ZlibArchive) C:\Users\carucci_r\Documents\chunker\build\chunker_hidden\PYZ-00.pyz completed successfully. 31153 INFO: checking PKG
+31154 INFO: Building PKG because PKG-00.toc is non existent
+31154 INFO: Building PKG (CArchive) chunker_hidden.pkg
+52994 INFO: Building PKG (CArchive) chunker_hidden.pkg completed successfully. 53047 INFO: Bootloader C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+53047 INFO: checking EXE
+53047 INFO: Building EXE because EXE-00.toc is non existent
+53048 INFO: Building EXE from EXE-00.toc
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Scripts\pyinstaller.exe\__main__.py", line 7, in <module>
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\__main__.py", line 231, in _console_script_run
+    run()
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\__main__.py", line 215, in run
+    run_build(pyi_config, spec_file, **vars(args))
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\__main__.py", line 70, in run_build
+    PyInstaller.building.build_main.main(pyi_config, spec_file, **kwargs)
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\building\build_main.py", line 1282, in main
+    build(specfile, distpath, workpath, clean_build)
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\building\build_main.py", line 1220, in build
+    exec(code, spec_namespace)
+  File "chunker_hidden.spec", line 30, in <module>
+    exe = EXE(
+          ^^^^
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\building\api.py", line 678, in __init__
+    self.__postinit__()
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\building\datastruct.py", line 184, in __postinit__
+    self.assemble()
+  File "C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\building\api.py", line 772, in assemble
+    os.remove(self.name)
+PermissionError: [WinError 5] Access is denied: 'C:\\Users\\carucci_r\\Documents\\chunker\\dist\\chunker_hidden.exe'
+
+C:\Users\carucci_r\Documents\chunker>
+ChatGPT said:
+✅ You're almost done — PyInstaller tried to overwrite the old chunker_hidden.exe, but it was still running, so Windows blocked it (PermissionError: [WinError 5]). 🧼 Fix: Stop the running .exe first
+Do one of the following:
+
+🔁 Option A (Easiest)
+Restart your computer. Run again:
+
+pyinstaller --clean chunker_hidden.spec
+🛑 Option B (Manual Stop)
+Open Task Manager (Ctrl + Shift + Esc)
+
+Find: chunker_hidden.exe
+
+Right-click → End Task
+
+Back in Command Prompt:
+
+pyinstaller --clean chunker_hidden.spec
+This time, it will build the .exe cleanly. a. Want to test new chunker_hidden.exe in Task Scheduler now? b. Want to embed required NLTK data directly so no internet is needed later? You said:
+Microsoft Windows [Version 10.0.26100.4484]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>cd \Users\carucci_r\Documents\chunker
+
+C:\Users\carucci_r\Documents\chunker>pyinstaller --clean chunker_hidden.spec
+174 INFO: PyInstaller: 6.14.1, contrib hooks: 2025.5
+174 INFO: Python: 3.12.4
+207 INFO: Platform: Windows-11-10.0.26100-SP0
+207 INFO: Python environment: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312
+210 INFO: Removing temporary files and cleaning cache in C:\Users\carucci_r\AppData\Local\pyinstaller
+223 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\pyinstaller.exe',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\setuptools\\_vendor',
+ 'C:\\Users\\carucci_r\\Documents\\chunker']
+628 INFO: checking Analysis
+628 INFO: Building Analysis because Analysis-00.toc is non existent
+628 INFO: Running Analysis Analysis-00.toc
+628 INFO: Target bytecode optimization level: 0
+628 INFO: Initializing module dependency graph...
+630 INFO: Initializing module graph hook caches...
+640 INFO: Analyzing modules for base_library.zip ...
+1782 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+2259 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+2755 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3519 INFO: Caching module dependency graph...
+3540 INFO: Looking for Python shared library...
+3545 INFO: Using Python shared library: C:\Users\carucci_r\AppData\Local\Programs\Python\Python312\python312.dll
+3545 INFO: Analyzing C:\Users\carucci_r\Documents\chunker\watcher_splitter.py
+3681 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3704 INFO: Processing standard module hook 'hook-nltk.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+4323 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4337 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4802 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4931 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5286 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+5721 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+6586 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+6666 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\carucci_r\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+6668 INFO: SetuptoolsInfo: initializing cached setuptools info...
+8986 INFO: Setuptools: 'typing_extensions' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.typing_extensions'!

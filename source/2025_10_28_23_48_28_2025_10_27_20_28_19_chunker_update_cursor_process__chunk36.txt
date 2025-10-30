@@ -1,0 +1,116 @@
+# Count active processes
+        active_processes = len([p for p in psutil.process_iter() if p.is_running()])
+        
+        # Update session stats
+        session_stats["performance_metrics"]["peak_cpu_usage"] = max(
+            session_stats["performance_metrics"]["peak_cpu_usage"], cpu_percent
+        )
+        session_stats["performance_metrics"]["peak_memory_usage"] = max(
+            session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
+        )
+        
+        # Log to database with retry
+        if db:
+            try:
+                db.log_system_metrics(cpu_percent, memory.percent, 
+                                     (disk.used / disk.total) * 100, active_processes)
+            except Exception as e:
+                logger.warning(f"Failed to log system metrics to database: {e}")
+        
+        logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
+                   f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
+        
+        # Send alerts if thresholds exceeded
+        if cpu_percent > 90:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+        elif cpu_percent > 80:
+            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+        
+        if memory.percent > 90:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+        elif memory.percent > 80:
+            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            
+    except Exception as e:
+        logger.error(f"Failed to log system metrics: {e}")
+
+def chunk_text_enhanced(text, limit, department_config):
+    """Enhanced chunking with department-specific rules"""
+    logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
+    if not text or len(text.strip()) < 10:
+        logger.warning("Text too short for chunking - skipping")
+        return []
+    
+    try:
+        sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in text - skipping")
+            return []
+        
+        # Apply department-specific chunking rules
+        original_sentence_count = len(sentences)
+        if department_config.get("enable_redaction"):
+            sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {original_sentence_count} -> {len(sentences)} sentences")
+        
+        chunks = []
+        max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        logger.info(f"Chunking parameters - Max chars per chunk: {max_chars}, Target sentences per chunk: {limit}")
+        
+        current_chunk = []
+        current_length = 0
+        chunk_count = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
+            
+            # Check if adding this sentence would exceed limits
+            if (len(current_chunk) >= limit or 
+                current_length + sentence_length > max_chars) and current_chunk:
+                
+                chunk_text = " ".join(current_chunk)
+                if len(chunk_text.strip()) > 0:
+                    chunks.append(chunk_text)
+                    chunk_count += 1
+                    logger.debug(f"Created chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+                
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        # Add final chunk
+        if current_chunk:
+            chunk_text = " ".join(current_chunk)
+            if len(chunk_text.strip()) > 0:
+                chunks.append(chunk_text)
+                chunk_count += 1
+                logger.debug(f"Created final chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+        
+        session_stats["total_sentences_processed"] += len(sentences)
+        logger.info(f"Chunking complete - Created {len(chunks)} chunks from {len(sentences)} sentences (avg: {len(sentences)/len(chunks):.1f} sentences/chunk)")
+        return chunks
+        
+    except Exception as e:
+        logger.error(f"Chunking failed: {e}")
+        if db:
+            try:
+                db.log_error("ChunkingError", str(e), traceback.format_exc())
+            except Exception as db_error:
+                logger.warning(f"Failed to log chunking error to database: {db_error}")
+        session_stats["errors"] += 1
+        return []
+
+def apply_redaction_rules(sentences):
+    """Apply redaction rules for sensitive departments"""
+    import re
+    
+    redaction_patterns = [
+        (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),  # SSN
+        (r'\b\d{3}-\d{3}-\d{4}\b', '[PHONE-REDACTED]'),  # Phone
+        (r'\b\d{1,5}\s+\w+\s+(? :street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd)\b', '[ADDRESS-REDACTED]'),  # Address
+        (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.

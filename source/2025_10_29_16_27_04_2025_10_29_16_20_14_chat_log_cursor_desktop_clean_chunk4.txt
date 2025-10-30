@@ -1,0 +1,777 @@
+```powershell
+$preserveRoot = "C:\Desktop_Chunker_Backup_20251029_144807"
+$newSystemPath = "C:\Dev\ClaudeExportFixer"
+$timestamp = "20251029_144807"
+
+Write-Host "`n========================================"
+Write-Host "INTEGRATING PRESERVED DATA"
+Write-Host "========================================`n"
+
+$errors = @()
+
+# 1) Unprocessed -> 01_input
+Write-Host "Moving unprocessed files..."
+$unprocessedSource = Join-Path $preserveRoot "unprocessed"
+if (Test-Path $unprocessedSource) {
+    $inputDest = Join-Path $newSystemPath "01_input"
+    New-Item -ItemType Directory -Path $inputDest -Force | Out-Null
+    Get-ChildItem $unprocessedSource -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $destPath = Join-Path $inputDest $_.Name
+            if (Test-Path $destPath) { $destPath = Join-Path $inputDest ("${timestamp}_" + $_.Name) }
+            Copy-Item $_.FullName -Destination $destPath -Force
+            Write-Host ("   Copied: " + $_.Name)
+        } catch { $errors += "Unprocessed: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $inputCount = (Get-ChildItem $inputDest -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total in 01_input: " + $inputCount)
+} else {
+    Write-Host "   No unprocessed source found"
+}
+
+# 2) Databases -> 03_knowledge_base
+Write-Host "`nMoving databases..."
+$dbSource = Join-Path $preserveRoot "databases"
+if (Test-Path $dbSource) {
+    $kbDest = Join-Path $newSystemPath "03_knowledge_base"
+    New-Item -ItemType Directory -Path $kbDest -Force | Out-Null
+    Get-ChildItem $dbSource -Filter "*.db" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Copy-Item $_.FullName -Destination (Join-Path $kbDest $_.Name) -Force
+            Write-Host ("   Copied DB: " + $_.Name)
+        } catch { $errors += "DB: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $kbCount = (Get-ChildItem $kbDest -Filter "*.db" -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total DBs in 03_knowledge_base: " + $kbCount)
+} else {
+    Write-Host "   No database source found"
+}
+
+# 3) Processed outputs -> 04_archive/from_old_desktop_[timestamp]
+Write-Host "`nOrganizing processed outputs..."
+$processedSource = Join-Path $preserveRoot "processed"
+if (Test-Path $processedSource) {
+    $archiveDest = Join-Path $newSystemPath ("04_archive\from_old_desktop_" + $timestamp)
+    New-Item -ItemType Directory -Path $archiveDest -Force | Out-Null
+    Copy-Item (Join-Path $processedSource "*") -Destination $archiveDest -Recurse -Force -ErrorAction SilentlyContinue
+    $procCount = (Get-ChildItem $archiveDest -Recurse -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total processed archived: " + $procCount)
+} else {
+    Write-Host "   No processed source found"
+}
+
+# 4) Configs -> docs/legacy_configs
+Write-Host "`nSaving legacy configs..."
+$configSource = Join-Path $preserveRoot "configs"
+if (Test-Path $configSource) {
+    $configDest = Join-Path $newSystemPath "docs\legacy_configs"
+    New-Item -ItemType Directory -Path $configDest -Force | Out-Null
+    Get-ChildItem $configSource -Filter "*.json" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Copy-Item $_.FullName -Destination (Join-Path $configDest $_.Name) -Force
+            Write-Host ("   Copied: " + $_.Name)
+        } catch { $errors += "Config: $($_.FullName) => $($_.Exception.Message)" }
+    }
+    $cfgCount = (Get-ChildItem $configDest -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total legacy configs: " + $cfgCount)
+} else {
+    Write-Host "   No legacy config source found"
+}
+
+# 5) Docs -> docs/legacy_docs
+Write-Host "`nSaving legacy docs..."
+$docsSource = Join-Path $preserveRoot "docs"
+if (Test-Path $docsSource) {
+    $docsDest = Join-Path $newSystemPath "docs\legacy_docs"
+    New-Item -ItemType Directory -Path $docsDest -Force | Out-Null
+    Copy-Item (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force -ErrorAction SilentlyContinue
+    $docsCount = (Get-ChildItem $docsDest -Recurse -File -ErrorAction SilentlyContinue).Count
+    Write-Host ("   Total legacy docs: " + $docsCount)
+} else {
+    Write-Host "   No legacy docs source found"
+}
+
+Write-Host "`n========================================"
+Write-Host "INTEGRATION COMPLETE"
+Write-Host "========================================`n"
+
+Write-Host "Destinations and counts:"
+Write-Host (" - 01_input: " + ((Get-ChildItem (Join-Path $newSystemPath "01_input") -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - 03_knowledge_base: " + ((Get-ChildItem (Join-Path $newSystemPath "03_knowledge_base") -Filter "*.db" -ErrorAction SilentlyContinue).Count))
+Write-Host (" - 04_archive/from_old_desktop_" + $timestamp + ": " + ((Get-ChildItem (Join-Path $newSystemPath ("04_archive\from_old_desktop_" + $timestamp)) -Recurse -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - docs/legacy_configs: " + ((Get-ChildItem (Join-Path $newSystemPath "docs\legacy_configs") -File -ErrorAction SilentlyContinue).Count))
+Write-Host (" - docs/legacy_docs: " + ((Get-ChildItem (Join-Path $newSystemPath "docs\legacy_docs") -Recurse -File -ErrorAction SilentlyContinue).Count))
+
+if ($errors.Count -gt 0) {
+    Write-Host "`nErrors encountered:"
+    $errors | ForEach-Object { Write-Host ("   - " + $_) }
+} else {
+    Write-Host "`nNo errors encountered." }
+
+Write-Host "`nNew System Summary:"
+Write-Host ("   Location: " + $newSystemPath)
+$inputCount = (Get-ChildItem (Join-Path $newSystemPath "01_input") -File -ErrorAction SilentlyContinue).Count
+$kbCount = (Get-ChildItem (Join-Path $newSystemPath "03_knowledge_base") -Filter "*.db" -ErrorAction SilentlyContinue).Count
+$archiveFiles = (Get-ChildItem (Join-Path $newSystemPath "04_archive") -Recurse -File -ErrorAction SilentlyContinue).Count
+Write-Host ("   Files in input: " + $inputCount)
+Write-Host ("   Knowledge bases: " + $kbCount)
+Write-Host ("   Archived files: " + $archiveFiles)
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE5_INTEGRATE.ps1"
+```
+
+---
+
+**User**
+
+C:\Dev\ClaudeExportFixer>python -c "import start_watchdog, sys; sys.stdout.write(getattr(start_watchdog,'__version__','unknown'))"
+✅ Loaded configuration from C:\Dev\ClaudeExportFixer\config.json
+2.0.0
+C:\Dev\ClaudeExportFixer>pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE5_INTEGRATE.ps1"
+
+========================================
+INTEGRATING PRESERVED DATA
+========================================
+
+Moving unprocessed files... Copied: README.md
+   Copied: scrpa_time_power_bi_full transcript.txt
+   Total in 01_input: 3
+
+Moving databases... Copied DB: Chunker_chunker_tracking.db
+   Total DBs in 03_knowledge_base: 1
+
+Organizing processed outputs...
+   Total processed archived: 1
+
+Saving legacy configs...
+   No legacy config source found
+
+Saving legacy docs...
+   Total legacy docs: 8
+
+========================================
+INTEGRATION COMPLETE
+========================================
+
+Destinations and counts:
+ - 01_input: 3
+ - 03_knowledge_base: 1
+ - 04_archive/from_old_desktop_20251029_144807: 1
+ - docs/legacy_configs: 0
+ - docs/legacy_docs: 8
+
+No errors encountered. New System Summary:
+   Location: C:\Dev\ClaudeExportFixer
+   Files in input: 3
+   Knowledge bases: 1
+   Archived files: 1
+
+---
+
+**Cursor**
+
+I'll run Phase 6 final verification now: import checks, config check, version check, and directory structure verification, then report results. PowerShell’s inline quoting tripped on the backticks. Please run this Phase 6 verification script locally. Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE6_VERIFY.ps1
+
+```powershell
+Write-Host "`n========================================"
+Write-Host "FINAL VERIFICATION"
+Write-Host "========================================`n"
+
+Push-Location "C:\Dev\ClaudeExportFixer"
+.\venv\Scripts\Activate.ps1
+
+# 1) Imports
+Write-Host "1) Testing imports..."
+python -c "import start_watchdog, chunker_engine, file_processors; print('   OK: imports')"
+
+# 2) Configuration
+Write-Host "`n2) Testing configuration..."
+python -c "import json; c=json.load(open('config.json','r',encoding='utf-8')); print('   OK: config loaded, formats:', len(c.get('file_processing',{}).get('supported_extensions',[])))"
+
+# 3) Version
+Write-Host "`n3) Checking version..."
+python -c "import start_watchdog, sys; sys.stdout.write('   Version: ' + getattr(start_watchdog,'__version__','unknown'))"
+
+# 4) Directory structure
+Write-Host "`n`n4) Verifying directory structure..."
+$required = @('01_input','02_output','03_knowledge_base','04_archive','docs')
+foreach ($d in $required) {
+    if (Test-Path $d) { Write-Host ("   OK: " + $d) } else { Write-Host ("   MISSING: " + $d) }
+}
+
+# Counts
+Write-Host "`nCounts:"
+$inputCount = (Get-ChildItem "01_input" -File -ErrorAction SilentlyContinue).Count
+$kbCount = (Get-ChildItem "03_knowledge_base" -Filter "*.db" -ErrorAction SilentlyContinue).Count
+$archiveFiles = (Get-ChildItem "04_archive" -Recurse -File -ErrorAction SilentlyContinue).Count
+Write-Host ("   Files in input: " + $inputCount)
+Write-Host ("   Knowledge bases: " + $kbCount)
+Write-Host ("   Archived files: " + $archiveFiles)
+
+Pop-Location
+```
+
+Run it:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE6_VERIFY.ps1"
+```
+
+Please paste back:
+- Imports, config, and version lines
+- Directory structure lines
+- Counts section
+
+I’ll mark Phase 6 complete and provide the short final summary. ```powershell
+Write-Host "`n========================================"
+Write-Host "FINAL VERIFICATION"
+Write-Host "========================================`n"
+
+Push-Location "C:\Dev\ClaudeExportFixer"
+.\venv\Scripts\Activate.ps1
+
+# 1) Imports
+Write-Host "1) Testing imports..."
+python -c "import start_watchdog, chunker_engine, file_processors; print('   OK: imports')"
+
+# 2) Configuration
+Write-Host "`n2) Testing configuration..."
+python -c "import json; c=json.load(open('config.json','r',encoding='utf-8')); print('   OK: config loaded, formats:', len(c.get('file_processing',{}).get('supported_extensions',[])))"
+
+# 3) Version
+Write-Host "`n3) Checking version..."
+python -c "import start_watchdog, sys; sys.stdout.write('   Version: ' + getattr(start_watchdog,'__version__','unknown'))"
+
+# 4) Directory structure
+Write-Host "`n`n4) Verifying directory structure..."
+$required = @('01_input','02_output','03_knowledge_base','04_archive','docs')
+foreach ($d in $required) {
+    if (Test-Path $d) { Write-Host ("   OK: " + $d) } else { Write-Host ("   MISSING: " + $d) }
+}
+
+# Counts
+Write-Host "`nCounts:"
+$inputCount = (Get-ChildItem "01_input" -File -ErrorAction SilentlyContinue).Count
+$kbCount = (Get-ChildItem "03_knowledge_base" -Filter "*.db" -ErrorAction SilentlyContinue).Count
+$archiveFiles = (Get-ChildItem "04_archive" -Recurse -File -ErrorAction SilentlyContinue).Count
+Write-Host ("   Files in input: " + $inputCount)
+Write-Host ("   Knowledge bases: " + $kbCount)
+Write-Host ("   Archived files: " + $archiveFiles)
+
+Pop-Location
+```
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\PHASE6_VERIFY.ps1"
+```
+
+---
+
+**User**
+
+
+========================================
+FINAL VERIFICATION
+========================================
+
+1) Testing imports...
+✅ Loaded configuration from C:\Dev\ClaudeExportFixer\config.json
+   OK: imports
+
+2) Testing configuration...
+   OK: config loaded, formats: 15
+
+3) Checking version...
+✅ Loaded configuration from C:\Dev\ClaudeExportFixer\config.json
+   Version: 2.0.0
+
+4) Verifying directory structure...
+   OK: 01_input
+   OK: 02_output
+   OK: 03_knowledge_base
+   OK: 04_archive
+   OK: docs
+
+Counts:
+   Files in input: 3
+   Knowledge bases: 1
+   Archived files: 1
+
+---
+
+**Cursor**
+
+All verification checks passed; wrapping up the cleanup. - Clone: SUCCESS
+- Venv: CREATED
+- Deps: INSTALLED
+- Version: 2.0.0
+- Structure: `01_input`, `02_output`, `03_knowledge_base`, `04_archive`, `docs` all present
+- Counts: input=3, knowledge bases=1, archived files=1
+
+- Your desktop is now consolidated to `C:\Dev\ClaudeExportFixer` with v2.0.0 installed and your preserved data integrated. ---
+
+**User**
+
+# 🎉 **DESKTOP CLEANUP COMPLETE! ** 🎉
+
+
+## 🚀 Quick Start - Using Your New System
+
+### Option 1: Process Files Manually
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python process_workflow.py
+```
+
+### Option 2: Start Watchdog (Auto-processing)
+```powershell
+cd C:\Dev\ClaudeExportFixer
+.\venv\Scripts\Activate.ps1
+python start_watchdog.py --build-kb --incremental --verbose
+```
+*Just drop files in `01_input\` and they'll process automatically! *
+
+### Option 3: Build Knowledge Base
+```powershell
+python start_watchdog.py --build-kb --incremental
+```
+
+---
+
+## 📂 Your New System Structure
+
+```
+C:\Dev\ClaudeExportFixer\
+├── 01_input\           [3 files ready to process]
+├── 02_output\          [Processed exports go here]
+├── 03_knowledge_base\  [1 database integrated]
+├── 04_archive\         [1 historical file preserved]
+├── docs\
+│   ├── legacy_configs\ [Old configs for reference]
+│   └── legacy_docs\    [Old documentation]
+├── venv\               [Python virtual environment]
+├── config.json
+├── chunker_engine.py
+├── file_processors.py
+├── start_watchdog.py
+└── README.md
+```
+
+---
+
+## 💾 Archive Locations (Keep for 60 Days)
+
+1. **Data Backup:** `C:\Desktop_Chunker_Backup_20251029_144807`
+   - All preserved data before cleanup
+   
+2. **Old Directories:** `C:\Old_Desktop_Chunkers_Archive_20251029_145528`
+   - Complete old directory structures
+
+**⚠️ Keep both for 60 days, then delete after verifying everything works! **
+
+---
+
+## 🎯 What Changed? ### Before
+- ❌ 5 scattered chunker directories
+- ❌ Outdated code (pre-v2.0.0)
+- ❌ Disorganized data
+- ❌ Confusion about which to use
+
+### After
+- ✅ 1 clean, unified directory
+- ✅ Latest v2.0.0 from GitHub
+- ✅ All data preserved and organized
+- ✅ Ready to use immediately
+
+---
+
+## 🧹 Now Do the Same on Your Laptop! Your **laptop** still has the old directories too. When you're ready, use the same cleanup process:
+
+1. Open the prompt: `C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\CURSOR_DESKTOP_CLEANUP_PROMPT.md`
+2. Modify the directory list for laptop-specific paths
+3. Run through the same 6 phases
+4. You'll have both machines clean and synchronized! ## 📊 Success Stats
+
+- **Directories cleaned:** 5
+- **Data preserved:** 13 files, 0.21 MB
+- **Total space reclaimed:** ~96 MB
+- **Time to completion:** ~10-15 minutes
+- **Data lost:** 0 files ✅
+
+---
+
+## 🎉 **Your Desktop is Ready! **
+
+You now have:
+- ✅ The latest v2.0.0 unified system
+- ✅ 13 file formats supported
+- ✅ Semantic chunking ready to use
+- ✅ Knowledge base building
+- ✅ Automatic file monitoring
+- ✅ All your data preserved
+
+**Go ahead and start using it! ** 🚀
+
+Drop files in `01_input\` or run the watchdog service and watch it work! ✨
+
+---
+
+**Cursor**
+
+Fantastic — everything is set. - System ready at: C:\Dev\ClaudeExportFixer
+- Version: 2.0.0
+- Input/KB/Archive counts: 3 / 1 / 1
+- Backups to keep 60 days: C:\Desktop_Chunker_Backup_20251029_144807, C:\Old_Desktop_Chunkers_Archive_20251029_145528
+
+Quick start:
+- Manual: activate venv, run process_workflow.py
+- Watchdog: start_watchdog.py --build-kb --incremental --verbose
+- Drop files in 01_input\ for auto-processing
+
+Nice work — desktop is clean, unified, and ready. ---
+
+**User**
+
+Please run a comprehensive verification check to confirm the desktop cleanup was successful. Run these PowerShell commands and show me the results:
+
+# 1. Check C:\ drive for chunker-related directories
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔍 CHECKING C:\ DRIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$cDriveChecks = @(
+    "C:\_chunker",
+    "C:\Desktop_Chunker_Backup_20251029_144807",
+    "C:\Old_Desktop_Chunkers_Archive_20251029_145528",
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript"
+)
+
+foreach ($path in $cDriveChecks) {
+    if (Test-Path $path) {
+        Write-Host "✅ EXISTS: $path" -ForegroundColor Green
+        
+        # Show what's inside if it's an archive or backup
+        if ($path -like "*Archive*" -or $path -like "*Backup*") {
+            $items = Get-ChildItem $path -Directory -ErrorAction SilentlyContinue
+            if ($items) {
+                Write-Host "   Contents:" -ForegroundColor Yellow
+                $items | ForEach-Object { Write-Host "      - $($_.Name)" -ForegroundColor Gray }
+            }
+        }
+        
+        # Check if it's the new v2.0.0 system
+        if ($path -eq "C:\Dev\ClaudeExportFixer") {
+            if (Test-Path "$path\chunker_engine.py") {
+                Write-Host "   ✅ Contains v2.0.0 unified system files" -ForegroundColor Cyan
+            }
+        }
+    } else {
+        Write-Host "❌ NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+# 2. Check C:\Users\carucci_r\ for chunker-related directories
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔍 CHECKING C:\Users\carucci_r\" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$userChecks = @(
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+foreach ($path in $userChecks) {
+    if (Test-Path $path) {
+        Write-Host "✅ EXISTS: $path" -ForegroundColor Green
+    } else {
+        Write-Host "❌ NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+# 3. Verify the archive contains the old _chunker
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔍 VERIFYING OLD DIRECTORIES IN ARCHIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$archivePath = "C:\Old_Desktop_Chunkers_Archive_20251029_145528"
+if (Test-Path $archivePath) {
+    Write-Host "✅ Archive exists at: $archivePath" -ForegroundColor Green
+    Write-Host "`nArchived directories:" -ForegroundColor Yellow
+    Get-ChildItem $archivePath -Directory | ForEach-Object {
+        Write-Host "   📦 $($_.Name)" -ForegroundColor Cyan
+        
+        # Check if this is the old _chunker
+        if ($_.Name -like "*_chunker*") {
+            Write-Host "      ⭐ This is your old C:\_chunker directory (safely archived)" -ForegroundColor Magenta
+        }
+    }
+} else {
+    Write-Host "❌ Archive not found!" -ForegroundColor Red
+}
+
+# 4. Verify new system has merged functionality
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "🔍 VERIFYING NEW v2.0.0 SYSTEM" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$newSystem = "C:\Dev\ClaudeExportFixer"
+if (Test-Path $newSystem) {
+    Write-Host "✅ New system exists at: $newSystem" -ForegroundColor Green
+    
+    $requiredFiles = @(
+        "config.json",
+        "chunker_engine.py",
+        "file_processors.py", 
+        "start_watchdog.py",
+        "patch_conversations.py",
+        "claude_knowledge_base.py"
+    )
+    
+    Write-Host "`nChecking for merged functionality:" -ForegroundColor Yellow
+    foreach ($file in $requiredFiles) {
+        if (Test-Path "$newSystem\$file") {
+            Write-Host "   ✅ $file" -ForegroundColor Green
+        } else {
+            Write-Host "   ❌ Missing: $file" -ForegroundColor Red
+        }
+    }
+    
+    # Check version
+    Push-Location $newSystem
+    .\venv\Scripts\Activate.ps1
+    Write-Host "`nVersion check:" -ForegroundColor Yellow
+    python -c "import start_watchdog; print(f'   ✅ ClaudeExportFixer v{start_watchdog.__version__}')" 2>$null
+    Pop-Location
+} else {
+    Write-Host "❌ New system not found!" -ForegroundColor Red
+}
+
+# 5. Summary
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "📊 CLEANUP VERIFICATION SUMMARY" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+Write-Host "EXPECTED STATE (What SHOULD be):" -ForegroundColor Yellow
+Write-Host "✅ C:\_chunker - REMOVED (archived)" -ForegroundColor White
+Write-Host "✅ Old directories - REMOVED (archived)" -ForegroundColor White
+Write-Host "✅ C:\Desktop_Chunker_Backup_* - EXISTS (keep 60 days)" -ForegroundColor White
+Write-Host "✅ C:\Old_Desktop_Chunkers_Archive_* - EXISTS (keep 60 days)" -ForegroundColor White
+Write-Host "✅ C:\Dev\ClaudeExportFixer - EXISTS (v2.0.0 with merged functionality)" -ForegroundColor White
+
+Write-Host "`nYour old C:\_chunker is safely stored in the archive folder!" -ForegroundColor Cyan
+Write-Host "It was moved, not deleted. You can restore it if needed." -ForegroundColor Cyan
+
+---
+
+**Cursor**
+
+I'll run the comprehensive verification by writing your PowerShell block to a temporary script and executing it to avoid inline quoting issues. Running inline with emoji and f-strings caused parsing issues. Please run the verification locally using this cleaned script (no emojis, no f-strings). Save as: C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\VERIFY_CLEANUP.ps1
+
+```powershell
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "CHECKING C:\ DRIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$cDriveChecks = @(
+    "C:\_chunker",
+    "C:\Desktop_Chunker_Backup_20251029_144807",
+    "C:\Old_Desktop_Chunkers_Archive_20251029_145528",
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript"
+)
+
+foreach ($path in $cDriveChecks) {
+    if (Test-Path $path) {
+        Write-Host "EXISTS: $path" -ForegroundColor Green
+        
+        if ($path -like "*Archive*" -or $path -like "*Backup*") {
+            $items = Get-ChildItem $path -Directory -ErrorAction SilentlyContinue
+            if ($items) {
+                Write-Host "   Contents:" -ForegroundColor Yellow
+                $items | ForEach-Object { Write-Host "      - $($_.Name)" -ForegroundColor Gray }
+            }
+        }
+        
+        if ($path -eq "C:\Dev\ClaudeExportFixer") {
+            if (Test-Path "$path\chunker_engine.py") {
+                Write-Host "   Contains v2.0.0 unified system files" -ForegroundColor Cyan
+            }
+        }
+    } else {
+        Write-Host "NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "CHECKING C:\Users\carucci_r\" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$userChecks = @(
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+foreach ($path in $userChecks) {
+    if (Test-Path $path) {
+        Write-Host "EXISTS: $path" -ForegroundColor Green
+    } else {
+        Write-Host "NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "VERIFYING OLD DIRECTORIES IN ARCHIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$archivePath = "C:\Old_Desktop_Chunkers_Archive_20251029_145528"
+if (Test-Path $archivePath) {
+    Write-Host "Archive exists at: $archivePath" -ForegroundColor Green
+    Write-Host "`nArchived directories:" -ForegroundColor Yellow
+    Get-ChildItem $archivePath -Directory | ForEach-Object {
+        Write-Host "   $($_.Name)" -ForegroundColor Cyan
+        if ($_.Name -like "*_chunker*") {
+            Write-Host "      This is your old C:\_chunker directory (archived)" -ForegroundColor Magenta
+        }
+    }
+} else {
+    Write-Host "Archive not found!" -ForegroundColor Red
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "VERIFYING NEW v2.0.0 SYSTEM" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$newSystem = "C:\Dev\ClaudeExportFixer"
+if (Test-Path $newSystem) {
+    Write-Host "New system exists at: $newSystem" -ForegroundColor Green
+    
+    $requiredFiles = @(
+        "config.json",
+        "chunker_engine.py",
+        "file_processors.py", 
+        "start_watchdog.py",
+        "patch_conversations.py",
+        "claude_knowledge_base.py"
+    )
+    
+    Write-Host "`nChecking for merged functionality:" -ForegroundColor Yellow
+    foreach ($file in $requiredFiles) {
+        if (Test-Path "$newSystem\$file") {
+            Write-Host "   $file" -ForegroundColor Green
+        } else {
+            Write-Host "   Missing: $file" -ForegroundColor Red
+        }
+    }
+    
+    Push-Location $newSystem
+    .\venv\Scripts\Activate.ps1
+    Write-Host "`nVersion check:" -ForegroundColor Yellow
+    python -c "import start_watchdog; print('   ClaudeExportFixer v' + getattr(start_watchdog,'__version__','unknown'))" 2>$null
+    Pop-Location
+} else {
+    Write-Host "New system not found!" -ForegroundColor Red
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "CLEANUP VERIFICATION SUMMARY" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+Write-Host "EXPECTED STATE (What SHOULD be):" -ForegroundColor Yellow
+Write-Host "C:\_chunker - REMOVED (archived)" -ForegroundColor White
+Write-Host "Old directories - REMOVED (archived)" -ForegroundColor White
+Write-Host "C:\Desktop_Chunker_Backup_* - EXISTS (keep 60 days)" -ForegroundColor White
+Write-Host "C:\Old_Desktop_Chunkers_Archive_* - EXISTS (keep 60 days)" -ForegroundColor White
+Write-Host "C:\Dev\ClaudeExportFixer - EXISTS (v2.0.0 with merged functionality)" -ForegroundColor White
+
+Write-Host "`nYour old C:\_chunker is safely stored in the archive folder." -ForegroundColor Cyan
+Write-Host "It was moved, not deleted. You can restore it if needed." -ForegroundColor Cyan
+```
+
+Run:
+```powershell
+pwsh -ExecutionPolicy Bypass -File "C:\Users\carucci_r\OneDrive - City of Hackensack\00_dev\VERIFY_CLEANUP.ps1"
+```
+
+Please paste the output here. ```powershell
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "CHECKING C:\ DRIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$cDriveChecks = @(
+    "C:\_chunker",
+    "C:\Desktop_Chunker_Backup_20251029_144807",
+    "C:\Old_Desktop_Chunkers_Archive_20251029_145528",
+    "C:\Dev\ClaudeExportFixer",
+    "C:\Dev\Chunker",
+    "C:\Dev\Chat_Log_Transcript"
+)
+
+foreach ($path in $cDriveChecks) {
+    if (Test-Path $path) {
+        Write-Host "EXISTS: $path" -ForegroundColor Green
+        
+        if ($path -like "*Archive*" -or $path -like "*Backup*") {
+            $items = Get-ChildItem $path -Directory -ErrorAction SilentlyContinue
+            if ($items) {
+                Write-Host "   Contents:" -ForegroundColor Yellow
+                $items | ForEach-Object { Write-Host "      - $($_.Name)" -ForegroundColor Gray }
+            }
+        }
+        
+        if ($path -eq "C:\Dev\ClaudeExportFixer") {
+            if (Test-Path "$path\chunker_engine.py") {
+                Write-Host "   Contains v2.0.0 unified system files" -ForegroundColor Cyan
+            }
+        }
+    } else {
+        Write-Host "NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "CHECKING C:\Users\carucci_r\" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$userChecks = @(
+    "C:\Users\carucci_r\chat_log_chunker_v1",
+    "C:\Users\carucci_r\Documents\chat_log_processor",
+    "C:\Users\carucci_r\Documents\chat_log_chunker",
+    "C:\Users\carucci_r\Documents\chat_watcher",
+    "C:\Users\carucci_r\Documents\chunker"
+)
+
+foreach ($path in $userChecks) {
+    if (Test-Path $path) {
+        Write-Host "EXISTS: $path" -ForegroundColor Green
+    } else {
+        Write-Host "NOT FOUND: $path" -ForegroundColor Red
+    }
+}
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "VERIFYING OLD DIRECTORIES IN ARCHIVE" -ForegroundColor Green
+Write-Host "========================================`n" -ForegroundColor Cyan
+
+$archivePath = "C:\Old_Desktop_Chunkers_Archive_20251029_145528"
+if (Test-Path $archivePath) {
+    Write-Host "Archive exists at: $archivePath" -ForegroundColor Green
+    Write-Host "`nArchived directories:" -ForegroundColor Yellow
+    Get-ChildItem $archivePath -Directory | ForEach-Object {
+        Write-Host "   $($_.Name)" -ForegroundColor Cyan
+        if ($_.Name -like "*_chunker*") {
+            Write-Host "      This is your old C:\_chunker directory (archived)" -ForegroundColor Magenta
+        }
+    }
+} else {
+    Write-Host "Archive not found!"

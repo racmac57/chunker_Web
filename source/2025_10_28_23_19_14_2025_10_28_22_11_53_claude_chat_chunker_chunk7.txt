@@ -1,0 +1,765 @@
+try:
+            # Set logging level based on verbose/quiet
+            logger = logging.getLogger()
+            if self.quiet_var.get():
+                logger.setLevel(logging.ERROR)
+            elif self.verbose_var.get():
+                logger.setLevel(logging.DEBUG)
+            else:
+                logger.setLevel(logging.INFO)
+            
+            # Get projects path (only if it actually exists)
+            projects = None
+            projects_str = self.projects_path.get()
+            if projects_str and projects_str != "No projects.json found" and Path(projects_str).exists():
+                projects = projects_str
+            
+            # Call process_file
+            exit_code = process_file(
+                self.input_path.get(),
+                self.output_path.get(),
+                projects_path=projects,
+                zip_output=self.zip_output_var.get(),
+                stream=self.stream_var.get(),
+                pretty=self.pretty_var.get(),
+                strict=self.strict_var.get(),
+                verbose=self.verbose_var.get(),
+                quiet=self.quiet_var.get(),
+                no_backup=self.no_backup_var.get(),
+                no_merge_to_files=self.no_merge_to_files_var.get(),
+                keep_invalid=self.keep_invalid_var.get()
+            )
+            
+            # Report completion
+            if exit_code == 0:
+                self.last_output_path = self.output_path.get()
+                output_file = Path(self.output_path.get())
+                report_path = output_file.with_name(output_file.stem + '_report.csv')
+                
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✓ SUCCESS! Exit code: {exit_code}")
+                self.log_queue.put(f"Output file: {self.last_output_path}")
+                self.log_queue.put(f"Report file: {report_path}")
+                self.log_queue.put("="*60)
+                
+                # Enable "Open Output" button
+                self.root.after(0, lambda: self.open_output_button.config(state='normal'))
+            else:
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✗ FAILED! Exit code: {exit_code}")
+                self.log_queue.put("="*60)
+        
+        except Exception as e:
+            self.log_queue.put(f"\n✗ ERROR: {e}")
+            import traceback
+            self.log_queue.put(traceback.format_exc())
+        
+        finally:
+            # Stop progress bar and re-enable UI
+            self.root.after(0, self.progress.stop)
+            self.processing = False
+            self.root.after(0, self.update_button_states)
+    
+    def open_output(self) -> None:
+        """Open the output file with the default application.""" if not self.last_output_path:
+            return
+        
+        output_path = Path(self.last_output_path)
+        if not output_path.exists():
+            messagebox.showerror("Error", f"Output file not found: {output_path}")
+            return
+        
+        try:
+            # Windows
+            os.startfile(str(output_path))
+        except AttributeError:
+            # macOS/Linux
+            import subprocess
+            try:
+                subprocess.run(['open', str(output_path)], check=True)  # macOS
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                try:
+                    subprocess.run(['xdg-open', str(output_path)], check=True)  # Linux
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    messagebox.showinfo("Info", f"Please open manually: {output_path}")
+        except Exception as e:
+            error_msg = f"Failed to open output: {e}"
+            logging.error(error_msg)
+            messagebox.showerror("Error", error_msg)
+
+
+def launch_gui() -> None:
+    """Launch the GUI application.""" root = tk.Tk()
+    app = ClaudeExportFixerGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    launch_gui()
+
+
+```
+
+Now let me add headless safety to the `launch_gui` function:
+
+```python
+#!/usr/bin/env python3
+"""
+Tkinter GUI for ClaudeExportFixer. Provides a simple graphical interface for processing Claude conversation exports.
+""" import logging
+import os
+import queue
+import threading
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+from typing import Optional
+
+from patch_conversations import __version__, process_file
+
+
+def _suggest_output_path(input_path: str, zip_output: bool) -> str:
+    """
+    Generate output path suggestion based on input path and zip_output flag. Args:
+        input_path: Input file path
+        zip_output: Whether ZIP output is requested
+        
+    Returns:
+        Suggested output path with _patched suffix
+    """
+    input_file = Path(input_path)
+    ext = ".zip" if zip_output else ".json"
+    suggested = input_file.parent / (input_file.stem + "_patched" + ext)
+    return str(suggested)
+
+
+class QueueHandler(logging.Handler):
+    """Custom logging handler that sends messages to a queue.""" def __init__(self, log_queue: queue.Queue):
+        super().__init__()
+        self.log_queue = log_queue
+    
+    def emit(self, record: logging.LogRecord) -> None:
+        self.log_queue.put(self.format(record))
+
+
+class ClaudeExportFixerGUI:
+    """Main GUI application class.""" def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title(f"ClaudeExportFixer v{__version__}")
+        self.root.geometry("800x700")
+        self.root.resizable(True, True)
+        
+        # Variables
+        self.input_path = tk.StringVar()
+        self.output_path = tk.StringVar()
+        self.projects_path = tk.StringVar()
+        
+        self.zip_output_var = tk.BooleanVar(value=False)
+        self.stream_var = tk.BooleanVar(value=False)
+        self.pretty_var = tk.BooleanVar(value=True)  # Default ON
+        self.strict_var = tk.BooleanVar(value=False)
+        self.quiet_var = tk.BooleanVar(value=False)
+        self.verbose_var = tk.BooleanVar(value=False)
+        self.no_backup_var = tk.BooleanVar(value=False)
+        self.no_merge_to_files_var = tk.BooleanVar(value=False)
+        self.keep_invalid_var = tk.BooleanVar(value=False)
+        
+        self.processing = False
+        self.last_output_path: Optional[str] = None
+        self.log_queue: queue.Queue = queue.Queue()
+        
+        self.setup_ui()
+        self.setup_logging()
+        self.poll_log_queue()
+    
+    def setup_ui(self) -> None:
+        """Set up the user interface.""" # Main frame with padding
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        
+        row = 0
+        
+        # Input file section
+        ttk.Label(main_frame, text="Input File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.input_path, width=50).grid(
+            row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5
+        )
+        ttk.Button(main_frame, text="Browse...", command=self.browse_input).grid(
+            row=row, column=2, pady=5
+        )
+        row += 1
+        
+        # Output file section
+        ttk.Label(main_frame, text="Output File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.output_path, width=50).grid(
+            row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5
+        )
+        ttk.Button(main_frame, text="Save as...", command=self.browse_output).grid(
+            row=row, column=2, pady=5
+        )
+        row += 1
+        
+        # Projects file section (read-only, auto-detected)
+        ttk.Label(main_frame, text="Projects File:").grid(row=row, column=0, sticky=tk.W, pady=5)
+        projects_entry = ttk.Entry(main_frame, textvariable=self.projects_path, width=50, state='readonly')
+        projects_entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5, padx=5)
+        ttk.Label(main_frame, text="(auto-detected)").grid(row=row, column=2, pady=5)
+        row += 1
+        
+        # Separator
+        ttk.Separator(main_frame, orient='horizontal').grid(
+            row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10
+        )
+        row += 1
+        
+        # Options section
+        ttk.Label(main_frame, text="Options:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=row, column=0, columnspan=3, sticky=tk.W, pady=5
+        )
+        row += 1
+        
+        # Create two-column layout for checkboxes
+        options_frame = ttk.Frame(main_frame)
+        options_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        
+        # Left column
+        left_col = ttk.Frame(options_frame)
+        left_col.grid(row=0, column=0, sticky=(tk.W, tk.N), padx=(0, 20))
+        
+        ttk.Checkbutton(left_col, text="ZIP output", variable=self.zip_output_var,
+                       command=self.on_zip_output_changed).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Stream (large files)", variable=self.stream_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Pretty print", variable=self.pretty_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="Strict mode", variable=self.strict_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(left_col, text="No backup (ZIP)", variable=self.no_backup_var).pack(anchor=tk.W, pady=2)
+        
+        # Right column
+        right_col = ttk.Frame(options_frame)
+        right_col.grid(row=0, column=1, sticky=(tk.W, tk.N))
+        
+        ttk.Checkbutton(right_col, text="Verbose logging", variable=self.verbose_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="Quiet mode", variable=self.quiet_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="No merge to files", variable=self.no_merge_to_files_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(right_col, text="Keep invalid messages", variable=self.keep_invalid_var).pack(anchor=tk.W, pady=2)
+        
+        row += 1
+        
+        # Separator
+        ttk.Separator(main_frame, orient='horizontal').grid(
+            row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10
+        )
+        row += 1
+        
+        # Buttons section
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=row, column=0, columnspan=3, pady=10)
+        
+        self.run_button = ttk.Button(button_frame, text="Run", command=self.run_processing, width=15)
+        self.run_button.pack(side=tk.LEFT, padx=5)
+        
+        self.open_output_button = ttk.Button(
+            button_frame, text="Open Output", command=self.open_output, width=15, state='disabled'
+        )
+        self.open_output_button.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=self.root.quit, width=15).pack(side=tk.LEFT, padx=5)
+        
+        row += 1
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
+        self.progress.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        row += 1
+        
+        # Log output section
+        ttk.Label(main_frame, text="Log Output:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5)
+        )
+        row += 1
+        
+        # Text area with scrollbar
+        log_frame = ttk.Frame(main_frame)
+        log_frame.grid(row=row, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(row, weight=1)
+        
+        self.log_text = tk.Text(log_frame, height=15, width=80, wrap=tk.WORD, state='disabled')
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        scrollbar = ttk.Scrollbar(log_frame, orient='vertical', command=self.log_text.yview)
+        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.log_text['yscrollcommand'] = scrollbar.set
+        
+        # Update button states
+        self.update_button_states()
+    
+    def setup_logging(self) -> None:
+        """Set up logging to queue.""" self.queue_handler = QueueHandler(self.log_queue)
+        formatter = logging.Formatter('%(levelname)s: %(message)s')
+        self.queue_handler.setFormatter(formatter)
+        
+        # Get root logger and add our handler
+        logger = logging.getLogger()
+        logger.addHandler(self.queue_handler)
+        logger.setLevel(logging.INFO)
+    
+    def poll_log_queue(self) -> None:
+        """Poll the log queue and update the text widget.""" while True:
+            try:
+                message = self.log_queue.get_nowait()
+                self.append_log(message + '\n')
+            except queue.Empty:
+                break
+        
+        # Schedule next poll
+        self.root.after(50, self.poll_log_queue)
+    
+    def append_log(self, message: str) -> None:
+        """Append message to log text area.""" self.log_text.config(state='normal')
+        self.log_text.insert(tk.END, message)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+    
+    def browse_input(self) -> None:
+        """Open file dialog for input file.""" filename = filedialog.askopenfilename(
+            title="Select Input File",
+            filetypes=[
+                ("Supported files", "*.json *.zip"),
+                ("JSON files", "*.json"),
+                ("ZIP files", "*.zip"),
+                ("All files", "*. *")
+            ]
+        )
+        
+        if filename:
+            self.input_path.set(filename)
+            self.update_projects_path()
+            self.suggest_output_path()
+            self.update_button_states()
+    
+    def browse_output(self) -> None:
+        """Open file dialog for output file.""" # Determine default extension based on zip_output checkbox
+        if self.zip_output_var.get():
+            default_ext = ".zip"
+            filetypes = [("ZIP files", "*.zip"), ("All files", "*. *")]
+        else:
+            default_ext = ".json"
+            filetypes = [("JSON files", "*.json"), ("All files", "*. *")]
+        
+        # Get initial filename
+        initial_file = ""
+        if self.input_path.get():
+            input_path = Path(self.input_path.get())
+            initial_file = str(input_path.stem + "_patched" + default_ext)
+        
+        filename = filedialog.asksaveasfilename(
+            title="Save Output File",
+            initialfile=initial_file,
+            defaultextension=default_ext,
+            filetypes=filetypes
+        )
+        
+        if filename:
+            self.output_path.set(filename)
+            self.update_button_states()
+    
+    def update_projects_path(self) -> None:
+        """Auto-detect projects.json next to input file.""" if not self.input_path.get():
+            self.projects_path.set("No input file selected")
+            return
+        
+        input_file = Path(self.input_path.get())
+        projects_file = input_file.parent / 'projects.json'
+        
+        if projects_file.exists():
+            self.projects_path.set(str(projects_file))
+        else:
+            self.projects_path.set("No projects.json found")
+    
+    def suggest_output_path(self) -> None:
+        """Suggest output path based on input and settings.""" if not self.input_path.get():
+            return
+        
+        suggested = _suggest_output_path(self.input_path.get(), self.zip_output_var.get())
+        self.output_path.set(suggested)
+    
+    def on_zip_output_changed(self) -> None:
+        """Handle zip-output checkbox change.""" # Update output path extension if it was auto-suggested
+        if self.output_path.get():
+            output_path = Path(self.output_path.get())
+            if output_path.stem.endswith("_patched"):
+                new_ext = ".zip" if self.zip_output_var.get() else ".json"
+                new_path = output_path.with_suffix(new_ext)
+                self.output_path.set(str(new_path))
+    
+    def update_button_states(self) -> None:
+        """Update button enabled/disabled states based on current state.""" # Check if we can run
+        can_run = False
+        
+        if self.input_path.get() and self.output_path.get():
+            input_file = Path(self.input_path.get())
+            output_file = Path(self.output_path.get())
+            
+            # Check input exists
+            if input_file.exists():
+                # Check output directory is writable
+                output_dir = output_file.parent
+                if output_dir.exists() and os.access(output_dir, os.W_OK):
+                    can_run = True
+        
+        # Update run button
+        if self.processing:
+            self.run_button.config(state='disabled')
+        else:
+            self.run_button.config(state='normal' if can_run else 'disabled')
+    
+    def run_processing(self) -> None:
+        """Start processing in a background thread.""" if self.processing:
+            return
+        
+        self.processing = True
+        self.last_output_path = None
+        self.update_button_states()
+        self.open_output_button.config(state='disabled')
+        
+        # Clear log
+        self.log_text.config(state='normal')
+        self.log_text.delete('1.0', tk.END)
+        self.log_text.config(state='disabled')
+        
+        # Start progress bar
+        self.progress.start(10)
+        
+        # Start processing thread
+        thread = threading.Thread(target=self.process_thread, daemon=True)
+        thread.start()
+    
+    def process_thread(self) -> None:
+        """Background thread for processing.""" try:
+            # Set logging level based on verbose/quiet
+            logger = logging.getLogger()
+            if self.quiet_var.get():
+                logger.setLevel(logging.ERROR)
+            elif self.verbose_var.get():
+                logger.setLevel(logging.DEBUG)
+            else:
+                logger.setLevel(logging.INFO)
+            
+            # Get projects path (only if it actually exists)
+            projects = None
+            projects_str = self.projects_path.get()
+            if projects_str and projects_str != "No projects.json found" and Path(projects_str).exists():
+                projects = projects_str
+            
+            # Call process_file
+            exit_code = process_file(
+                self.input_path.get(),
+                self.output_path.get(),
+                projects_path=projects,
+                zip_output=self.zip_output_var.get(),
+                stream=self.stream_var.get(),
+                pretty=self.pretty_var.get(),
+                strict=self.strict_var.get(),
+                verbose=self.verbose_var.get(),
+                quiet=self.quiet_var.get(),
+                no_backup=self.no_backup_var.get(),
+                no_merge_to_files=self.no_merge_to_files_var.get(),
+                keep_invalid=self.keep_invalid_var.get()
+            )
+            
+            # Report completion
+            if exit_code == 0:
+                self.last_output_path = self.output_path.get()
+                output_file = Path(self.output_path.get())
+                report_path = output_file.with_name(output_file.stem + '_report.csv')
+                
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✓ SUCCESS! Exit code: {exit_code}")
+                self.log_queue.put(f"Output file: {self.last_output_path}")
+                self.log_queue.put(f"Report file: {report_path}")
+                self.log_queue.put("="*60)
+                
+                # Enable "Open Output" button
+                self.root.after(0, lambda: self.open_output_button.config(state='normal'))
+            else:
+                self.log_queue.put("\n" + "="*60)
+                self.log_queue.put(f"✗ FAILED! Exit code: {exit_code}")
+                self.log_queue.put("="*60)
+        
+        except Exception as e:
+            self.log_queue.put(f"\n✗ ERROR: {e}")
+            import traceback
+            self.log_queue.put(traceback.format_exc())
+        
+        finally:
+            # Stop progress bar and re-enable UI
+            self.root.after(0, self.progress.stop)
+            self.processing = False
+            self.root.after(0, self.update_button_states)
+    
+    def open_output(self) -> None:
+        """Open the output file with the default application.""" if not self.last_output_path:
+            return
+        
+        output_path = Path(self.last_output_path)
+        if not output_path.exists():
+            messagebox.showerror("Error", f"Output file not found: {output_path}")
+            return
+        
+        try:
+            # Windows
+            os.startfile(str(output_path))
+        except AttributeError:
+            # macOS/Linux
+            import subprocess
+            try:
+                subprocess.run(['open', str(output_path)], check=True)  # macOS
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                try:
+                    subprocess.run(['xdg-open', str(output_path)], check=True)  # Linux
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    messagebox.showinfo("Info", f"Please open manually: {output_path}")
+        except Exception as e:
+            error_msg = f"Failed to open output: {e}"
+            logging.error(error_msg)
+            messagebox.showerror("Error", error_msg)
+
+
+def launch_gui() -> None:
+    """Launch the GUI application.""" try:
+        root = tk.Tk()
+    except Exception as e:
+        import sys
+        print(
+            "Could not initialize Tkinter (no display?). " "Use the CLI instead or run on a system with a display. ",
+            file=sys.stderr
+        )
+        return
+    
+    app = ClaudeExportFixerGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    launch_gui()
+
+
+```
+
+Now let me update the README to add the headless note and Open Output button mention:
+
+```markdown
+# ClaudeExportFixer
+
+Python CLI to normalize Claude/Claude.ai export JSON/ZIP for the osteele chat viewer. ## Quick start (Windows)
+```bat
+cd C:\Dev\ClaudeExportFixer
+scripts\windows\create_venv.bat
+```
+
+## GUI Mode
+
+Launch a graphical interface (requires Tkinter, included in Python stdlib):
+
+```bat
+py patch_conversations.py --gui
+```
+
+Or directly:
+
+```bat
+py gui.py
+```
+
+Or use the convenient batch script:
+
+```bat
+scripts\windows\run_gui.bat
+```
+
+- Select input (`conversations.json` or `.zip`) and output paths. - Check options (e.g., `--pretty` is on by default). - Click "Run" to process; logs appear in real-time. - On success, output and report paths are shown; click "Open Output" to view the output file in your default application. - If Tkinter cannot initialize (e.g., headless environment), use CLI or run on a system with a display. ## CLI Mode
+
+Process a JSON:
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py sample\conversations.example.json -o fixed.json --pretty
+```
+
+Process a ZIP (streaming):
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py export.zip -o export_patched.zip --zip-output --stream --pretty
+```
+
+Run tests:
+
+```bat
+scripts\windows\run_tests.bat
+```
+
+## Building Executables
+
+### CLI only
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe.bat
+```
+
+### GUI (windowed)
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile --windowed patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe_gui.bat
+```
+
+Output: `dist/patch_conversations.exe`. Run GUI with `--gui` flag. **Note:** No additional dependencies required; Tkinter is part of Python stdlib. ## Notes
+
+* `ijson` is optional but required for `--stream` support. * Tkinter (for GUI) is included in Python stdlib on Windows and macOS. * See `CHANGELOG.md` for version history and changes. * See `SUMMARY.md` for project overview. * See `.github/CONTRIBUTING.md` for contribution guidelines. ## Project Structure
+
+```
+ClaudeExportFixer/
+├── patch_conversations.py          # Main CLI script (v1.1.0)
+├── gui.py                          # Optional Tkinter GUI interface
+├── README.md                       # This file
+├── CHANGELOG.md                    # Version history and changes
+├── SUMMARY.md                      # Project overview
+├── requirements.txt                # Runtime dependencies (ijson, pytest)
+├── requirements-build.txt          # Build dependencies (pyinstaller)
+├── .gitignore                      # Git ignore rules
+│
+├── sample/                         # Example data files
+│   ├── conversations.example.json  # Sample conversation export
+│   └── projects.example.json       # Sample projects file
+│
+├── tests/                          # Test suite
+│   ├── test_smoke.py              # Basic smoke tests
+│   └── test_gui_import.py         # GUI import tests
+│
+├── scripts/windows/                # Windows automation scripts
+│   ├── create_venv.bat            # Setup virtual environment
+│   ├── run_tests.bat              # Run test suite
+│   ├── run_gui.bat                # Launch GUI
+│   ├── run_example_json.bat       # Process JSON example
+│   ├── run_example_zip_stream.bat # Process ZIP example
+│   ├── build_exe.bat              # Build CLI executable
+│   └── build_exe_gui.bat          # Build GUI executable
+│
+└── .github/                        # GitHub integration
+    ├── workflows/
+    │   ├── ci.yml                 # Continuous integration
+    │   └── release.yml            # Release automation
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.yml         # Bug report template
+    │   └── feature_request.yml    # Feature request template
+    ├── PULL_REQUEST_TEMPLATE.md   # PR template
+    └── CONTRIBUTING.md            # Contributing guidelines
+```
+
+## Key Files
+
+- **`patch_conversations.py`** - Main script with CLI and `--gui` flag
+- **`gui.py`** - Standalone Tkinter GUI (optional, stdlib only)
+- **`CHANGELOG.md`** - Track all project changes here
+- **`requirements.txt`** - Runtime dependencies (ijson, pytest)
+- **`requirements-build.txt`** - Build dependencies (pyinstaller)
+- **`.github/`** - GitHub integration (workflows, issue templates, contributing guide)
+
+```
+
+```markdown
+# ClaudeExportFixer
+
+Python CLI to normalize Claude/Claude.ai export JSON/ZIP for the osteele chat viewer. ## Quick start (Windows)
+```bat
+cd C:\Dev\ClaudeExportFixer
+scripts\windows\create_venv.bat
+```
+
+## GUI Mode
+
+Launch a graphical interface (requires Tkinter, included in Python stdlib):
+
+```bat
+py patch_conversations.py --gui
+```
+
+Or directly:
+
+```bat
+py gui.py
+```
+
+Or use the convenient batch script:
+
+```bat
+scripts\windows\run_gui.bat
+```
+
+- Select input (`conversations.json` or `.zip`) and output paths. - Check options (e.g., `--pretty` is on by default). - Click "Run" to process; logs appear in real-time. - On success, output and report paths are shown; click "Open Output" to view the output file in your default application. - If Tkinter cannot initialize (e.g., headless environment), use CLI or run on a system with a display. ## CLI Mode
+
+Process a JSON:
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py sample\conversations.example.json -o fixed.json --pretty
+```
+
+Process a ZIP (streaming):
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py export.zip -o export_patched.zip --zip-output --stream --pretty
+```
+
+Run tests:
+
+```bat
+scripts\windows\run_tests.bat
+```
+
+## Building Executables
+
+### CLI only
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe.bat
+```
+
+### GUI (windowed)
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile --windowed patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe_gui.bat
+```
+
+Output: `dist/patch_conversations.exe`. Run GUI with `--gui` flag. **Note:** No additional dependencies required; Tkinter is part of Python stdlib. For GUI-only launch without console on Windows, build with `--windowed` and run `patch_conversations.exe --gui`. ## Notes
+
+* `ijson` is optional but required for `--stream` support. * Tkinter (for GUI) is included in Python stdlib on Windows and macOS. * See `CHANGELOG.md` for version history and changes. * See `SUMMARY.md` for project overview. * See `.github/CONTRIBUTING.md` for contribution guidelines.

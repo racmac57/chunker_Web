@@ -1,0 +1,983 @@
+```python
+# Add to watcher_splitter.py
+- Generate embeddings for each chunk using OpenAI/cohere/ollama
+- Store embeddings in a vector database (Chroma, Pinecone, or local FAISS)
+- Extract metadata: file type, department, keywords, code functions
+- Create context-aware chunking for code files
+```
+
+```python
+# New file: rag_search.py
+- Semantic search over your processed chunks
+- Query: "How did I fix the vlookup error?" - Returns: Relevant chunks with context from multiple files
+- Provides citations and source files
+```
+
+```json
+{
+  "chunk_id": "2025_10_27_12_21_37_file_chunk1",
+  "source_file": "filename.xlsx",
+  "file_type": "excel",
+  "keywords": ["vlookup", "data-analysis", "power-bi"],
+  "code_metadata": {
+    "functions": ["calculateTotal()"],
+    "formulas": ["VLOOKUP(A2, Sheet2!A:B, 2, FALSE)"],
+    "imports": ["pandas", "numpy"]
+  },
+  "context": "This solution addresses Power BI query errors",
+  "timestamp": "2025-10-27T12:21:37Z",
+  "chunk_index": 1
+}
+```
+
+```python
+# Better search results = semantic + keyword
+results = vector_search(query) + keyword_search(query)
+ranked_results = rerank(results)
+```
+
+---
+
+**User**
+
+should we have Grok add Ollama local embeddings
+Add more code comments
+
+---
+
+**Cursor**
+
+Using Ollama for local embeddings makes sense here. It’s free, runs on your machine, and fits your knowledge base usage. I’ll include concrete integration steps below. ## Why Ollama is a good fit
+
+- Zero API costs at scale; works completely offline
+- Fast for large batches; on-device if your hardware supports it
+- Simple to add; local deployment
+- Privacy-friendly; content stays local
+- Many models supported (llama3.2, nomic-embed, and others) depending on your needs
+
+## Implementation plan
+
+### Phase 1: Add Ollama
+I’ll provide:
+1) Install/setup steps; model start script
+2) Embedding function to connect to Ollama
+3) Local embedding storage (FAISS or SQLite)
+4) Integration into `watcher_splitter.py`
+5) Search/retrieval API
+
+### Phase 2: Enhanced comments and docs
+- Comments for file processing, chunking, database ops, parallel processing, and the search/RAG layer
+- Reorganize for clarity (script vs. core utils)
+- README updates for dependencies and startup
+- Docstrings where missing
+
+## Next steps
+Tell me which you prefer:
+- A) Write the Ollama integration patch and comments now
+- B) First install and verify Ollama; I’ll add the code after
+- C) Decide to skip Ollama and stick with text chunking for now
+
+## Starting point
+Assuming you already have Ollama, I’ll generate:
+- `ollama_integration.py` (RAG search via embeddings)
+- `embedding_helpers.py` (local FAISS storage and retrieval)
+- `requirements_rag.txt` (ollama-client, faiss-cpu, pandas)
+- Patches to watcher_splitter.py to write and update embeddings
+- Comments throughout for maintainability
+
+Which should I do first? Should I wait for you to install Ollama and share the running model name? ---
+
+**User**
+
+do we and to add RAG evaluation metrics
+
+---
+
+**Cursor**
+
+Short answer: Yes—evaluation metrics are critical for RAG. They help you catch problematic answers, save time, and maintain a useful knowledge base. Add them from day one. ## Why evaluation metrics matter
+
+### 1. Quality checks
+- Are retrieved results relevant? - Does the answer match the query? - What sources are cited? Without metrics, you won’t know if RAG is helping or hurting. ### 2. Debugging
+- Identify bad chunks
+- Surface encoding issues
+- Flag unhelpful queries or chunks
+- Catch regressions
+
+### 3. Optimization
+- Improve chunk sizes
+- Adjust retrieval strategies
+- Tune metadata
+
+## Essential evaluation metrics for your RAG
+- Semantic similarity (cosine between query and docs)
+- Keyword overlap (fraction of query terms found)
+- Source quality (authority/relevance scoring)
+- Response quality (ground truth alignment)
+- Retrieval rank (position of best answer)
+- Latency and token usage
+
+## Recommend
+1. `eval_rag.py`: orchestrate evaluation, compute metrics, and aggregate scores/regressions. 2. `preset queries`: keep a test set covering common real use cases. 3. Regressions/improvements: show deltas across versions. 4. Shared formats: CSV/JSON/SQLite outputs for review and trends. Want me to draft `eval_rag.py` and the required helpers, and wire it into the repo this session? We can also keep the query set small initially (5–10 examples) and evolve it with usage. ---
+
+**User**
+
+do we and grok to add RAG metrics implementation
+LangSmith evaluation
+
+---
+
+**Cursor**
+
+Yes—adding RAG metrics and LangSmith evaluation is a smart move. It’ll give you production-grade observability and debugging for your knowledge base. ## Why LangSmith + RAG metrics
+
+### 1. LangSmith benefits
+- **Tracing**: See exactly how queries flow through retrieval → generation
+- **Feedback loops**: Capture user ratings, corrections
+- **A/B testing**: Compare different retrieval strategies
+- **Cost tracking**: Monitor embedding/LLM usage
+- **Debugging**: Step-by-step execution traces
+
+### 2. RAG metrics you need
+- **Retrieval**: Precision@K, Recall@K, MRR (Mean Reciprocal Rank)
+- **Relevance**: Semantic similarity, keyword overlap
+- **Answer quality**: Faithfulness, answer relevance, context utilization
+- **Latency**: Query time, embedding time, generation time
+
+## Implementation approach
+
+### Phase 1: Core metrics
+```python
+# eval_rag.py
+- Implement retrieval metrics (precision@k, recall@k, MRR)
+- Add semantic similarity scoring
+- Track latency and token usage
+- Export results to CSV/JSON for analysis
+```
+
+### Phase 2: LangSmith integration
+```python
+# langsmith_integration.py
+- Add LangSmith tracing to RAG pipeline
+- Implement feedback collection
+- Set up evaluation datasets
+- Create dashboards for monitoring
+```
+
+### Phase 3: Automated evaluation
+```python
+# automated_eval.py
+- Run evaluations on schedule
+- Compare against baselines
+- Alert on regressions
+- Generate reports
+```
+
+## Recommended setup
+
+### 1. LangSmith configuration
+```python
+# Add to config.json
+{
+  "langsmith": {
+    "api_key": "your_key",
+    "project": "chunker-rag-eval",
+    "tracing_enabled": true,
+    "evaluation_enabled": true
+  }
+}
+```
+
+### 2. Evaluation datasets
+```python
+# test_queries.json
+[
+  {
+    "query": "How do I fix vlookup errors in Excel? ",
+    "expected_answer": "Check data types and table references",
+    "expected_sources": ["excel_troubleshooting.md", "vlookup_guide.xlsx"],
+    "category": "excel"
+  }
+]
+```
+
+### 3. Metrics tracking
+```python
+# Track in database
+- Query performance
+- Retrieval quality
+- User feedback
+- Cost per query
+```
+
+## What Grok should implement
+
+### 1. **RAG evaluation framework**
+- Retrieval metrics (precision@k, recall@k, MRR)
+- Answer quality metrics (faithfulness, relevance)
+- Latency and cost tracking
+- Automated evaluation pipeline
+
+### 2. **LangSmith integration**
+- Tracing for RAG pipeline
+- Feedback collection system
+- Evaluation dataset management
+- Performance dashboards
+
+### 3. **Monitoring and alerting**
+- Regression detection
+- Performance thresholds
+- Cost monitoring
+- Quality alerts
+
+## Benefits for your knowledge base
+
+### 1. **Quality assurance**
+- Catch bad retrievals before they impact users
+- Identify problematic chunks or queries
+- Track improvement over time
+
+### 2. **Optimization**
+- Tune chunk sizes based on metrics
+- Adjust retrieval strategies
+- Improve metadata extraction
+
+### 3. **User experience**
+- Faster, more accurate answers
+- Better source citations
+- Reduced hallucination
+
+## Next steps
+
+1. **Set up LangSmith account** and get API key
+2. **Create evaluation datasets** with your common queries
+3. **Implement core metrics** (precision@k, recall@k, MRR)
+4. **Add LangSmith tracing** to RAG pipeline
+5. **Set up monitoring** and alerting
+
+## Recommendation
+
+Tell Grok to implement:
+- **RAG evaluation framework** with core metrics
+- **LangSmith integration** for tracing and feedback
+- **Automated evaluation pipeline** with regression detection
+- **Performance monitoring** and cost tracking
+
+This will give you production-ready RAG with proper observability and quality assurance. Should I create the implementation plan with code examples for Grok to follow? ```python
+# eval_rag.py
+- Implement retrieval metrics (precision@k, recall@k, MRR)
+- Add semantic similarity scoring
+- Track latency and token usage
+- Export results to CSV/JSON for analysis
+```
+
+```python
+# langsmith_integration.py
+- Add LangSmith tracing to RAG pipeline
+- Implement feedback collection
+- Set up evaluation datasets
+- Create dashboards for monitoring
+```
+
+```python
+# automated_eval.py
+- Run evaluations on schedule
+- Compare against baselines
+- Alert on regressions
+- Generate reports
+```
+
+```python
+# Add to config.json
+{
+  "langsmith": {
+    "api_key": "your_key",
+    "project": "chunker-rag-eval",
+    "tracing_enabled": true,
+    "evaluation_enabled": true
+  }
+}
+```
+
+```python
+# test_queries.json
+[
+  {
+    "query": "How do I fix vlookup errors in Excel? ",
+    "expected_answer": "Check data types and table references",
+    "expected_sources": ["excel_troubleshooting.md", "vlookup_guide.xlsx"],
+    "category": "excel"
+  }
+]
+```
+
+```python
+# Track in database
+- Query performance
+- Retrieval quality
+- User feedback
+- Cost per query
+```
+
+---
+
+**User**
+
+Grok is asking if we want LangSmith tracing examples
+RAG evaluation tools
+
+---
+
+**Cursor**
+
+Yes—provide Grok with concrete LangSmith tracing examples and RAG evaluation tools. It’ll accelerate implementation and ensure best practices. ## LangSmith tracing examples to share
+
+### 1. **Basic RAG tracing**
+```python
+from langsmith import traceable
+from langchain.schema import Document
+
+@traceable
+def rag_query(query: str, vector_store, llm):
+    # Trace retrieval
+    docs = vector_store.similarity_search(query, k=5)
+    
+    # Trace generation
+    context = "\n".join([doc.page_content for doc in docs])
+    response = llm.invoke(f"Context: {context}\nQuery: {query}")
+    
+    return response
+```
+
+### 2. **Custom evaluation metrics**
+```python
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Run, Example
+
+def evaluate_retrieval(run: Run, example: Example):
+    # Check if retrieved docs are relevant
+    retrieved_docs = run.outputs.get("retrieved_docs", [])
+    expected_sources = example.outputs.get("expected_sources", [])
+    
+    # Calculate precision@k
+    relevant_docs = [doc for doc in retrieved_docs 
+                    if doc.metadata.get("source") in expected_sources]
+    precision = len(relevant_docs) / len(retrieved_docs) if retrieved_docs else 0
+    
+    return {"precision": precision}
+
+# Run evaluation
+evaluate(
+    lambda x: rag_query(x["query"], vector_store, llm),
+    data=test_dataset,
+    evaluators=[evaluate_retrieval]
+)
+```
+
+### 3. **Feedback collection**
+```python
+from langsmith import Client
+
+client = Client()
+
+# Collect user feedback
+def collect_feedback(run_id: str, rating: int, comment: str):
+    client.create_feedback(
+        run_id=run_id,
+        key="user_rating",
+        score=rating,
+        comment=comment
+    )
+```
+
+## RAG evaluation tools to implement
+
+### 1. **Retrieval metrics**
+```python
+def calculate_retrieval_metrics(retrieved_docs, relevant_docs, k=5):
+    # Precision@K
+    precision_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / k
+    
+    # Recall@K
+    recall_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / len(relevant_docs)
+    
+    # MRR (Mean Reciprocal Rank)
+    mrr = 0
+    for i, doc in enumerate(retrieved_docs):
+        if doc in relevant_docs:
+            mrr = 1 / (i + 1)
+            break
+    
+    return {
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+        "mrr": mrr
+    }
+```
+
+### 2. **Answer quality metrics**
+```python
+def evaluate_answer_quality(generated_answer, expected_answer, context):
+    # Faithfulness (answer grounded in context)
+    faithfulness_score = calculate_faithfulness(generated_answer, context)
+    
+    # Answer relevance (answer matches query)
+    relevance_score = calculate_relevance(generated_answer, expected_answer)
+    
+    # Context utilization (how much context was used)
+    context_utilization = calculate_context_utilization(generated_answer, context)
+    
+    return {
+        "faithfulness": faithfulness_score,
+        "relevance": relevance_score,
+        "context_utilization": context_utilization
+    }
+```
+
+### 3. **Automated evaluation pipeline**
+```python
+def run_evaluation_pipeline(test_queries, vector_store, llm):
+    results = []
+    
+    for query in test_queries:
+        # Run RAG query
+        response = rag_query(query["text"], vector_store, llm)
+        
+        # Calculate metrics
+        retrieval_metrics = calculate_retrieval_metrics(
+            response["retrieved_docs"], 
+            query["relevant_docs"]
+        )
+        
+        answer_metrics = evaluate_answer_quality(
+            response["answer"], 
+            query["expected_answer"], 
+            response["context"]
+        )
+        
+        results.append({
+            "query": query["text"],
+            "retrieval_metrics": retrieval_metrics,
+            "answer_metrics": answer_metrics,
+            "latency": response["latency"]
+        })
+    
+    return results
+```
+
+## What Grok should implement
+
+### 1. **LangSmith integration**
+- Tracing decorators for RAG pipeline
+- Custom evaluation functions
+- Feedback collection system
+- Performance monitoring
+
+### 2. **RAG evaluation tools**
+- Retrieval metrics (precision@k, recall@k, MRR)
+- Answer quality metrics (faithfulness, relevance)
+- Latency and cost tracking
+- Automated evaluation pipeline
+
+### 3. **Monitoring and alerting**
+- Regression detection
+- Performance thresholds
+- Quality alerts
+- Cost monitoring
+
+## Benefits for your knowledge base
+
+### 1. **Quality assurance**
+- Catch bad retrievals before they impact users
+- Identify problematic chunks or queries
+- Track improvement over time
+
+### 2. **Optimization**
+- Tune chunk sizes based on metrics
+- Adjust retrieval strategies
+- Improve metadata extraction
+
+### 3. **User experience**
+- Faster, more accurate answers
+- Better source citations
+- Reduced hallucination
+
+## Recommendation
+
+Tell Grok to implement:
+- **LangSmith tracing** with concrete examples
+- **RAG evaluation tools** with core metrics
+- **Automated evaluation pipeline** with regression detection
+- **Performance monitoring** and cost tracking
+
+This will give you production-ready RAG with proper observability and quality assurance. Should I create the complete implementation plan with code examples for Grok to follow? ```python
+from langsmith import traceable
+from langchain.schema import Document
+
+@traceable
+def rag_query(query: str, vector_store, llm):
+    # Trace retrieval
+    docs = vector_store.similarity_search(query, k=5)
+    
+    # Trace generation
+    context = "\n".join([doc.page_content for doc in docs])
+    response = llm.invoke(f"Context: {context}\nQuery: {query}")
+    
+    return response
+```
+
+```python
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Run, Example
+
+def evaluate_retrieval(run: Run, example: Example):
+    # Check if retrieved docs are relevant
+    retrieved_docs = run.outputs.get("retrieved_docs", [])
+    expected_sources = example.outputs.get("expected_sources", [])
+    
+    # Calculate precision@k
+    relevant_docs = [doc for doc in retrieved_docs 
+                    if doc.metadata.get("source") in expected_sources]
+    precision = len(relevant_docs) / len(retrieved_docs) if retrieved_docs else 0
+    
+    return {"precision": precision}
+
+# Run evaluation
+evaluate(
+    lambda x: rag_query(x["query"], vector_store, llm),
+    data=test_dataset,
+    evaluators=[evaluate_retrieval]
+)
+```
+
+```python
+from langsmith import Client
+
+client = Client()
+
+# Collect user feedback
+def collect_feedback(run_id: str, rating: int, comment: str):
+    client.create_feedback(
+        run_id=run_id,
+        key="user_rating",
+        score=rating,
+        comment=comment
+    )
+```
+
+```python
+def calculate_retrieval_metrics(retrieved_docs, relevant_docs, k=5):
+    # Precision@K
+    precision_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / k
+    
+    # Recall@K
+    recall_at_k = len(set(retrieved_docs[:k]) & set(relevant_docs)) / len(relevant_docs)
+    
+    # MRR (Mean Reciprocal Rank)
+    mrr = 0
+    for i, doc in enumerate(retrieved_docs):
+        if doc in relevant_docs:
+            mrr = 1 / (i + 1)
+            break
+    
+    return {
+        "precision_at_k": precision_at_k,
+        "recall_at_k": recall_at_k,
+        "mrr": mrr
+    }
+```
+
+```python
+def evaluate_answer_quality(generated_answer, expected_answer, context):
+    # Faithfulness (answer grounded in context)
+    faithfulness_score = calculate_faithfulness(generated_answer, context)
+    
+    # Answer relevance (answer matches query)
+    relevance_score = calculate_relevance(generated_answer, expected_answer)
+    
+    # Context utilization (how much context was used)
+    context_utilization = calculate_context_utilization(generated_answer, context)
+    
+    return {
+        "faithfulness": faithfulness_score,
+        "relevance": relevance_score,
+        "context_utilization": context_utilization
+    }
+```
+
+```python
+def run_evaluation_pipeline(test_queries, vector_store, llm):
+    results = []
+    
+    for query in test_queries:
+        # Run RAG query
+        response = rag_query(query["text"], vector_store, llm)
+        
+        # Calculate metrics
+        retrieval_metrics = calculate_retrieval_metrics(
+            response["retrieved_docs"], 
+            query["relevant_docs"]
+        )
+        
+        answer_metrics = evaluate_answer_quality(
+            response["answer"], 
+            query["expected_answer"], 
+            response["context"]
+        )
+        
+        results.append({
+            "query": query["text"],
+            "retrieval_metrics": retrieval_metrics,
+            "answer_metrics": answer_metrics,
+            "latency": response["latency"]
+        })
+    
+    return results
+```
+
+---
+
+**User**
+
+Grok asked Implement faithfulness scoring
+Explore ChromaDB integration
+Add more concrete examples
+
+---
+
+**Cursor**
+
+Perfect! Here are concrete implementations for Grok to implement:
+
+## 1. Faithfulness Scoring Implementation
+
+```python
+import re
+import nltk
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+
+class FaithfulnessScorer:
+    def __init__(self):
+        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.stop_words = set(nltk.corpus.stopwords.words('english'))
+    
+    def extract_claims(self, answer):
+        """Extract factual claims from the answer"""
+        # Split into sentences and filter out questions/opinions
+        sentences = nltk.sent_tokenize(answer)
+        claims = []
+        
+        for sentence in sentences:
+            # Remove questions and opinion indicators
+            if not re.search(r'\?|I think|I believe|in my opinion', sentence, re.IGNORECASE):
+                # Extract factual statements
+                if re.search(r'\b(is|are|was|were|has|have|will|can|should)\b', sentence, re.IGNORECASE):
+                    claims.append(sentence.strip())
+        
+        return claims
+    
+    def calculate_faithfulness(self, answer, context, threshold=0.7):
+        """
+        Calculate faithfulness score (0-1) based on how well answer claims
+        are supported by the context
+        """
+        claims = self.extract_claims(answer)
+        if not claims:
+            return 1.0  # No claims to verify
+        
+        # Get embeddings for claims and context
+        claim_embeddings = self.model.encode(claims)
+        context_embeddings = self.model.encode([context])
+        
+        faithfulness_scores = []
+        
+        for claim_emb in claim_embeddings:
+            # Find best matching context sentence
+            similarities = cosine_similarity([claim_emb], context_embeddings)[0]
+            max_similarity = np.max(similarities)
+            
+            # Check if claim is supported by context
+            if max_similarity >= threshold:
+                faithfulness_scores.append(1.0)
+            else:
+                # Check for partial support
+                faithfulness_scores.append(max_similarity)
+        
+        return np.mean(faithfulness_scores)
+    
+    def detailed_faithfulness_analysis(self, answer, context):
+        """Provide detailed analysis of faithfulness"""
+        claims = self.extract_claims(answer)
+        analysis = {
+            "total_claims": len(claims),
+            "supported_claims": 0,
+            "unsupported_claims": 0,
+            "claim_details": []
+        }
+        
+        for claim in claims:
+            claim_emb = self.model.encode([claim])
+            context_emb = self.model.encode([context])
+            similarity = cosine_similarity(claim_emb, context_emb)[0][0]
+            
+            is_supported = similarity >= 0.7
+            if is_supported:
+                analysis["supported_claims"] += 1
+            else:
+                analysis["unsupported_claims"] += 1
+            
+            analysis["claim_details"].append({
+                "claim": claim,
+                "similarity": float(similarity),
+                "supported": is_supported
+            })
+        
+        analysis["faithfulness_score"] = analysis["supported_claims"] / analysis["total_claims"] if analysis["total_claims"] > 0 else 1.0
+        
+        return analysis
+
+# Usage example
+scorer = FaithfulnessScorer()
+answer = "The vlookup function requires exact matches. You should use FALSE for exact matching." context = "VLOOKUP syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches, TRUE for approximate matches." faithfulness_score = scorer.calculate_faithfulness(answer, context)
+print(f"Faithfulness Score: {faithfulness_score:.2f}")
+
+detailed_analysis = scorer.detailed_faithfulness_analysis(answer, context)
+print(f"Supported claims: {detailed_analysis['supported_claims']}/{detailed_analysis['total_claims']}")
+```
+
+## 2. ChromaDB Integration
+
+```python
+import chromadb
+from chromadb.config import Settings
+import uuid
+from datetime import datetime
+import json
+
+class ChromaRAG:
+    def __init__(self, persist_directory="./chroma_db"):
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        
+        # Create or get collection
+        self.collection = self.client.get_or_create_collection(
+            name="chunker_knowledge_base",
+            metadata={"description": "Enterprise chunker knowledge base"}
+        )
+    
+    def add_chunk(self, chunk_text, metadata):
+        """Add a chunk to the vector database"""
+        chunk_id = f"{metadata['timestamp']}_{metadata['file_name']}_chunk{metadata['chunk_index']}"
+        
+        # Prepare metadata for ChromaDB
+        chroma_metadata = {
+            "file_name": metadata["file_name"],
+            "file_type": metadata["file_type"],
+            "chunk_index": metadata["chunk_index"],
+            "timestamp": metadata["timestamp"],
+            "department": metadata.get("department", "admin"),
+            "keywords": json.dumps(metadata.get("keywords", [])),
+            "file_size": metadata.get("file_size", 0),
+            "processing_time": metadata.get("processing_time", 0)
+        }
+        
+        # Add to collection
+        self.collection.add(
+            documents=[chunk_text],
+            metadatas=[chroma_metadata],
+            ids=[chunk_id]
+        )
+        
+        return chunk_id
+    
+    def search_similar(self, query, n_results=5, file_type=None, department=None):
+        """Search for similar chunks"""
+        where_clause = {}
+        
+        if file_type:
+            where_clause["file_type"] = file_type
+        if department:
+            where_clause["department"] = department
+        
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where_clause if where_clause else None
+        )
+        
+        return self._format_results(results)
+    
+    def search_by_keywords(self, keywords, n_results=5):
+        """Search by specific keywords"""
+        # Convert keywords to query string
+        query = " ".join(keywords)
+        return self.search_similar(query, n_results)
+    
+    def get_chunk_by_id(self, chunk_id):
+        """Retrieve specific chunk by ID"""
+        results = self.collection.get(ids=[chunk_id])
+        return self._format_results(results)
+    
+    def update_chunk(self, chunk_id, new_text, new_metadata):
+        """Update existing chunk"""
+        self.collection.update(
+            ids=[chunk_id],
+            documents=[new_text],
+            metadatas=[new_metadata]
+        )
+    
+    def delete_chunk(self, chunk_id):
+        """Delete chunk from database"""
+        self.collection.delete(ids=[chunk_id])
+    
+    def get_collection_stats(self):
+        """Get statistics about the collection"""
+        count = self.collection.count()
+        return {
+            "total_chunks": count,
+            "collection_name": self.collection.name,
+            "last_updated": datetime.now().isoformat()
+        }
+    
+    def _format_results(self, results):
+        """Format ChromaDB results for easier use"""
+        formatted_results = []
+        
+        if results.get("documents"):
+            for i, doc in enumerate(results["documents"][0]):
+                formatted_results.append({
+                    "id": results["ids"][0][i],
+                    "document": doc,
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i] if results.get("distances") else None
+                })
+        
+        return formatted_results
+
+# Integration with watcher_splitter.py
+def integrate_chroma_with_watcher():
+    """Example of how to integrate ChromaDB with the existing watcher"""
+    
+    # Initialize ChromaDB
+    chroma_rag = ChromaRAG()
+    
+    def process_file_with_chroma(file_path, config):
+        """Enhanced file processing with ChromaDB integration"""
+        # ... existing processing code ...
+        
+        # After creating chunks, add them to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = {
+                "file_name": file_path.name,
+                "file_type": file_path.suffix,
+                "chunk_index": i + 1,
+                "timestamp": datetime.now().isoformat(),
+                "department": department,
+                "keywords": extract_keywords(chunk),
+                "file_size": file_path.stat().st_size,
+                "processing_time": time.time() - start_time
+            }
+            
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+        
+        return True
+
+# Usage examples
+def example_usage():
+    # Initialize
+    rag = ChromaRAG()
+    
+    # Add chunks
+    metadata = {
+        "file_name": "excel_guide.md",
+        "file_type": ".md",
+        "chunk_index": 1,
+        "timestamp": "2025-10-27T12:00:00Z",
+        "department": "admin",
+        "keywords": ["excel", "vlookup", "formulas"]
+    }
+    
+    chunk_id = rag.add_chunk(
+        "VLOOKUP is used to find values in a table. Syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])",
+        metadata
+    )
+    
+    # Search
+    results = rag.search_similar("How do I use vlookup in Excel? ", n_results=3)
+    print(f"Found {len(results)} similar chunks")
+    
+    # Search by keywords
+    keyword_results = rag.search_by_keywords(["vlookup", "excel"])
+    print(f"Found {len(keyword_results)} chunks with keywords")
+    
+    # Get stats
+    stats = rag.get_collection_stats()
+    print(f"Total chunks in database: {stats['total_chunks']}")
+```
+
+## 3. Concrete Examples for Grok
+
+### Example 1: Complete RAG Pipeline
+```python
+def complete_rag_example():
+    """Complete RAG pipeline with evaluation"""
+    
+    # Initialize components
+    chroma_rag = ChromaRAG()
+    faithfulness_scorer = FaithfulnessScorer()
+    
+    # Query
+    query = "How do I fix Power BI query errors?" # Retrieve relevant chunks
+    retrieved_chunks = chroma_rag.search_similar(query, n_results=5)
+    
+    # Generate answer (simplified)
+    context = "\n".join([chunk["document"] for chunk in retrieved_chunks])
+    answer = f"Based on the context: {context[:500]}..."
+    
+    # Evaluate faithfulness
+    faithfulness_score = faithfulness_scorer.calculate_faithfulness(answer, context)
+    
+    # Return results
+    return {
+        "query": query,
+        "answer": answer,
+        "sources": [chunk["metadata"]["file_name"] for chunk in retrieved_chunks],
+        "faithfulness_score": faithfulness_score,
+        "retrieved_chunks": len(retrieved_chunks)
+    }
+```
+
+### Example 2: Batch Processing
+```python
+def batch_process_files(file_paths):
+    """Process multiple files and add to ChromaDB"""
+    chroma_rag = ChromaRAG()
+    
+    for file_path in file_paths:
+        # Process file (existing logic)
+        chunks = process_file_enhanced(file_path, config)
+        
+        # Add each chunk to ChromaDB
+        for i, chunk in enumerate(chunks):
+            metadata = extract_metadata(file_path, chunk, i)
+            chunk_id = chroma_rag.add_chunk(chunk, metadata)
+            print(f"Added {chunk_id} to knowledge base")
+    
+    # Get final stats
+    stats = chroma_rag.get_collection_stats()
+    print(f"Knowledge base now contains {stats['total_chunks']} chunks")
+```
+
+### Example 3: Evaluation Pipeline
+```python
+def evaluate_rag_performance():
+    """Evaluate RAG performance with test queries"""
+    
+    test_queries = [
+        {
+            "query": "How do I fix vlookup errors?

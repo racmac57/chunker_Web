@@ -1,0 +1,745 @@
+return
+    
+    # Check processor dependencies
+    processor_deps = check_processor_dependencies()
+    missing_deps = [dep for dep, available in processor_deps.items() if not available]
+    if missing_deps:
+        logger.warning(f"Missing file processor dependencies: {', '.join(missing_deps)}")
+        logger.info("Some file types may not be processed correctly")
+    
+    os.makedirs(CONFIG.get("output_dir", "output"), exist_ok=True)
+    os.makedirs(CONFIG.get("archive_dir", "processed"), exist_ok=True)
+
+    logger.info("=== ENTERPRISE CHUNKER STARTED ===")
+    logger.info(f"Monitoring: {watch_folder}")
+    supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    filter_mode = CONFIG.get("file_filter_mode", "all")
+    logger.info(f"File types: {', '.join(supported_extensions)} files")
+    logger.info(f"Filter mode: {filter_mode}")
+    if filter_mode == "patterns":
+        patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+        logger.info(f"Required patterns: {', '.join(patterns)}")
+    elif filter_mode == "suffix":
+        logger.info("Required suffix: _full_conversation")
+    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    logger.info(f"Database tracking: Enabled")
+    logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG enabled: {CONFIG.get('rag_enabled', False)}")
+    
+    processed_files = set()
+    loop_count = 0
+    last_cleanup = datetime.now()
+    last_report = datetime.now()
+    
+    # Send startup notification
+    notifications.send_email(
+        notifications.config["admin_emails"],
+        "🚀 Chunker System Started",
+        f"Enterprise Chunker system started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Monitoring: {watch_folder}\n"
+        f"File types: {', '.join(supported_extensions)} files\n"
+        f"Filter mode: {filter_mode}\n"
+        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Database: Enabled\n"
+        f"Dashboard: http://localhost:5000"
+    )
+    
+    try:
+        while True:
+            try:
+                # Look for files with supported extensions
+                all_files = []
+                supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+                for ext in supported_extensions:
+                    all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
+                
+                # Filter files based on configuration
+                excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
+                
+                # Apply file filtering based on mode
+                filter_mode = CONFIG.get("file_filter_mode", "all")
+                file_patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+                exclude_patterns = CONFIG.get("exclude_patterns", [])
+                
+                filtered_files = []
+                for f in all_files:
+                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                        continue
+                    
+                    # Check exclude patterns first
+                    if any(pattern in f.name for pattern in exclude_patterns):
+                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        continue
+                    
+                    # Apply filter mode
+                    if filter_mode == "all":
+                        filtered_files.append(f)
+                    elif filter_mode == "patterns":
+                        if any(pattern in f.name for pattern in file_patterns):
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                    elif filter_mode == "suffix":
+                        # Only process files with _full_conversation suffix
+                        if "_full_conversation" in f.name:
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                new_files = filtered_files
+                
+                if new_files:
+                    logger.info(f"Found {len(new_files)} new files to process")
+                    
+                    # Process files in parallel if multiple files
+                    if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
+                        results = process_files_parallel(new_files, CONFIG)
+                        for i, result in enumerate(results):
+                            if result:
+                                processed_files.add(new_files[i].name)
+                    else:
+                        # Process files sequentially
+                        for file_path in new_files:
+                            try:
+                                if process_file_enhanced(file_path, CONFIG):
+                                    processed_files.add(file_path.name)
+                                    logger.info(f"Successfully processed: {file_path.name}")
+                                else:
+                                    logger.error(f"Failed to process: {file_path.name}")
+                            except Exception as e:
+                                logger.exception(f"Error processing {file_path.name}: {e}")
+                                if db:
+                                    try:
+                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                    except Exception as db_error:
+                                        logger.warning(f"Failed to log processing error to database: {db_error}")
+                
+                # Periodic maintenance
+                loop_count += 1
+                
+                # Log session stats every minute
+                if loop_count % 12 == 0:  # Every minute at 5s intervals
+                    log_session_stats()
+                
+                # Log system metrics every 5 minutes
+                if loop_count % 60 == 0:
+                    log_system_metrics()
+                
+                # Daily cleanup and reporting
+                if datetime.now() - last_cleanup > timedelta(hours=24):
+                    if db:
+                        try:
+                            db.cleanup_old_data(days=30)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to run database cleanup: {db_error}")
+                    last_cleanup = datetime.now()
+                
+                # Send daily report
+                if datetime.now() - last_report > timedelta(hours=24):
+                    if db:
+                        try:
+                            analytics = db.get_analytics(days=1)
+                            notifications.send_daily_summary(session_stats, analytics)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to get analytics or send daily summary: {db_error}")
+                    last_report = datetime.now()
+                
+                time.sleep(CONFIG.get("polling_interval", 5))
+                
+            except KeyboardInterrupt:
+                logger.info("Watcher stopped by user")
+                break
+            except Exception as e:
+                logger.exception("Critical error in main loop")
+                if db:
+                    try:
+                        db.log_error("MainLoopError", str(e), traceback.format_exc())
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                try:
+                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
+                except Exception as notify_error:
+                    logger.warning(f"Failed to send error alert: {notify_error}")
+                time.sleep(10)
+                
+    finally:
+        # Final statistics and cleanup
+        log_session_stats()
+        
+        # Send shutdown notification
+        notifications.send_email(
+            notifications.config["admin_emails"],
+            "🛑 Chunker System Stopped",
+            f"Enterprise Chunker system stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Session Summary:\n"
+            f"Files Processed: {session_stats['files_processed']}\n"
+            f"Chunks Created: {session_stats['chunks_created']}\n"
+            f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}\n"
+            f"Errors: {session_stats['errors']}\n"
+            f"Uptime: {datetime.now() - datetime.strptime(session_stats['session_start'], '%Y-%m-%d %H:%M:%S')}"
+        )
+
+if __name__ == "__main__":
+    main()
+```
+
+Now let me update the config.json to include Celery settings:
+
+
+```json
+{
+  "watch_folder": "C:/_chunker/02_data",
+  "output_dir": "C:/_chunker/04_output",
+  "archive_dir": "C:/_chunker/03_archive",
+  "supported_extensions": [".txt", ".md", ".json", ".csv", ".xlsx", ".pdf", ".py", ".docx", ".sql", ".yaml", ".xml", ".log"],
+  "chunk_size": 800,
+  "overlap": 50,
+  "min_chunk_size": 100,
+  "max_chunk_size": 1500,
+  "file_filter_mode": "all",
+  "file_patterns": ["_full_conversation", "_conversation", "_chat"],
+  "exclude_patterns": ["_draft", "_temp", "_backup"],
+  "parallel_workers": 4,
+  "database_enabled": true,
+  "notification_enabled": false,
+  "cloud_repo_root": null,
+  "log_level": "INFO",
+  "log_rotation": true,
+  "max_log_size": 5242880,
+  "backup_count": 3,
+  "session_cleanup_interval": 3600,
+  "summary_auto_generate": false,
+  "summary_min_chunks": 5,
+  "rag_enabled": false,
+  "chroma_persist_dir": "./chroma_db",
+  "celery_enabled": true,
+  "celery_broker": "redis://localhost:6379/0",
+  "celery_result_backend": "redis://localhost:6379/0",
+  "celery_task_time_limit": 300,
+  "celery_task_soft_time_limit": 240,
+  "celery_worker_concurrency": 4,
+  "evaluation_enabled": false,
+  "langsmith": {
+    "api_key": null,
+    "project": "chunker-rag-eval",
+    "tracing_enabled": true,
+    "evaluation_enabled": true
+  }
+}
+
+```
+
+Now let me update the README with Celery usage instructions:
+
+
+```markdown
+## Advanced Usage (Celery-Enabled)
+
+For high-volume processing and advanced task management:
+
+### 1. Install Celery Dependencies
+```bash
+pip install celery redis flower
+```
+
+### 2. Start Redis Server
+```bash
+# Windows (if installed)
+redis-server
+
+# Linux/macOS
+sudo systemctl start redis  # or brew services start redis
+```
+
+### 3. Start Celery Services
+```bash
+# Start orchestrator (recommended)
+python orchestrator.py
+
+# Or start services manually:
+# Terminal 1: Celery worker
+celery -A celery_tasks worker --loglevel=info --concurrency=4
+
+# Terminal 2: Celery beat scheduler
+celery -A celery_tasks beat --loglevel=info
+
+# Terminal 3: Flower dashboard (optional)
+celery -A celery_tasks flower --port=5555
+
+# Terminal 4: Watchdog monitor
+python enhanced_watchdog.py
+```
+
+### 4. Monitor Tasks
+- **Flower Dashboard**: http://localhost:5555
+- **Celery CLI**: `celery -A celery_tasks inspect active`
+- **Logs**: Check `logs/watcher.log` for detailed processing information
+
+### 5. Configuration
+Update `config.json`:
+```json
+{
+  "celery_enabled": true,
+  "celery_broker": "redis://localhost:6379/0",
+  "celery_task_time_limit": 300,
+  "celery_worker_concurrency": 4,
+  "evaluation_enabled": true
+}
+```
+```
+
+Let me find the correct section in the README:
+
+
+Let me add the Celery section after the RAG section:
+
+
+```markdown
+# Chunker_v2 - Enterprise RAG-Powered File Processing System
+
+**Version 2.0** - Enhanced with comprehensive RAG (Retrieval-Augmented Generation) capabilities, real-time monitoring, and advanced evaluation metrics. ## 🚀 What's New in v2.0
+
+- **🔍 Advanced RAG System**: Ollama + FAISS for local embeddings and semantic search
+- **📊 Comprehensive Evaluation**: Precision@K, Recall@K, MRR, ROUGE, BLEU, Faithfulness scoring
+- **🔗 LangSmith Integration**: Tracing, evaluation, and feedback collection
+- **⚡ Real-time Monitoring**: Watchdog-based file system monitoring with debouncing
+- **🤖 Hybrid Search**: Combines semantic similarity with keyword matching
+- **📈 Automated Evaluation**: Scheduled testing with regression detection
+- **🛡️ Production Ready**: Graceful degradation, error handling, and monitoring
+
+## Directory Structure
+
+- **C:/_chunker** - Main project directory with scripts
+- **02_data/** - Input files to be processed (watch folder)
+- **03_archive/** - Archived original files and processed source files
+- **04_output/** - Generated chunks and transcripts (organized by source file)
+- **05_logs/** - Application logs and tracking
+- **06_config/** - Configuration files
+- **faiss_index/** - FAISS vector database storage
+- **evaluations/** - RAG evaluation results
+- **reports/** - Automated evaluation reports
+
+## 🚀 Quick Start
+
+### Basic Usage (Core Chunking)
+1. Place files to process in `02_data/` folder
+2. Run the watcher: `python watcher_splitter.py`
+3. Check `04_output/` for processed chunks and transcripts
+4. Original files are moved to `03_archive/` after processing
+
+### Advanced Usage (RAG-Enabled)
+1. Install RAG dependencies: `python install_rag_dependencies.py`
+2. Install Ollama and pull model: `ollama pull nomic-embed-text`
+3. Enable RAG in `config.json`: Set `"rag_enabled": true`
+4. Run the watcher: `python watcher_splitter.py`
+5. Search knowledge base: `python rag_search.py`
+
+### Advanced Usage (Celery-Enabled)
+For high-volume processing and advanced task management:
+
+1. **Install Celery Dependencies**:
+   ```bash
+   pip install celery redis flower
+   ```
+
+2. **Start Redis Server**:
+   ```bash
+   # Windows: Download from https://github.com/microsoftarchive/redis/releases
+   redis-server
+   
+   # Linux: sudo apt-get install redis-server
+   # macOS: brew install redis
+   ```
+
+3. **Start Celery Services**:
+   ```bash
+   # Option A: Use orchestrator (recommended)
+   python orchestrator.py
+   
+   # Option B: Start manually
+   celery -A celery_tasks worker --loglevel=info --concurrency=4
+   celery -A celery_tasks beat --loglevel=info
+   celery -A celery_tasks flower --port=5555
+   python enhanced_watchdog.py
+   ```
+
+4. **Monitor Tasks**:
+   - Flower Dashboard: http://localhost:5555
+   - Celery CLI: `celery -A celery_tasks inspect active`
+   - Logs: Check `logs/watcher.log`
+
+5. **Configuration**:
+   ```json
+   {
+     "celery_enabled": true,
+     "celery_broker": "redis://localhost:6379/0",
+     "celery_task_time_limit": 300,
+     "celery_worker_concurrency": 4
+   }
+   ```
+
+## ✨ Features
+
+### Core Chunking
+- [x] **Organized output** by source file name with timestamp prefixes
+- [x] **Multi-file type support** - .txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log
+- [x] **Unicode filename support** - Handles files with emojis, special characters, and symbols
+- [x] **Enhanced filename sanitization** - Automatically cleans problematic characters
+- [x] **Database tracking and logging** - Comprehensive activity monitoring
+- [x] **Automatic file organization** - Moves processed files to archive
+
+### RAG System (v2.0)
+- [x] **Ollama Integration** - Local embeddings with nomic-embed-text model
+- [x] **FAISS Vector Database** - High-performance similarity search
+- [x] **Hybrid Search** - Combines semantic similarity with keyword matching
+- [x] **ChromaDB Support** - Alternative vector database (optional)
+- [x] **Real-time Monitoring** - Watchdog-based file system monitoring
+- [x] **Debounced Processing** - Prevents race conditions and duplicate processing
+
+### Evaluation & Quality Assurance
+- [x] **Comprehensive Metrics** - Precision@K, Recall@K, MRR, NDCG@K
+- [x] **Generation Quality** - ROUGE-1/2/L, BLEU, BERTScore
+- [x] **Faithfulness Scoring** - Evaluates answer grounding in source context
+- [x] **Context Utilization** - Measures how much context is used in answers
+- [x] **Automated Evaluation** - Scheduled testing with regression detection
+- [x] **LangSmith Integration** - Tracing, evaluation, and feedback collection
+
+### Production Features
+- [x] **Graceful Degradation** - Continues working even if RAG components fail
+- [x] **Error Handling** - Robust error recovery and logging
+- [x] **Performance Monitoring** - System metrics and performance tracking
+- [x] **Security Redaction** - PII masking in metadata
+- [x] **Modular Architecture** - Clean separation of concerns
+
+## ⚙️ Configuration
+
+Edit `config.json` to customize:
+
+### Core Settings
+- **File filter modes**: all, patterns, suffix
+- **Supported file extensions**: .txt, .md, .json, .csv, .xlsx, .pdf, .py, .docx, .sql, .yaml, .xml, .log
+- **Chunk sizes and processing options**: sentence limits, overlap settings
+- **Notification settings**: email alerts and summaries
+
+### RAG Settings
+- **`rag_enabled`**: Enable/disable RAG functionality
+- **`ollama_model`**: Ollama embedding model (default: nomic-embed-text)
+- **`faiss_persist_dir`**: FAISS index storage directory
+- **`chroma_persist_dir`**: ChromaDB storage directory (optional)
+
+### LangSmith Settings (Optional)
+- **`langsmith_api_key`**: Your LangSmith API key
+- **`langsmith_project`**: Project name for tracing
+- **`tracing_enabled`**: Enable/disable tracing
+- **`evaluation_enabled`**: Enable/disable evaluation
+
+### Monitoring Settings
+- **`debounce_window`**: File event debouncing time (seconds)
+- **`max_workers`**: Maximum parallel processing workers
+- **`failed_dir`**: Directory for failed file processing
+
+## 🔍 RAG Usage
+
+### Setup
+1. **Install Dependencies**: `python install_rag_dependencies.py`
+2. **Install Ollama**: Download from [ollama.ai](https://ollama.ai/)
+3. **Pull Model**: `ollama pull nomic-embed-text`
+4. **Enable RAG**: Set `"rag_enabled": true` in `config.json`
+5. **Start Processing**: `python watcher_splitter.py`
+
+### Search Knowledge Base
+
+#### Interactive Search
+```bash
+python rag_search.py
+```
+
+#### Command Line Search
+```bash
+# Single query
+python rag_search.py --query "How do I fix vlookup errors?" # Batch search
+python rag_search.py --batch queries.txt --output results.json
+
+# Different search types
+python rag_search.py --query "Excel formulas" --search-type semantic
+python rag_search.py --query "vlookup excel" --search-type keyword
+```
+
+#### Programmatic Search
+```python
+from ollama_integration import initialize_ollama_rag
+
+# Initialize RAG system
+rag = initialize_ollama_rag()
+
+# Search
+results = rag.hybrid_search("How do I fix vlookup errors? ", top_k=5)
+
+# Display results
+for result in results:
+    print(f"Score: {result['score']:.3f}")
+    print(f"Content: {result['content'][:100]}...")
+    print(f"Source: {result['metadata']['source_file']}")
+```
+
+### Example Output
+
+**Interactive Search Session:**
+```
+RAG Search Interface
+==================================================
+Commands:
+  search <query> - Search the knowledge base
+  semantic <query> - Semantic similarity search
+  keyword <query> - Keyword-based search
+  stats - Show knowledge base statistics
+  quit - Exit the interface
+
+RAG> search How do I fix vlookup errors? Search Results for: 'How do I fix vlookup errors?' ==================================================
+
+1. Score: 0.847 (semantic)
+   Source: excel_guide.md
+   Type: .md
+   Content: VLOOKUP is used to find values in a table. Syntax: VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup]). Use FALSE for exact matches...
+   Keywords: vlookup, excel, formula, table
+
+2. Score: 0.723 (semantic)
+   Source: troubleshooting.xlsx
+   Type: .xlsx
+   Content: Common VLOOKUP errors include #N/A when lookup value not found, #REF when table array is invalid...
+   Keywords: vlookup, error, troubleshooting, excel
+
+Search completed in 0.234 seconds
+Found 2 results
+```
+
+## 📊 Evaluation & Testing
+
+### Automated Evaluation
+```bash
+# Run comprehensive evaluation
+python automated_eval.py
+
+# Run specific tests
+python rag_test.py
+
+# Generate evaluation report
+python -c "from automated_eval import AutomatedEvaluator; evaluator = AutomatedEvaluator({}); evaluator.generate_csv_report()"
+```
+
+### Manual Evaluation
+```python
+from rag_evaluation import RAGEvaluator
+from rag_integration import FaithfulnessScorer
+
+# Initialize evaluator
+evaluator = RAGEvaluator()
+
+# Evaluate retrieval quality
+retrieval_metrics = evaluator.evaluate_retrieval(
+    retrieved_docs=["doc1.md", "doc2.xlsx"],
+    relevant_docs=["doc1.md", "doc2.xlsx", "doc3.pdf"],
+    k_values=[1, 3, 5]
+)
+
+# Evaluate generation quality
+generation_metrics = evaluator.evaluate_generation(
+    reference="Check data types and table references",
+    generated="Verify data types and table references for vlookup errors"
+)
+
+# Evaluate faithfulness
+scorer = FaithfulnessScorer()
+faithfulness_score = scorer.calculate_faithfulness(
+    answer="VLOOKUP requires exact data types",
+    context="VLOOKUP syntax requires exact data type matching"
+)
+
+print(f"Precision@5: {retrieval_metrics['precision_at_5']:.3f}")
+print(f"ROUGE-1: {generation_metrics['rouge1']:.3f}")
+print(f"Faithfulness: {faithfulness_score:.3f}")
+```
+
+### LangSmith Integration
+```python
+from langsmith_integration import initialize_langsmith
+
+# Initialize LangSmith
+langsmith = initialize_langsmith(
+    api_key="your_api_key",
+    project="chunker-rag-eval"
+)
+
+# Create evaluation dataset
+test_queries = [
+    {
+        "query": "How do I fix vlookup errors? ",
+        "expected_answer": "Check data types and table references",
+        "expected_sources": ["excel_guide.md", "troubleshooting.xlsx"]
+    }
+]
+
+# Run evaluation
+results = langsmith.run_evaluation(test_queries, rag_function)
+```
+
+## 📁 Supported File Types
+
+| Type | Extensions | Processing Method | Metadata Extracted |
+|------|------------|------------------|-------------------|
+| **Text** | .txt, .md, .log | Direct text processing | Word count, sentences, keywords |
+| **Structured** | .json, .csv, .yaml, .xml | Parsed structure | Schema, data types, samples |
+| **Office** | .xlsx, .docx | Library extraction | Sheets, formulas, formatting |
+| **Code** | .py | AST parsing | Functions, classes, imports, docstrings |
+| **Documents** | .pdf | Text extraction | Pages, metadata, text content |
+
+## 🛠️ Advanced Features
+
+### Real-time Monitoring
+```python
+from watchdog_system import create_watchdog_monitor
+
+# Initialize watchdog monitor
+monitor = create_watchdog_monitor(config, process_callback)
+
+# Start monitoring
+monitor.start()
+
+# Monitor stats
+stats = monitor.get_stats()
+print(f"Queue size: {stats['queue_size']}")
+print(f"Processing files: {stats['processing_files']}")
+```
+
+### Modular File Processing
+```python
+from file_processors import process_excel_file, process_pdf_file
+
+# Process specific file types
+excel_content = process_excel_file("", "data.xlsx")
+pdf_content = process_pdf_file("", "document.pdf")
+```
+
+### Embedding Management
+```python
+from embedding_helpers import EmbeddingManager
+
+# Initialize embedding manager
+manager = EmbeddingManager(chunk_size=1000, chunk_overlap=200)
+
+# Process files for embedding
+results = batch_process_files(file_paths, manager, extract_keywords_func)
+```
+
+## 🚀 Performance & Scalability
+
+- **Parallel Processing**: Multi-threaded file processing with configurable workers
+- **Streaming**: Large file support with memory-efficient streaming
+- **Caching**: FAISS index persistence for fast startup
+- **Debouncing**: Prevents duplicate processing of rapidly changing files
+- **Graceful Degradation**: Continues working even if optional components fail
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+1. **ChromaDB Installation Fails (Windows)**
+   ```bash
+   # Use FAISS instead
+   pip install faiss-cpu
+   # Or install build tools
+   # Or use Docker deployment
+   ```
+
+2. **Ollama Not Available**
+   ```bash
+   # Install Ollama from https://ollama.ai/
+   # Pull the model
+   ollama pull nomic-embed-text
+   ```
+
+3. **Memory Issues with Large Files**
+   ```python
+   # Enable streaming in config
+   "enable_streaming": true,
+   "stream_chunk_size": 1048576  # 1MB chunks
+   ```
+
+### Performance Optimization
+
+- **Chunk Size**: Adjust based on content type (75 for police, 150 for admin)
+- **Parallel Workers**: Set based on CPU cores (default: 4)
+- **Debounce Window**: Increase for slow file systems (default: 1s)
+- **Index Persistence**: Enable for faster startup after restart
+
+## 📈 Monitoring & Analytics
+
+- **Database Tracking**: SQLite database with processing statistics
+- **Session Metrics**: Files processed, chunks created, performance metrics
+- **Error Logging**: Comprehensive error tracking and notification
+- **System Metrics**: CPU, memory, disk usage monitoring
+- **RAG Metrics**: Search performance, evaluation scores, user feedback
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details. ## 🙏 Acknowledgments
+
+- **Ollama** for local embedding models
+- **FAISS** for vector similarity search
+- **LangChain** for RAG framework
+- **LangSmith** for evaluation and tracing
+- **Watchdog** for file system monitoring
+
+```
+
+Now let me update the CHANGELOG with Celery integration:
+
+
+```markdown
+## Version 2.1.0 - 2025-10-27 - Celery Integration
+
+### 🚀 New Features
+- **Celery Task Queue Integration**: Advanced async processing with Redis broker
+- **Task Chains**: Process → RAG → Evaluate workflow with automatic retries
+- **Flower Dashboard**: Web-based monitoring at http://localhost:5555
+- **Enhanced Orchestrator**: Automated service management with health checks
+- **Graceful Fallback**: System continues working if Celery/Redis unavailable
+- **Rate Limiting**: Configurable task rate limits (10/m processing, 20/m RAG)
+- **Task Timeouts**: 300s hard limit, 240s soft limit with retries
+- **Health Monitoring**: Automated health checks every minute
+
+### 🔧 Enhancements
+- **Advanced Error Handling**: Network failure retries (3 attempts)
+- **Task Routing**: Separate queues for processing, RAG, evaluation, monitoring
+- **Comprehensive Logging**: Task start/completion/failure tracking
+- **Backward Compatibility**: Existing functionality preserved
+- **Configuration**: Celery settings in config.json
+
+### 📁 New Files
+- `celery_tasks.py` - Task definitions and chains
+- `enhanced_watchdog.py` - Celery-integrated file monitoring
+- `orchestrator.py` - Service orchestration with Flower dashboard
+- `advanced_celery_config.py` - Advanced Celery configuration
+
+### 🔄 Updated Files
+- `watcher_splitter.py` - Celery integration with fallback
+- `config.json` - Added Celery configuration options
+- `requirements_rag.txt` - Added celery, redis, flower dependencies
+- `README.md` - Celery usage instructions and monitoring guide
+
+## Version 1.2.1 - 2025-10-27 - RAG Enhancements
+```
+
+```markdown
+# Changelog
+
+All notable changes to the Enterprise Chunker system will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
