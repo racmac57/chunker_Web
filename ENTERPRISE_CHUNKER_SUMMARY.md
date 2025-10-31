@@ -59,6 +59,11 @@ C:\_chunker\
 - Startup logs show Celery availability; default `celery_enabled: false` for direct processing
 - When enabled, sidecar is also copied to `source/` (`copy_sidecar_to_source: true`)
 
+### SendTo Integration & Origin Manifests
+- Optional Windows SendTo helper drops files/folders into `02_data` and writes `<file>.origin.json`
+- Manifest fields: original_full_path, original_directory, original_filename, sent_at, integrity (sha256, size, mtime, ctime), optional hmac_sha256
+- Watcher loads manifest if present and sets sidecar.origin accordingly; falls back if absent or invalid
+
 ### File Processing Flow
 1. **Input**: Files placed in `02_data/`
 2. **Processing**: System chunks and processes files with dynamic parallel workers

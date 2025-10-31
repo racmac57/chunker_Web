@@ -45,6 +45,11 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 - Sidecar JSON written next to transcript and copied to `source/` when enabled
 - Enhanced origin metadata in sidecar (paths, sizes, timestamps)
 
+### 🖱️ Windows SendTo + Origin Manifests
+- Added optional Windows SendTo helper (`SendTo/Chunker.ps1` + `Chunker.bat`) to copy files/folders into `02_data`
+- Per-file manifest `<file>.origin.json` captures original path, times, size, SHA-256; watcher uses this to populate sidecar origin
+- Optional HMAC verification with key in `06_config/manifest_hmac.key` (best-effort, non-blocking)
+
 ### ⚙️ Defaults & Config
 - `celery_enabled` default set to `false` for direct processing unless explicitly enabled
 - Confirmed flags enabled by default:

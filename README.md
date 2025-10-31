@@ -157,7 +157,14 @@ To quickly drop files into `02_data` via right‑click:
 2. New → Shortcut → Target: `C:\_chunker\02_data` → Name: `Send to Chunker (02_data)`
 3. Right‑click any file → Send to → `Send to Chunker (02_data)`
 
-Optional PowerShell variant can write a small `.orig.json` manifest with the original path next to each copied file. The watcher will still process the copied file normally; sidecar origin fields already capture source paths by default.
+Optional PowerShell variant (recommended): `SendTo\Chunker.ps1` + `Chunker.bat`
+- Recursively copies files/folders into `02_data`, preserving relative paths
+- Writes `<filename>.origin.json` manifest (original_full_path, times, size, sha256, optional hmac)
+- Watcher reads the manifest and populates sidecar `origin` (falls back if missing)
+
+Notes
+- Discovery is recursive under `02_data` and case-insensitive for extensions
+- Optional sidecar copy-back to `source/` is enabled via `copy_sidecar_to_source`
 
 ## 🔄 Consolidation (2025-10-29)
 - New sidecar flags (config.json):
