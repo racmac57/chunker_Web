@@ -341,3 +341,19 @@ taskkill /f /im python.exe && python start_dashboard.py
 
 *Last Updated: January 2025*
 *System Version: Enterprise Chunker v2.0*
+
+
+## Documentation Locations
+
+- **Root Documentation:** README.md, CHANGELOG.md, ENTERPRISE_CHUNKER_SUMMARY.md
+- **Additional Docs:** `99_doc/` - All supporting documentation and notes
+- **Notes & Transcripts:** `99_doc/notes/` - Conversation transcripts and analysis notes
+- **Maintenance Logs:** `05_logs/maintenance/` - Directory cleanup and health reports
+
+## Snapshot Policy
+
+Legacy snapshots are stored in `**/legacy/` folders and follow a naming convention of `ProjectName_YYYY_MM_DD_HH_MM_SS`. 
+
+**Policy:** Only the latest snapshot per project is retained. Older snapshots are automatically pruned during directory maintenance.
+
+**Config Backups:** Files matching `config.json.backup_*` follow the same policy - only the most recent backup is kept.

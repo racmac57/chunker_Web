@@ -1,5 +1,23 @@
 # Changelog
 
+## [2025-10-31] - Directory Maintenance
+
+### Changed
+- Directory cleanup and normalization
+- Documentation moved to `99_doc/` structure
+- Legacy snapshot pruning (kept latest per project)
+- Removed development cruft and temporary files
+
+### Metrics
+- Items scanned: 16595
+- Files moved: 7
+- Items deleted: 627
+- Snapshots pruned: 0
+
+**Maintenance Log:** `05_logs/maintenance/2025_10_31_19_16_35/`
+
+
+
 All notable changes to the Enterprise Chunker system will be documented in this file.
 ## Version 2.1.3 - 2025-10-29 - Project Consolidation & Legacy Snapshots
 
