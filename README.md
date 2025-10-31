@@ -151,6 +151,14 @@ For high-volume processing and advanced task management:
 - [x] **Modular Architecture** - Clean separation of concerns
 - [x] **JSON Sidecar (optional)** - Per-file sidecar with chunk list, metadata, and Python code blocks
 
+### Windows “Send to” (Optional Helper)
+To quickly drop files into `02_data` via right‑click:
+1. Press Win+R → type `shell:sendto` → Enter
+2. New → Shortcut → Target: `C:\_chunker\02_data` → Name: `Send to Chunker (02_data)`
+3. Right‑click any file → Send to → `Send to Chunker (02_data)`
+
+Optional PowerShell variant can write a small `.orig.json` manifest with the original path next to each copied file. The watcher will still process the copied file normally; sidecar origin fields already capture source paths by default.
+
 ## 🔄 Consolidation (2025-10-29)
 - New sidecar flags (config.json):
   - `enable_json_sidecar` (default: true)

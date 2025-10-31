@@ -54,6 +54,11 @@ C:\_chunker\
   - for Python files: `code_blocks` with class/function spans and signatures
 - If `enable_block_summary` is true, Python transcripts append a “Code Blocks Summary” section.
 
+### Watcher Discovery & Defaults (2025-10-30)
+- Case-insensitive extension matching and clearer include/exclude logging
+- Startup logs show Celery availability; default `celery_enabled: false` for direct processing
+- When enabled, sidecar is also copied to `source/` (`copy_sidecar_to_source: true`)
+
 ### File Processing Flow
 1. **Input**: Files placed in `02_data/`
 2. **Processing**: System chunks and processes files with dynamic parallel workers

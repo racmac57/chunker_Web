@@ -34,6 +34,25 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 - Optional transcript appendix “Code Blocks Summary” for .py files (enabled by default)
 - New config flags: `enable_json_sidecar`, `enable_block_summary`, `enable_grok`
 
+## Version 2.1.4 - 2025-10-30 - Watcher Robustness & Write-back
+
+### 🔍 Discovery Improvements
+- Case-insensitive extension matching using `Path.iterdir()` with lowercased suffix
+- Enhanced debug logging for include/exclude decisions
+- Startup log now shows Celery status
+
+### 🧾 Sidecar & Write-back
+- Sidecar JSON written next to transcript and copied to `source/` when enabled
+- Enhanced origin metadata in sidecar (paths, sizes, timestamps)
+
+### ⚙️ Defaults & Config
+- `celery_enabled` default set to `false` for direct processing unless explicitly enabled
+- Confirmed flags enabled by default:
+  - `enable_json_sidecar`, `enable_block_summary`, `copy_sidecar_to_source`
+
+### 📝 Documentation
+- README and Enterprise Summary updated with discovery changes, sidecar write-back, and config notes
+
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
