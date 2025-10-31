@@ -482,6 +482,46 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **LangSmith** for evaluation and tracing
 - **Watchdog** for file system monitoring
 
+## 🔄 Version Control & GitHub
+
+### Git Repository
+This project is version-controlled using Git and backed up to GitHub.
+
+**Remote Repository:** `https://github.com/racmac57/chunker_Web.git`
+
+### Quick Git Commands
+```bash
+# Check status
+git status
+
+# Stage and commit changes
+git add -A
+git commit -m "Description of changes"
+
+# Push to GitHub
+git push origin main
+
+# View commit history
+git log --oneline -10
+```
+
+### Files Excluded from Git
+The following are automatically excluded via `.gitignore`:
+- Processed documents (`99_doc/`, `04_output/`)
+- Archived files (`03_archive/`)
+- Database files (`*.db`, `*.sqlite`)
+- Log files (`logs/`, `*.log`)
+- Virtual environments (`.venv/`, `venv/`)
+- NLTK data (`nltk_data/`)
+- Temporary and backup files
+
+### Contributing via Git
+1. Clone the repository: `git clone https://github.com/racmac57/chunker_Web.git`
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make changes and commit: `git commit -m "Feature: description"`
+4. Push to your fork and create a pull request
+
+For detailed Git setup information, see `GIT_SETUP_STATUS.md`.
 
 ## Directory Health
 
@@ -494,3 +534,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **Snapshot Policy:** Keep only the latest legacy snapshot per project. Older snapshots are pruned during maintenance. Config backups follow the same policy.
 
 **Log Location:** `05_logs/maintenance/2025_10_31_19_16_35/`
+
+**Git Status:** ✅ Repository initialized, connected to GitHub, and regularly backed up

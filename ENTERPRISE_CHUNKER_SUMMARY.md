@@ -343,9 +343,34 @@ taskkill /f /im python.exe && python start_dashboard.py
 *System Version: Enterprise Chunker v2.0*
 
 
+## 🔄 Version Control & Backup
+
+### Git Repository
+- **Repository**: Initialized and active
+- **Remote**: `https://github.com/racmac57/chunker_Web.git`
+- **Branch**: `main`
+- **Status**: ✅ Connected and regularly backed up
+
+### Git Workflow
+```bash
+# Regular backup
+git add -A
+git commit -m "Backup: $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+git push origin main
+```
+
+### Excluded from Git
+- Processed documents (`99_doc/`, `04_output/`)
+- Archived files (`03_archive/`)
+- Database files (`*.db`, `*.sqlite`)
+- Log files (`logs/`, `*.log`)
+- Virtual environments (`.venv/`, `venv/`)
+
+For complete Git setup details, see `GIT_SETUP_STATUS.md`.
+
 ## Documentation Locations
 
-- **Root Documentation:** README.md, CHANGELOG.md, ENTERPRISE_CHUNKER_SUMMARY.md
+- **Root Documentation:** README.md, CHANGELOG.md, ENTERPRISE_CHUNKER_SUMMARY.md, GIT_SETUP_STATUS.md
 - **Additional Docs:** `99_doc/` - All supporting documentation and notes
 - **Notes & Transcripts:** `99_doc/notes/` - Conversation transcripts and analysis notes
 - **Maintenance Logs:** `05_logs/maintenance/` - Directory cleanup and health reports
