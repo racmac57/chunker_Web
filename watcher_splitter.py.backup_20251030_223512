@@ -632,19 +632,10 @@ def process_file_enhanced(file_path, config):
                 with open(transcript_file, "w", encoding="utf-8") as tf:
                     # Add markdown header for admin files
                     if department == "admin":
-                        # Determine archive path for front matter
-                        dept_processed = Path(config.get("archive_dir", "processed")) / department
-                        archive_path = dept_processed / file_path.name
-
                         tf.write(f"# {clean_base.replace('_', ' ').title()}\n\n")
                         tf.write(f"**Processing Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                         tf.write(f"**Source File:** {file_path.name}\n")
-                        tf.write(f"**Source Path:** {file_path.absolute()}\n")
-                        tf.write(f"**Archive Location:** {archive_path}\n")
-                        tf.write(f"**Output Folder:** {file_output_folder}\n")
-                        tf.write(f"**Original Size:** {original_size:,} bytes\n")
-                        tf.write(f"**Total Chunks:** {len(chunk_files)}\n")
-                        tf.write(f"**Department:** {department}\n\n")
+                        tf.write(f"**Total Chunks:** {len(chunk_files)}\n\n")
                         tf.write("---\n\n")
                     
                     for chunk_file in chunk_files:
@@ -658,21 +649,6 @@ def process_file_enhanced(file_path, config):
         # Emit JSON sidecar and optional block summary for Python files
         try:
             if CONFIG.get("enable_json_sidecar", True):
-                # Capture enhanced origin metadata
-                try:
-                    file_stat = file_path.stat()
-                    file_size = file_stat.st_size
-                    modified_time = datetime.fromtimestamp(file_stat.st_mtime).isoformat()
-                    created_time = datetime.fromtimestamp(file_stat.st_ctime).isoformat()
-                except Exception:
-                    file_size = 0
-                    modified_time = None
-                    created_time = None
-
-                # Determine archive path
-                dept_processed = Path(config.get("archive_dir", "processed")) / department
-                archive_path = dept_processed / file_path.name
-
                 sidecar = {
                     "file": str(file_path),
                     "processed_at": datetime.now().isoformat(),
@@ -680,20 +656,6 @@ def process_file_enhanced(file_path, config):
                     "type": file_type,
                     "output_folder": str(file_output_folder),
                     "transcript": str(transcript_file) if 'transcript_file' in locals() else None,
-
-                    # Enhanced origin tracking
-                    "origin": {
-                        "source_path": str(file_path.absolute()),
-                        "source_directory": str(file_path.parent.absolute()),
-                        "source_filename": file_path.name,
-                        "archive_path": str(archive_path),
-                        "received_at": datetime.now().isoformat(),
-                        "file_size": file_size,
-                        "original_size": original_size,
-                        "modified_time": modified_time,
-                        "created_time": created_time,
-                    },
-
                     "chunks": [
                         {
                             "filename": cf.name,
@@ -825,9 +787,9 @@ def process_file_enhanced(file_path, config):
             try:
                 # Create source folder if it doesn't exist
                 source_folder.mkdir(parents=True, exist_ok=True)
-
+                
                 files_copied = 0
-
+                
                 # Copy chunks if enabled
                 if config.get("copy_chunks_only", True):
                     for chunk_file in chunk_files:
@@ -835,23 +797,13 @@ def process_file_enhanced(file_path, config):
                         shutil.copy2(chunk_file, dest_file)
                         files_copied += 1
                         logger.info(f"Copied chunk to source: {dest_file.name}")
-
+                
                 # Copy transcript if enabled
                 if config.get("copy_transcript_only", False) and 'transcript_file' in locals():
                     dest_transcript = source_folder / transcript_file.name
                     shutil.copy2(transcript_file, dest_transcript)
                     files_copied += 1
                     logger.info(f"Copied transcript to source: {dest_transcript.name}")
-
-                # Copy sidecar JSON to source if enabled
-                if config.get("copy_sidecar_to_source", True) and 'sidecar_path' in locals():
-                    if sidecar_path.exists():
-                        dest_sidecar = source_folder / sidecar_path.name
-                        shutil.copy2(sidecar_path, dest_sidecar)
-                        files_copied += 1
-                        logger.info(f"Copied sidecar metadata to source: {dest_sidecar.name}")
-                    else:
-                        logger.warning(f"Sidecar file not found for copy: {sidecar_path}")
                 
                 if files_copied > 0:
                     source_copy_success = True
