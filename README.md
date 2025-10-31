@@ -481,3 +481,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **LangChain** for RAG framework
 - **LangSmith** for evaluation and tracing
 - **Watchdog** for file system monitoring
+
+
+## Directory Health
+
+**Last Cleanup:** 2025-10-31 19:22:39  
+**Items Scanned:** 16595  
+**Items Moved:** 7  
+**Items Deleted:** 627  
+**Snapshots Pruned:** 0
+
+**Snapshot Policy:** Keep only the latest legacy snapshot per project. Older snapshots are pruned during maintenance. Config backups follow the same policy.
+
+**Log Location:** `05_logs/maintenance/2025_10_31_19_16_35/`
