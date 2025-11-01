@@ -13,15 +13,34 @@ import shutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
-from celery import Celery, chain, group
-from celery.exceptions import Retry, WorkerLostError
-from celery.signals import task_prerun, task_postrun, task_failure
-import redis
-from watchdog.events import FileSystemEvent
 
 logger = logging.getLogger(__name__)
 
-# Celery configuration
+# Optional Celery imports with fallback
+try:
+    from celery import Celery, chain, group
+    from celery.exceptions import Retry, WorkerLostError
+    from celery.signals import task_prerun, task_postrun, task_failure
+    CELERY_AVAILABLE = True
+except ImportError:
+    CELERY_AVAILABLE = False
+    logger.warning("Celery not available. Processing functions will work without async tasks.")
+
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger.warning("Redis not available. Task coordination disabled.")
+
+try:
+    from watchdog.events import FileSystemEvent
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    WATCHDOG_AVAILABLE = False
+    logger.warning("Watchdog not available. File monitoring disabled.")
+
+# Celery configuration (only if available)
 CELERY_CONFIG = {
     'broker_url': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
     'result_backend': os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
@@ -38,12 +57,37 @@ CELERY_CONFIG = {
     'worker_disable_rate_limits': True,
 }
 
-# Initialize Celery app
-app = Celery('chunker_v2')
-app.config_from_object(CELERY_CONFIG)
+# Initialize Celery app (only if available)
+if CELERY_AVAILABLE:
+    app = Celery('chunker_v2')
+    app.config_from_object(CELERY_CONFIG)
+else:
+    app = None
 
-# Redis client for coordination
-redis_client = redis.Redis.from_url(CELERY_CONFIG['broker_url'])
+# Redis client for coordination (only if available)
+if REDIS_AVAILABLE:
+    try:
+        redis_client = redis.Redis.from_url(CELERY_CONFIG['broker_url'])
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}")
+        redis_client = None
+else:
+    redis_client = None
+
+# Create a no-op decorator for when Celery is not available
+if not CELERY_AVAILABLE:
+    def celery_task_decorator(*args, **kwargs):
+        """No-op decorator when Celery is not available"""
+        def decorator(func):
+            return func
+        return decorator
+    
+    # Make app.task work when app is None
+    class MockApp:
+        def task(self, *args, **kwargs):
+            return celery_task_decorator(*args, **kwargs)
+    
+    app = MockApp()
 
 class TaskCoordinator:
     """
@@ -134,57 +178,56 @@ class TaskCoordinator:
         except Exception as e:
             logger.error(f"Error marking file failed: {e}")
 
-# Task routing and configuration with priority support
-CELERY_CONFIG.update({
-    'task_routes': {
-        'celery_tasks.process_file_task': {'queue': 'file_processing'},
-        'celery_tasks.batch_process_files_task': {'queue': 'batch_processing'},
-        'celery_tasks.add_to_rag_task': {'queue': 'rag_processing'},
-        'celery_tasks.evaluate_rag_task': {'queue': 'evaluation'},
-        'celery_tasks.health_check_task': {'queue': 'monitoring'},
-        'celery_tasks.process_priority_file_task': {'queue': 'priority_processing'},
-    },
-    'task_annotations': {
-        'celery_tasks.process_file_task': {'rate_limit': '10/m'},
-        'celery_tasks.batch_process_files_task': {'rate_limit': '5/m'},
-        'celery_tasks.add_to_rag_task': {'rate_limit': '20/m'},
-        'celery_tasks.evaluate_rag_task': {'rate_limit': '2/m'},
-        'celery_tasks.process_priority_file_task': {'rate_limit': '50/m'},  # Higher rate for priority
-    },
-    'beat_schedule': {
-        'health-check': {
-            'task': 'celery_tasks.health_check_task',
-            'schedule': 60.0,  # Every minute
+# Task routing and configuration with priority support (only if Celery available)
+if CELERY_AVAILABLE:
+    CELERY_CONFIG.update({
+        'task_routes': {
+            'celery_tasks.process_file_task': {'queue': 'file_processing'},
+            'celery_tasks.batch_process_files_task': {'queue': 'batch_processing'},
+            'celery_tasks.add_to_rag_task': {'queue': 'rag_processing'},
+            'celery_tasks.evaluate_rag_task': {'queue': 'evaluation'},
+            'celery_tasks.health_check_task': {'queue': 'monitoring'},
+            'celery_tasks.process_priority_file_task': {'queue': 'priority_processing'},
         },
-        'cleanup-old-tasks': {
-            'task': 'celery_tasks.cleanup_old_tasks',
-            'schedule': 3600.0,  # Every hour
+        'task_annotations': {
+            'celery_tasks.process_file_task': {'rate_limit': '10/m'},
+            'celery_tasks.batch_process_files_task': {'rate_limit': '5/m'},
+            'celery_tasks.add_to_rag_task': {'rate_limit': '20/m'},
+            'celery_tasks.evaluate_rag_task': {'rate_limit': '2/m'},
+            'celery_tasks.process_priority_file_task': {'rate_limit': '50/m'},  # Higher rate for priority
         },
-    },
-})
+        'beat_schedule': {
+            'health-check': {
+                'task': 'celery_tasks.health_check_task',
+                'schedule': 60.0,  # Every minute
+            },
+            'cleanup-old-tasks': {
+                'task': 'celery_tasks.cleanup_old_tasks',
+                'schedule': 3600.0,  # Every hour
+            },
+        },
+    })
+    
+    # Re-initialize with updated config if needed
+    if not isinstance(app, type('MockApp', (), {})):
+        app = Celery('chunker_v2')
+        app.config_from_object(CELERY_CONFIG)
+    
+    # Task signals for monitoring
+    @task_prerun.connect
+    def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
+        """Log task start."""
+        logger.info(f"Task {task.name} started: {task_id}")
 
-# Initialize Celery app
-app = Celery('chunker_v2')
-app.config_from_object(CELERY_CONFIG)
+    @task_postrun.connect
+    def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kwds):
+        """Log task completion."""
+        logger.info(f"Task {task.name} completed: {task_id} - State: {state}")
 
-# Redis client for coordination
-redis_client = redis.Redis.from_url(CELERY_CONFIG['broker_url'])
-
-# Task signals for monitoring
-@task_prerun.connect
-def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
-    """Log task start."""
-    logger.info(f"Task {task.name} started: {task_id}")
-
-@task_postrun.connect
-def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, retval=None, state=None, **kwds):
-    """Log task completion."""
-    logger.info(f"Task {task.name} completed: {task_id} - State: {state}")
-
-@task_failure.connect
-def task_failure_handler(sender=None, task_id=None, exception=None, traceback=None, einfo=None, **kwds):
-    """Log task failures."""
-    logger.error(f"Task {sender.name} failed: {task_id} - {exception}")
+    @task_failure.connect
+    def task_failure_handler(sender=None, task_id=None, exception=None, traceback=None, einfo=None, **kwds):
+        """Log task failures."""
+        logger.error(f"Task {sender.name} failed: {task_id} - {exception}")
 
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
 def process_file_task(self, file_path: str, dest_path: Optional[str], 

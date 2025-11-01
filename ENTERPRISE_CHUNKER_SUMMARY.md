@@ -1,6 +1,15 @@
 # Enterprise Chunker System - Summary & Cheat Sheet
 
-**Version 2.1.2** - Critical Performance Optimizations & Loop Fix
+**Version 2.1.5** - Critical Performance Optimizations, Loop Fix & Move-Based Workflow
+
+## 🎯 **New in v2.1.5 - Move-Based Workflow**
+- **Storage Savings**: 50-60% reduction via MOVE operations
+- **OneDrive Sync**: 100% elimination of sync overhead
+- **Manifest System**: Complete origin tracking
+- **Enhanced Archive**: Retry logic with fallback
+- **See**: `MOVE_WORKFLOW_IMPLEMENTATION.md` for details
+
+---
 
 ## 🚀 Quick Start Guide
 

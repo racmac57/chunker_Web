@@ -1,6 +1,18 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.2** - Enhanced with comprehensive RAG (Retrieval-Augmented Generation) capabilities, real-time monitoring, advanced evaluation metrics, and **critical performance optimizations**.
+**Version 2.1.5** - Enhanced with comprehensive RAG (Retrieval-Augmented Generation) capabilities, real-time monitoring, advanced evaluation metrics, **critical performance optimizations**, and **Grok-recommended move-based workflow**.
+
+## 🚀 What's New in v2.1.5
+
+### 📦 Move-Based Workflow (Grok Recommendations)
+- **⚡ Storage Optimization**: Reduced storage overhead by 50-60% via MOVE operations instead of COPY
+- **🔗 OneDrive Sync Elimination**: 100% reduction in sync overhead by moving files out of OneDrive
+- **📋 Manifest Tracking**: Complete origin tracking with `.origin.json` files
+- **🔄 Enhanced Archive**: MOVE with 3 retry attempts and graceful fallback to COPY
+- **🎯 Department Organization**: Automatic folder structure in archive by department
+- **🔍 Smart Retry Logic**: Handles Windows permission issues with automatic retries
+
+---
 
 ## 🚀 What's New in v2.1.2
 

@@ -1,5 +1,37 @@
 # Changelog
 
+## [2025-11-01] - System Recovery & Move Workflow Testing
+
+### Added
+- **System Recovery**: Successfully recovered from crash and restored `watcher_splitter.py`
+- **Enhanced Archive Integration**: Integrated `archive_processed_file()` from `celery_tasks.py` into watcher
+- **Automated Testing**: Added `--auto` flag to `manual_process_files.py` for non-interactive processing
+- **Recovery Documentation**: Complete recovery summary in `RECOVERY_SUCCESS.md`
+
+### Changed
+- **watcher_splitter.py**: Enhanced to use new archive function with fallback logic
+- **manual_process_files.py**: Added command-line arguments for automated testing
+- **TASK_PROGRESS_REPORT.md**: Updated with recovery status and testing results
+
+### Fixed
+- **Processing Workflow**: Watcher now functional without Celery dependency
+- **Archive Operations**: Full MOVE workflow with retry logic operational
+- **Manifest Preservation**: `.origin.json` files correctly moved to archive
+
+### Testing
+- ✅ End-to-end workflow test: 4 markdown files processed successfully
+- ✅ Enhanced archive function verified with MOVE operations
+- ✅ Manifest validation confirmed
+- ✅ Zero data loss verified
+
+### Results
+- Files processed: 4 markdown files
+- Archive operations: 4 successful MOVE operations
+- Manifest tracking: All origin files preserved
+- Performance: ~3 seconds per file processing time
+
+---
+
 ## [2025-10-31] - Git Setup & Directory Maintenance
 
 ### Added

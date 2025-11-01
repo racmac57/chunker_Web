@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import logging
+import argparse
 from pathlib import Path
 from typing import List
 import time
@@ -131,7 +132,7 @@ def process_file_manually(file_path: Path, config: dict) -> bool:
         logger.exception(f"Error processing {file_path.name}: {e}")
         return False
 
-def main():
+def main(auto_confirm=False):
     """Main entry point for manual file processing"""
     logger.info("\n" + "="*80)
     logger.info("MANUAL FILE PROCESSING SCRIPT - Chunker_v2")
@@ -168,11 +169,14 @@ def main():
     logger.info(f"Found {len(files_to_process)} files to process")
     logger.info(f"{'='*80}\n")
 
-    # Ask for confirmation
-    response = input(f"Process {len(files_to_process)} files? (y/n): ").strip().lower()
-    if response != 'y':
-        logger.info("Processing cancelled by user")
-        return
+    # Ask for confirmation unless auto mode
+    if not auto_confirm:
+        response = input(f"Process {len(files_to_process)} files? (y/n): ").strip().lower()
+        if response != 'y':
+            logger.info("Processing cancelled by user")
+            return
+    else:
+        logger.info("Auto-confirm mode: Processing files automatically")
 
     # Process each file
     successful = 0
@@ -205,8 +209,12 @@ def main():
         logger.info(f"Archived files moved to: {config['archive_dir']}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Manual file processing for Chunker_v2')
+    parser.add_argument('--auto', action='store_true', help='Auto-confirm processing without prompting')
+    args = parser.parse_args()
+    
     try:
-        main()
+        main(auto_confirm=args.auto)
     except KeyboardInterrupt:
         logger.info("\n\nProcessing interrupted by user")
         sys.exit(0)
