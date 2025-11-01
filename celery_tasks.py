@@ -8,6 +8,8 @@ import json
 import logging
 import time
 import traceback
+import subprocess
+import shutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -915,7 +917,7 @@ def create_output_files(file_path: Path, chunks: List[str], config: Dict[str, An
 
 def archive_processed_file(file_path: Path, config: Dict[str, Any]) -> str:
     """
-    Archive the processed file.
+    Enhanced archive with move operation, manifest validation, retry logic, and Git integration.
     
     Args:
         file_path: Path to the file
@@ -924,20 +926,139 @@ def archive_processed_file(file_path: Path, config: Dict[str, Any]) -> str:
     Returns:
         Archive path
     """
+    # Check if move_to_archive is enabled
+    if not config.get('move_to_archive', False):
+        logger.debug(f"Archive move disabled in config, skipping: {file_path.name}")
+        return str(file_path)
+    
     try:
-        archive_dir = Path(config['archive_dir'])
+        # Validate .origin.json manifest if it exists
+        manifest_path = file_path.with_name(f"{file_path.name}.origin.json")
+        manifest_data = None
+        
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, 'r', encoding='utf-8') as f:
+                    manifest_data = json.load(f)
+                logger.info(f"Validated manifest for: {file_path.name}")
+            except Exception as e:
+                logger.warning(f"Failed to load manifest for {file_path.name}: {e}")
+        else:
+            logger.debug(f"No manifest found for: {file_path.name}")
+        
+        # Determine department from manifest or use default
+        department = "admin"  # default
+        if manifest_data and "department" in manifest_data:
+            department = manifest_data["department"]
+        
+        # Create department-specific archive folder
+        archive_dir = Path(config['archive_dir']) / department
         archive_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         archive_path = archive_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"
         
-        file_path.rename(archive_path)
+        # Handle duplicate names
+        counter = 1
+        while archive_path.exists():
+            archive_path = archive_dir / f"{file_path.stem}_{timestamp}_{counter}{file_path.suffix}"
+            counter += 1
+        
+        # Retry MOVE operation up to 3 times
+        move_success = False
+        for attempt in range(3):
+            try:
+                logger.info(f"Attempting MOVE to archive (attempt {attempt + 1}): {file_path.name}")
+                
+                # Use shutil.move for better error handling
+                shutil.move(str(file_path), str(archive_path))
+                move_success = True
+                logger.info(f"Successfully moved to archive: {archive_path.name}")
+                break
+                
+            except Exception as e:
+                logger.warning(f"MOVE attempt {attempt + 1} failed for {file_path.name}: {e}")
+                if attempt < 2:  # Don't sleep on last attempt
+                    time.sleep(1)
+        
+        # Fallback to COPY if all MOVE attempts failed
+        if not move_success:
+            logger.error(f"All MOVE attempts failed, falling back to COPY: {file_path.name}")
+            try:
+                shutil.copy2(str(file_path), str(archive_path))
+                logger.warning(f"Used COPY fallback for archive: {archive_path.name}")
+            except Exception as copy_error:
+                logger.error(f"COPY fallback also failed: {copy_error}")
+                return ""
+        
+        # Move manifest file if it exists
+        if manifest_path.exists():
+            try:
+                manifest_archive = archive_path.with_name(f"{archive_path.name}.origin.json")
+                shutil.move(str(manifest_path), str(manifest_archive))
+                logger.debug(f"Moved manifest to archive: {manifest_archive.name}")
+            except Exception as e:
+                logger.warning(f"Failed to move manifest: {e}")
+        
+        # Git integration: Commit archived file
+        if config.get('git_enabled', False):
+            try:
+                git_commit_archive(archive_path, file_path.name, timestamp)
+            except Exception as e:
+                logger.warning(f"Git commit failed: {e}")
         
         return str(archive_path)
         
     except Exception as e:
-        logger.error(f"Error archiving file: {e}")
+        logger.error(f"Error archiving file {file_path.name}: {e}")
         return ""
+
+def git_commit_archive(archive_path: Path, original_filename: str, timestamp: str) -> None:
+    """
+    Commit archived file to Git with proper message and tagging.
+    
+    Args:
+        archive_path: Path to archived file
+        original_filename: Original filename
+        timestamp: Timestamp string
+    """
+    try:
+        # Get archive directory (assume repo root is archive_dir parent)
+        repo_root = archive_path.parent.parent.parent  # Go up to C:/_chunker
+        git_dir = repo_root / '.git'
+        
+        if not git_dir.exists():
+            logger.debug("Git repository not found, skipping commit")
+            return
+        
+        # Change to repo root and commit
+        result = subprocess.run(
+            ['git', 'add', str(archive_path.relative_to(repo_root))],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            logger.warning(f"Git add failed: {result.stderr}")
+            return
+        
+        # Commit with descriptive message
+        commit_msg = f"Archive {original_filename} - {timestamp}"
+        result = subprocess.run(
+            ['git', 'commit', '-m', commit_msg],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            logger.warning(f"Git commit failed: {result.stderr}")
+        else:
+            logger.info(f"Git commit successful: {commit_msg}")
+        
+    except Exception as e:
+        logger.warning(f"Git operation failed: {e}")
 
 def copy_outputs_to_source(output_files: List[str], dest_path: str) -> None:
     """
