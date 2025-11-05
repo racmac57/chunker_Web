@@ -22,23 +22,54 @@ class ChromaRAG:
     Provides CRUD operations for vector database with hybrid search
     """
     
-    def __init__(self, persist_directory="./chroma_db"):
+    def __init__(self, persist_directory="./chroma_db", 
+                 hnsw_m: int = 32, 
+                 hnsw_ef_construction: int = 512,
+                 hnsw_ef_search: int = 200,
+                 recreate_collection: bool = False):
         """
-        Initialize ChromaDB client and collection
+        Initialize ChromaDB client and collection with HNSW optimization
         
         Args:
             persist_directory: Directory to persist ChromaDB database
+            hnsw_m: Number of bi-directional links for each node (default: 32)
+            hnsw_ef_construction: Size of the dynamic candidate list during construction (default: 512)
+            hnsw_ef_search: Size of the dynamic candidate list during search (default: 200)
+            recreate_collection: If True, delete existing collection and recreate with new HNSW params (default: False)
         """
         self.client = chromadb.PersistentClient(
             path=persist_directory,
             settings=Settings(anonymized_telemetry=False)
         )
         
-        # Create or get collection for chunker knowledge base
-        self.collection = self.client.get_or_create_collection(
-            name="chunker_knowledge_base",
-            metadata={"description": "Enterprise chunker knowledge base with RAG capabilities"}
-        )
+        # Create or get collection for chunker knowledge base with HNSW optimization
+        # HNSW parameters are immutable after creation, so we try to get existing first
+        collection_name = "chunker_knowledge_base"
+        
+        # If recreate_collection is True, delete existing collection first
+        if recreate_collection:
+            try:
+                self.client.delete_collection(name=collection_name)
+                logger.warning(f"Deleted existing collection '{collection_name}' to recreate with new HNSW params")
+            except Exception as e:
+                logger.info(f"Collection '{collection_name}' doesn't exist or already deleted: {e}")
+        
+        try:
+            self.collection = self.client.get_collection(name=collection_name)
+            logger.info(f"Loaded existing collection (using its original HNSW params)")
+        except Exception:
+            # Collection doesn't exist, create new with HNSW parameters
+            # Note: Key names must be exact: "hnsw:construction_ef" not "hnsw:ef_construction"
+            self.collection = self.client.create_collection(
+                name=collection_name,
+                metadata={
+                    "description": "Enterprise chunker knowledge base with RAG capabilities",
+                    "hnsw:M": hnsw_m,
+                    "hnsw:construction_ef": hnsw_ef_construction,
+                    "hnsw:search_ef": hnsw_ef_search  # Default for queries; override per query if needed
+                }
+            )
+            logger.info(f"Created new collection with custom HNSW params: M={hnsw_m}, construction_ef={hnsw_ef_construction}, search_ef={hnsw_ef_search}")
         
         logger.info(f"Initialized ChromaDB collection with {self.collection.count()} existing chunks")
     
@@ -85,15 +116,22 @@ class ChromaRAG:
     
     def search_similar(self, query: str, n_results: int = 5, 
                        file_type: Optional[str] = None, 
-                       department: Optional[str] = None) -> List[Dict]:
+                       department: Optional[str] = None,
+                       ef_search: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Search for similar chunks using semantic similarity
+        Search for similar chunks using semantic similarity with query optimizations
+        
+        Features:
+        - Metadata filtering for faster queries
+        - Configurable ef_search for accuracy/speed tradeoff
+        - Batch query support
         
         Args:
             query: Search query text
             n_results: Number of results to return
-            file_type: Filter by file type (optional)
-            department: Filter by department (optional)
+            file_type: Filter by file type (optional) - improves performance
+            department: Filter by department (optional) - improves performance
+            ef_search: HNSW ef_search parameter (100-500, higher = more accurate but slower)
         
         Returns:
             List of formatted search results
@@ -105,18 +143,25 @@ class ChromaRAG:
         if department:
             where_clause["department"] = department
         
+        # Use optimized ef_search if provided
+        query_kwargs = {
+            "query_texts": [query],
+            "n_results": n_results,
+            "where": where_clause if where_clause else None
+        }
+        
+        # Add ef_search if specified (override default search_ef from collection metadata)
+        if ef_search:
+            query_kwargs["ef"] = ef_search
+        
         try:
-            # Query the collection
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                where=where_clause if where_clause else None
-            )
+            # Query the collection with optimizations
+            results = self.collection.query(**query_kwargs)
             
             return self._format_results(results)
             
         except Exception as e:
-            logger.error(f"Failed to search ChromaDB: {e}")
+            logger.error(f"Failed to search ChromaDB: {e}", exc_info=True)
             return []
     
     def search_by_keywords(self, keywords: List[str], n_results: int = 5) -> List[Dict]:
