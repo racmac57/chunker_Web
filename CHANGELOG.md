@@ -1,5 +1,67 @@
 # Changelog
 
+All notable changes to the Enterprise Chunker system will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Planned
+- Additional performance optimizations
+- Enhanced error recovery mechanisms
+
+---
+
+## [v2.1.6] - 2025-11-05 - RAG Backfill Optimization and Multiprocessing
+
+### Added
+- **Multiprocessing Support**: Parallel file reading and metadata extraction with 4-8 workers
+- **Parallel ChromaDB Inserts**: Separate ChromaDB connections per process for concurrent inserts
+- **Empty Folder Logging**: Comprehensive logging of folders without chunk files
+- **Count Discrepancy Alerts**: Warnings when expected vs actual chunk counts differ
+- **Chunk Existence Verification**: Pre-insertion checks to avoid duplicate processing
+- **CPU Saturation Monitoring**: Real-time CPU usage tracking with alerts (>90% threshold)
+- **Performance Profiling**: Optional cProfile integration for bottleneck identification
+- **Batch Size Optimization**: Configurable batch sizes (500-1000 chunks) for ChromaDB efficiency
+- **Verification Scripts**: `verify_backfill.py` and `verify_chunk_completeness.py` for validation
+
+### Changed
+- **backfill_knowledge_base.py**: Complete rewrite with multiprocessing and optimization
+  - Parallel file processing with Pool workers
+  - Separate ChromaDB connections per worker process
+  - Batch size optimized to 750 chunks (from 1000)
+  - Enhanced error handling and retry logic
+- **rag_integration.py**: HNSW parameter configuration fixed
+  - Correct parameter names: `hnsw:construction_ef` and `hnsw:search_ef`
+  - Proper collection creation with `get_collection()` first, then `create_collection()`
+  - HNSW settings: M=32, ef_construction=512, ef_search=200
+- **config.json**: Added backfill configuration options
+  - `backfill_batch_size`: 750 (optimized for ChromaDB)
+  - `backfill_multiprocessing`: true
+  - `backfill_num_workers`: null (auto-detects 4-8)
+  - `backfill_profile`: false
+  - `expected_chunk_count`: null (for discrepancy alerts)
+
+### Fixed
+- **HNSW Parameter Errors**: Fixed "Failed to parse hnsw parameters" by using correct metadata keys
+- **ChromaDB Collection Creation**: Fixed collection initialization to handle existing collections
+- **Duplicate Detection**: Enhanced duplicate checking before insertion
+- **File Existence Verification**: Added checks before processing chunk files
+
+### Performance
+- **Throughput**: Increased from ~5 chunks/second to 100-200+ chunks/second with multiprocessing
+- **Processing Time**: Reduced from ~10 minutes to 2-3 minutes for 3,200 chunks
+- **Memory Efficiency**: Optimized batch processing reduces peak memory usage
+- **CPU Utilization**: Better CPU core utilization with parallel processing
+
+### Documentation
+- Updated version references to 2.1.6
+- Added comprehensive verification procedures
+- Enhanced error logging and troubleshooting guides
+
+---
+
 ## [2025-11-01] - System Recovery & Move Workflow Testing
 
 ### Added
