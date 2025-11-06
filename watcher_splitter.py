@@ -17,8 +17,32 @@ import json
 import psutil
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
+from typing import Iterable, Tuple, Optional, Dict, Any, List
+from metadata_enrichment import (
+    EnrichmentResult,
+    enrich_metadata,
+    enrich_chunk,
+    build_sidecar_payload,
+    tag_suffix_for_filename,
+    merge_manifest_metadata,
+    SIDECAR_SUFFIX,
+    dump_json,
+)
+from incremental_updates import VersionTracker
 from chunker_db import ChunkerDatabase
 from notification_system import NotificationSystem
+from monitoring_system import MonitoringSystem
+from backup_manager import BackupManager
+
+try:
+    from deduplication import DeduplicationManager
+except ImportError:
+    DeduplicationManager = None  # type: ignore
+
+try:
+    from incremental_updates import VersionTracker
+except ImportError:
+    VersionTracker = None  # type: ignore
 
 # Resolve config path (supports PyInstaller .exe)
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -38,6 +62,15 @@ except:
 # Load configuration
 with open(os.path.join(base_path, "config.json")) as f:
     CONFIG = json.load(f)
+
+# Feature toggle state (initialized after database/notifications are ready)
+METADATA_CONFIG: Dict[str, Any] = {}
+METADATA_ENABLED: bool = False
+DEDUP_CONFIG: Dict[str, Any] = {}
+dedup_manager = None
+INCREMENTAL_CONFIG: Dict[str, Any] = {}
+version_tracker = None
+monitoring: Optional[MonitoringSystem] = None
 
 # Department-specific configurations
 DEPARTMENT_CONFIGS = {
@@ -115,12 +148,143 @@ session_stats = {
     "total_bytes_created": 0,
     "parallel_jobs_completed": 0,
     "department_breakdown": {},
+    "skipped_unsupported": 0,
     "performance_metrics": {
         "avg_processing_time": 0,
         "peak_memory_usage": 0,
         "peak_cpu_usage": 0
-    }
+    },
+    "deduplication": {
+        "duplicates_detected": 0,
+        "chunks_skipped": 0
+    },
+    "incremental_updates": {
+        "processed_files": 0,
+        "skipped_files": 0,
+        "removed_artifacts": 0,
+    },
+    "tag_counts": {},
 }
+
+def initialize_feature_components() -> None:
+    """Refresh feature toggle dependencies (metadata, dedup, monitoring, incremental)."""
+    global METADATA_CONFIG, METADATA_ENABLED
+    global DEDUP_CONFIG, dedup_manager
+    global INCREMENTAL_CONFIG, version_tracker
+    global monitoring
+
+    METADATA_CONFIG = CONFIG.get("metadata_enrichment", {}) or {}
+    METADATA_ENABLED = bool(METADATA_CONFIG.get("enabled", False))
+
+    DEDUP_CONFIG = CONFIG.get("deduplication", {}) or {}
+    dedup_manager = None
+    if DEDUP_CONFIG.get("enabled"):
+        if DeduplicationManager is None:
+            logger.warning(
+                "Deduplication enabled but deduplication module is unavailable."
+            )
+        else:
+            try:
+                dedup_manager = DeduplicationManager(
+                    persist_directory=CONFIG.get("chroma_persist_dir", "./chroma_db"),
+                    config=DEDUP_CONFIG,
+                    preload=True,
+                )
+                logger.info(
+                    "Deduplication initialized with %d known hashes",
+                    len(dedup_manager.hash_index),
+                )
+            except Exception as dedup_error:
+                logger.warning(
+                    "Failed to initialize deduplication manager: %s", dedup_error
+                )
+                dedup_manager = None
+
+    INCREMENTAL_CONFIG = CONFIG.get("incremental_updates", {}) or {}
+    version_tracker = None
+    if INCREMENTAL_CONFIG.get("enabled"):
+        try:
+            tracker_config = dict(INCREMENTAL_CONFIG)
+            tracker_config.setdefault("base_dir", base_path)
+            version_tracker = VersionTracker(tracker_config, logger=logger)
+            logger.info(
+                "Incremental updates enabled. Tracking file: %s",
+                version_tracker.version_file,
+            )
+        except Exception as tracker_error:
+            logger.warning(
+                "Failed to initialize version tracker: %s", tracker_error
+            )
+            version_tracker = None
+
+    if monitoring and getattr(monitoring, "enabled", False):
+        try:
+            monitoring.stop_monitoring()
+        except Exception as stop_error:  # noqa: BLE001
+            logger.debug("Failed to stop previous monitoring thread: %s", stop_error)
+
+    monitoring = MonitoringSystem(
+        CONFIG,
+        db=db,
+        notification_system=notifications,
+        logger=logger,
+    )
+
+
+def reload_feature_components() -> None:
+    """Public helper for tests to reinitialize feature dependencies."""
+    initialize_feature_components()
+
+
+initialize_feature_components()
+
+def load_manifest_data(file_path: Path) -> Tuple[Dict[str, Any], Path]:
+    """
+    Load an existing .origin.json manifest if available; otherwise return an empty dict.
+    """
+    manifest_path = file_path.with_name(f"{file_path.name}.origin.json")
+    manifest_data: Dict[str, Any] = {}
+    if manifest_path.exists():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_data = json.load(manifest_file)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to load manifest for %s: %s", file_path.name, exc, exc_info=True
+            )
+            manifest_data = {}
+    return manifest_data, manifest_path
+
+
+def update_session_tag_counts(tags: Iterable[str]) -> None:
+    if not tags:
+        return
+    for tag in tags:
+        if not tag:
+            continue
+        session_stats["tag_counts"][tag] = session_stats["tag_counts"].get(tag, 0) + 1
+
+
+def cleanup_previous_artifacts(artifact_paths: Iterable[str]) -> int:
+    """Remove previously generated artifacts recorded by the version tracker."""
+    removed = 0
+    for artifact in artifact_paths:
+        if not artifact:
+            continue
+        target = Path(artifact)
+        try:
+            if target.is_file():
+                target.unlink()
+                removed += 1
+            elif target.is_dir():
+                shutil.rmtree(target)
+                removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as cleanup_error:  # noqa: BLE001
+            logger.debug("Failed to remove tracked artifact %s: %s", target, cleanup_error)
+    return removed
+
 
 def get_department_config(file_path):
     """Determine department configuration based on file path or content"""
@@ -287,6 +451,24 @@ def validate_chunk_content_enhanced(chunk, min_length=50, department_config=None
 def process_file_enhanced(file_path, config):
     """Enhanced file processing with comprehensive tracking"""
     start_time = time.time()
+    safe_text_extensions = set(
+        config.get(
+            "text_extensions",
+            config.get(
+                "supported_extensions",
+                [".txt", ".md", ".json", ".csv", ".py", ".log"],
+            ),
+        )
+    )
+    file_extension = file_path.suffix.lower()
+    if file_extension not in safe_text_extensions:
+        logger.info(
+            f"Skipping unsupported file type ({file_extension}): {file_path.name}"
+        )
+        session_stats["skipped_unsupported"] = (
+            session_stats.get("skipped_unsupported", 0) + 1
+        )
+        return True
     department_config = get_department_config(file_path)
     department = department_config.get("department", "default")
     
@@ -328,6 +510,48 @@ def process_file_enhanced(file_path, config):
                     logger.warning(f"Failed to log read error to database: {db_error}")
             return False
 
+        # Load manifest metadata and enrich (optional)
+        manifest_data, manifest_path = load_manifest_data(file_path)
+        if METADATA_ENABLED:
+            enrichment: EnrichmentResult = enrich_metadata(
+                text,
+                file_path,
+                manifest_data=manifest_data,
+            )
+            manifest_data = merge_manifest_metadata(manifest_data, enrichment)
+            update_session_tag_counts(enrichment.tags)
+            if enrichment.tags:
+                logger.info(
+                    "Metadata enrichment tags for %s: %s",
+                    file_path.name,
+                    ", ".join(enrichment.tags),
+                )
+        else:
+            enrichment = EnrichmentResult(tags=[], metadata={}, summaries={})
+
+        manifest_data["last_processed_at"] = datetime.now().isoformat()
+
+        # Prefer department inferred from enrichment/manifest when available
+        if METADATA_ENABLED:
+            enriched_department = (
+                manifest_data.get("department")
+                or enrichment.metadata.get("department")
+                or department
+            )
+            if enriched_department and enriched_department != department:
+                department = enriched_department
+                department_config["department"] = enriched_department
+        manifest_data["department"] = department
+
+        try:
+            dump_json(manifest_data, manifest_path)
+        except Exception as manifest_error:  # noqa: BLE001
+            logger.warning(
+                "Failed to persist manifest metadata for %s: %s",
+                file_path.name,
+                manifest_error,
+            )
+
         # Validate input text
         min_size = department_config.get("min_file_size_bytes", 100)
         if len(text.strip()) < min_size:
@@ -340,6 +564,9 @@ def process_file_enhanced(file_path, config):
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
             return False
+
+        if content_hash:
+            manifest_data["last_content_hash"] = content_hash
 
         # Chunk the text
         sentence_limit = department_config.get("chunk_size", 100)
@@ -363,39 +590,183 @@ def process_file_enhanced(file_path, config):
         
         # Create folder named after the source file
         file_output_folder = Path(output_folder) / clean_base
+        if version_tracker and file_output_folder.exists():
+            try:
+                shutil.rmtree(file_output_folder)
+                logger.info(
+                    "Incremental updates: cleared previous outputs for %s",
+                    file_path.name,
+                )
+            except Exception as cleanup_error:  # noqa: BLE001
+                logger.warning(
+                    "Incremental updates: failed to clear outputs for %s: %s",
+                    file_path.name,
+                    cleanup_error,
+                )
         os.makedirs(file_output_folder, exist_ok=True)
         
-        chunk_files = []
+        chunk_files: List[Path] = []
         valid_chunks = 0
         total_chunk_size = 0
+        chunk_records: List[Dict[str, Any]] = []
+        artifacts_for_distribution: List[Path] = []
+        sidecar_path: Optional[Path] = None
+        generated_chunk_ids: List[str] = []
 
-        # Write chunks with validation
+        # Write chunks with validation and deduplication
         for i, chunk in enumerate(chunks):
-            if validate_chunk_content_enhanced(chunk, department_config=department_config):
-                chunk_file = file_output_folder / f"{timestamp}_{clean_base}_chunk{i+1}.txt"
-                try:
-                    with open(chunk_file, "w", encoding="utf-8") as cf:
-                        cf.write(chunk)
-                    # Verify file was written correctly
-                    written_size = os.path.getsize(chunk_file)
-                    if written_size > 0:
-                        chunk_files.append(chunk_file)
-                        valid_chunks += 1
-                        total_chunk_size += written_size
-                        logger.info(f"Created chunk: {chunk_file.name} ({len(chunk)} chars, {written_size} bytes)")
-                    else:
-                        logger.warning(f"Zero-byte chunk prevented: {chunk_file.name}")
-                        session_stats["zero_byte_prevented"] += 1
-                        os.remove(chunk_file)
-                except Exception as e:
-                    logger.error(f"Failed to write chunk {i+1} for {file_path.name}: {e}")
-                    if db:
-                        try:
-                            db.log_error("ChunkWriteError", str(e), traceback.format_exc(), str(file_path))
-                        except Exception as db_error:
-                            logger.warning(f"Failed to log chunk write error to database: {db_error}")
+            chunk_index = i + 1
+
+            if not validate_chunk_content_enhanced(chunk, department_config=department_config):
+                logger.warning(f"Invalid chunk {chunk_index} skipped for {file_path.name}")
+                continue
+
+            if METADATA_ENABLED:
+                chunk_metadata = enrich_chunk(chunk, enrichment.tags)
+                chunk_tags = chunk_metadata.get("tags", [])
+                tag_suffix = tag_suffix_for_filename(chunk_tags)
             else:
-                logger.warning(f"Invalid chunk {i+1} skipped for {file_path.name}")
+                chunk_metadata = {
+                    "tags": [],
+                    "key_terms": [],
+                    "summary": "",
+                    "char_length": len(chunk),
+                }
+                chunk_tags = []
+                tag_suffix = ""
+
+            chunk_filename_base = f"{timestamp}_{clean_base}_chunk{chunk_index}"
+            if tag_suffix:
+                chunk_filename = f"{chunk_filename_base}_{tag_suffix}.txt"
+            else:
+                chunk_filename = f"{chunk_filename_base}.txt"
+
+            chunk_id = build_chunk_id(timestamp, clean_base, chunk_index)
+            chunk_file = file_output_folder / chunk_filename
+            chunk_dedup_id = chunk_id
+            dedup_hash_value = None
+
+            if dedup_manager:
+                try:
+                    is_duplicate, dedup_hash_value, existing_ids = dedup_manager.is_duplicate(
+                        chunk,
+                        chunk_id=chunk_dedup_id,
+                    )
+                except Exception as dedup_error:
+                    logger.warning(
+                        "Deduplication check failed for %s chunk %s: %s",
+                        file_path.name,
+                        chunk_index,
+                        dedup_error,
+                    )
+                    is_duplicate, dedup_hash_value, existing_ids = False, None, []
+
+                if is_duplicate:
+                    session_stats["deduplication"]["duplicates_detected"] += 1
+                    session_stats["deduplication"]["chunks_skipped"] += 1
+                    preview = existing_ids[:3]
+                    if len(existing_ids) > 3:
+                        preview.append("...")
+                    logger.info(
+                        "Deduplication skipped duplicate chunk %s (matches: %s)",
+                        chunk_dedup_id,
+                        preview if preview else "existing chunk",
+                    )
+                    continue
+
+            try:
+                with open(chunk_file, "w", encoding="utf-8") as cf:
+                    cf.write(chunk)
+                # Verify file was written correctly
+                written_size = os.path.getsize(chunk_file)
+                if written_size > 0:
+                    chunk_files.append(chunk_file)
+                    artifacts_for_distribution.append(chunk_file)
+                    valid_chunks += 1
+                    total_chunk_size += written_size
+                    logger.info(f"Created chunk: {chunk_file.name} ({len(chunk)} chars, {written_size} bytes)")
+                    if dedup_manager and dedup_hash_value:
+                        dedup_manager.add_hash(dedup_hash_value, chunk_dedup_id)
+                    chunk_record = {
+                        "chunk_id": chunk_id,
+                        "chunk_index": chunk_index,
+                        "file": chunk_file.name,
+                        "tags": chunk_tags,
+                        "key_terms": chunk_metadata.get("key_terms", []),
+                        "summary": chunk_metadata.get("summary", ""),
+                        "char_length": chunk_metadata.get("char_length", len(chunk)),
+                        "byte_length": written_size,
+                    }
+                    chunk_records.append(chunk_record)
+                    generated_chunk_ids.append(chunk_id)
+                    if METADATA_ENABLED:
+                        update_session_tag_counts(chunk_tags)
+                else:
+                    logger.warning(f"Zero-byte chunk prevented: {chunk_file.name}")
+                    session_stats["zero_byte_prevented"] += 1
+                    os.remove(chunk_file)
+            except Exception as e:
+                logger.error(f"Failed to write chunk {chunk_index} for {file_path.name}: {e}")
+                if db:
+                    try:
+                        db.log_error("ChunkWriteError", str(e), traceback.format_exc(), str(file_path))
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log chunk write error to database: {db_error}")
+
+        if generated_chunk_ids:
+            manifest_data["chunk_ids"] = generated_chunk_ids
+
+        manifest_copy_path = file_output_folder / f"{timestamp}_{clean_base}.origin.json"
+        try:
+            dump_json(manifest_data, manifest_copy_path)
+            artifacts_for_distribution.append(manifest_copy_path)
+        except Exception as manifest_copy_error:  # noqa: BLE001
+            logger.warning(
+                "Failed to write manifest copy for %s: %s",
+                file_path.name,
+                manifest_copy_error,
+            )
+
+        if chunk_records and config.get("enable_json_sidecar", True):
+            sidecar_filename = f"{timestamp}_{clean_base}{SIDECAR_SUFFIX}"
+            sidecar_path = file_output_folder / sidecar_filename
+            sidecar_payload = build_sidecar_payload(
+                source_path=file_path,
+                manifest_path=manifest_copy_path,
+                enrichment=enrichment,
+                chunk_records=chunk_records,
+                timestamp=timestamp,
+            )
+            try:
+                dump_json(sidecar_payload, sidecar_path)
+                artifacts_for_distribution.append(sidecar_path)
+                logger.info(
+                    "Created sidecar %s with %d tags",
+                    sidecar_path.name,
+                    len(enrichment.tags),
+                )
+            except Exception as sidecar_error:  # noqa: BLE001
+                logger.warning(
+                    "Failed to write sidecar for %s: %s",
+                    file_path.name,
+                    sidecar_error,
+                )
+
+        if (
+            config.get("copy_sidecar_to_source", False)
+            and sidecar_path
+            and sidecar_path.exists()
+        ):
+            try:
+                dest_sidecar = file_path.parent / sidecar_path.name
+                shutil.copy2(sidecar_path, dest_sidecar)
+                logger.info("Copied sidecar to source directory: %s", dest_sidecar.name)
+            except Exception as copy_error:  # noqa: BLE001
+                logger.warning(
+                    "Failed to copy sidecar %s to source: %s",
+                    sidecar_path.name,
+                    copy_error,
+                )
 
         # Concatenate all chunk files into a final transcript
         if chunk_files:
@@ -420,6 +791,7 @@ def process_file_enhanced(file_path, config):
                             tf.write(cf.read())
                             tf.write("\n\n")
                 logger.info(f"Final transcript created: {transcript_file.name}")
+                artifacts_for_distribution.append(transcript_file)
             except Exception as e:
                 logger.error(f"Failed to create final transcript for {file_path.name}: {e}")
 
@@ -450,7 +822,7 @@ def process_file_enhanced(file_path, config):
         if config.get("cloud_repo_root"):
             cloud_dir = Path(config["cloud_repo_root"]) / clean_base
             for attempt in range(3):
-                if copy_to_cloud_enhanced(chunk_files, cloud_dir, department_config):
+                if copy_to_cloud_enhanced(artifacts_for_distribution, cloud_dir, department_config):
                     logger.info(f"Cloud sync successful: {cloud_dir}")
                     cloud_success = True
                     break
@@ -483,6 +855,37 @@ def process_file_enhanced(file_path, config):
                                     processing_time, True, None, department, department_config)
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
+
+            if version_tracker:
+                try:
+                    if content_hash is None:
+                        content_hash = version_tracker.hash_content(text)
+                    metadata_payload = {
+                        "department": department,
+                        "artifacts": [
+                            str(path)
+                            for path in artifacts_for_distribution
+                            if path is not None
+                        ],
+                        "chunk_ids": list(generated_chunk_ids),
+                        "output_folder": str(file_output_folder),
+                        "sidecar": str(sidecar_path) if sidecar_path else None,
+                        "manifest_copy": str(manifest_copy_path),
+                        "timestamp": timestamp,
+                    }
+                    version_tracker.mark_processed(
+                        file_path,
+                        content_hash,
+                        chunk_ids=generated_chunk_ids,
+                        metadata=metadata_payload,
+                    )
+                    session_stats["incremental_updates"]["processed_files"] += 1
+                except Exception as tracker_error:  # noqa: BLE001
+                    logger.warning(
+                        "Incremental updates: failed to persist version data for %s: %s",
+                        file_path.name,
+                        tracker_error,
+                    )
         
         return move_success
         
@@ -516,6 +919,7 @@ def process_files_parallel(file_list, config):
     if not file_list:
         return []
     
+    global monitoring
     max_workers = min(4, multiprocessing.cpu_count(), len(file_list))
     logger.info(f"Processing {len(file_list)} files with {max_workers} workers")
     
@@ -530,9 +934,20 @@ def process_files_parallel(file_list, config):
         # Collect results with timeout
         for future in future_to_file:
             try:
+                file_path = future_to_file[future]
                 result = future.result(timeout=300)  # 5 minute timeout per file
                 results.append(result)
                 session_stats["parallel_jobs_completed"] += 1
+                if monitoring and monitoring.enabled:
+                    monitoring.record_processing_event(
+                        bool(result),
+                        {"file": file_path.name, "mode": "parallel"},
+                    )
+                    if not result:
+                        monitoring.record_error(
+                            "ProcessingFailure",
+                            f"Parallel processing failed for {file_path.name}",
+                        )
             except Exception as e:
                 file_path = future_to_file[future]
                 logger.error(f"Parallel processing failed for {file_path}: {e}")
@@ -542,6 +957,15 @@ def process_files_parallel(file_list, config):
                     except Exception as db_error:
                         logger.warning(f"Failed to log parallel processing error to database: {db_error}")
                 results.append(False)
+                if monitoring and monitoring.enabled:
+                    monitoring.record_processing_event(
+                        False, {"file": file_path.name, "mode": "parallel"}
+                    )
+                    monitoring.record_error(
+                        "ProcessingException",
+                        f"Parallel worker raised exception for {file_path.name}: {e}",
+                        severity="critical",
+                    )
     
     successful = sum(1 for r in results if r)
     logger.info(f"Parallel processing complete: {successful}/{len(file_list)} files successful")
@@ -686,6 +1110,11 @@ def log_session_stats():
             logger.info("Performance Metrics:")
             for metric, val in value.items():
                 logger.info(f"  {metric}: {val}")
+        elif key == "tag_counts":
+            logger.info("Tag Counts:")
+            sorted_tags = sorted(value.items(), key=lambda item: item[1], reverse=True)
+            for tag, count in sorted_tags:
+                logger.info("  %s: %s", tag, count)
         else:
             logger.info(f"{key}: {value}")
 
@@ -728,6 +1157,22 @@ def main():
         f"Dashboard: http://localhost:5000"
     )
     
+    backup_manager = None
+    try:
+        backup_config = CONFIG.get("backup", {})
+        if backup_config.get("enabled"):
+            backup_manager = BackupManager(backup_config, CONFIG, logger=logger)
+            schedule_settings = backup_config.get("schedule", {}) or {}
+            run_immediately = bool(schedule_settings.get("run_at_start", False))
+            backup_manager.schedule_backups(run_immediately=run_immediately)
+            logger.info("Automated backups enabled.")
+    except Exception as backup_error:
+        logger.exception("Failed to initialize backup manager: %s", backup_error)
+        backup_manager = None
+
+    if monitoring and monitoring.enabled:
+        monitoring.start_monitoring()
+
     try:
         while True:
             try:
@@ -785,13 +1230,34 @@ def main():
                         # Process files sequentially
                         for file_path in new_files:
                             try:
-                                if process_file_enhanced(file_path, CONFIG):
+                                success = process_file_enhanced(file_path, CONFIG)
+                                if monitoring and monitoring.enabled:
+                                    monitoring.record_processing_event(
+                                        bool(success),
+                                        {"file": file_path.name, "mode": "sequential"},
+                                    )
+                                    if not success:
+                                        monitoring.record_error(
+                                            "ProcessingFailure",
+                                            f"Failed to process {file_path.name}",
+                                        )
+                                if success:
                                     processed_files.add(file_path.name)
                                     logger.info(f"Successfully processed: {file_path.name}")
                                 else:
                                     logger.error(f"Failed to process: {file_path.name}")
                             except Exception as e:
                                 logger.exception(f"Error processing {file_path.name}: {e}")
+                                if monitoring and monitoring.enabled:
+                                    monitoring.record_processing_event(
+                                        False,
+                                        {"file": file_path.name, "mode": "sequential"},
+                                    )
+                                    monitoring.record_error(
+                                        "ProcessingException",
+                                        f"Exception while processing {file_path.name}: {e}",
+                                        severity="critical",
+                                    )
                                 if db:
                                     try:
                                         db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
@@ -849,6 +1315,10 @@ def main():
     finally:
         # Final statistics and cleanup
         log_session_stats()
+        if backup_manager:
+            backup_manager.stop_scheduled_backups()
+        if monitoring and monitoring.enabled:
+            monitoring.stop_monitoring()
         
         # Send shutdown notification
         notifications.send_email(

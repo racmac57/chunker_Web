@@ -15,6 +15,7 @@ Features:
 - Count discrepancy alerts
 """
 
+import hashlib
 import os
 import sys
 import json
@@ -23,11 +24,16 @@ import time
 import uuid
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple, Union, Iterable
 import re
 import multiprocessing
 from multiprocessing import Pool, cpu_count
 from functools import partial
+
+try:
+    from incremental_updates import VersionTracker
+except ImportError:
+    VersionTracker = None  # type: ignore
 
 # Setup logging first (before other imports that might use logger)
 import logging
@@ -56,6 +62,14 @@ try:
 except ImportError:
     TQDM_AVAILABLE = False
     logger.warning("tqdm not available - progress bars disabled")
+
+try:
+    from deduplication import DeduplicationManager
+except ImportError:
+    DeduplicationManager = None  # type: ignore
+
+from metadata_enrichment import SIDECAR_SUFFIX, MANIFEST_ENRICHMENT_KEY
+from incremental_updates import VersionTracker, build_chunk_id, normalize_timestamp
 
 # NLTK initialization (outside loop for performance)
 try:
@@ -87,6 +101,12 @@ def load_config() -> Dict[str, Any]:
         sys.exit(1)
 
 
+def compute_content_hash(text: str) -> str:
+    normalized = (text or "").strip().lower()
+    normalized = " ".join(normalized.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
     """
     Extract keywords from text using simple frequency analysis
@@ -115,6 +135,38 @@ def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
     return [word for word, _ in counter.most_common(max_keywords)]
 
 
+def dedupe_list(values: Optional[Iterable[Any]]) -> List[str]:
+    """
+    Deduplicate an iterable while preserving order and returning strings.
+    """
+    if not values:
+        return []
+
+    seen = set()
+    ordered: List[str] = []
+    for value in values:
+        if value is None:
+            continue
+        value_str = str(value).strip()
+        if not value_str or value_str in seen:
+            continue
+        seen.add(value_str)
+        ordered.append(value_str)
+    return ordered
+
+
+def load_json_safely(path: Path) -> Dict[str, Any]:
+    """
+    Load JSON data from disk, returning an empty dict on failure.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load JSON from %s: %s", path, exc)
+        return {}
+
+
 def parse_chunk_filename(filename: str) -> Dict[str, Any]:
     """
     Parse chunk filename to extract metadata using robust regex
@@ -139,10 +191,10 @@ def parse_chunk_filename(filename: str) -> Dict[str, Any]:
     
     # Extract base name (remove timestamp and chunk info using regex)
     base_name = re.sub(
-        r'_\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_chunk\d+\.txt$',
-        '',
-        filename
-    ).strip('_')
+        r'_\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_chunk\d+(?:_[^.]+)?\.txt$',
+        "",
+        filename,
+    ).strip("_")
     
     # Fallback if regex didn't match
     if not base_name or base_name == filename:
@@ -179,22 +231,136 @@ def find_chunk_files(output_dir: Path, expected_count: Optional[int] = None) -> 
             continue
         
         folder_chunks = list(folder_path.glob("*_chunk*.txt"))
-        
+
         if not folder_chunks:
             empty_folders.append(folder_path.name)
             logger.debug(f"Empty folder (no chunks): {folder_path.name}")
             continue
-        
+
         folders_with_chunks.append(folder_path.name)
-            
+
+        sidecar_path = next((p for p in folder_path.glob(f"*{SIDECAR_SUFFIX}")), None)
+        sidecar_data: Dict[str, Any] = (
+            load_json_safely(sidecar_path) if sidecar_path and sidecar_path.exists() else {}
+        )
+
+        manifest_path_candidate = next((p for p in folder_path.glob("*.origin.json")), None)
+        manifest_reference: Optional[str] = None
+        manifest_data: Dict[str, Any] = {}
+
+        if manifest_path_candidate and manifest_path_candidate.exists():
+            manifest_reference = str(manifest_path_candidate)
+            manifest_data = load_json_safely(manifest_path_candidate)
+        else:
+            manifest_hint = sidecar_data.get("manifest_path")
+            if isinstance(manifest_hint, str):
+                manifest_reference = manifest_hint
+                hint_path = Path(manifest_hint)
+                if hint_path.exists():
+                    manifest_data = load_json_safely(hint_path)
+
+        manifest_enrichment = manifest_data.get(MANIFEST_ENRICHMENT_KEY, {})
+        if not isinstance(manifest_enrichment, dict):
+            manifest_enrichment = {}
+
+        manifest_metadata = manifest_enrichment.get("metadata", {})
+        if not isinstance(manifest_metadata, dict):
+            manifest_metadata = {}
+
+        sidecar_metadata = sidecar_data.get("metadata", {})
+        if not isinstance(sidecar_metadata, dict):
+            sidecar_metadata = {}
+
+        merged_metadata = {**manifest_metadata, **sidecar_metadata}
+        enrichment_version = (
+            merged_metadata.get("enrichment_version")
+            or manifest_enrichment.get("enrichment_version")
+            or sidecar_data.get("enrichment_version")
+        )
+        if enrichment_version:
+            merged_metadata["enrichment_version"] = enrichment_version
+
+        sidecar_tags = sidecar_data.get("tags", [])
+        if not isinstance(sidecar_tags, list):
+            sidecar_tags = []
+        manifest_tags = manifest_data.get("tags", [])
+        if not isinstance(manifest_tags, list):
+            manifest_tags = []
+        combined_tags = dedupe_list([*sidecar_tags, *manifest_tags])
+
+        source_path_value = sidecar_data.get("source_path") or manifest_data.get("source_path")
+        if isinstance(source_path_value, Path):
+            source_path_value = str(source_path_value)
+        elif source_path_value is not None:
+            source_path_value = str(source_path_value)
+
+        chunk_metadata_map: Dict[str, Dict[str, Any]] = {}
+        sidecar_chunks = sidecar_data.get("chunks", [])
+        if isinstance(sidecar_chunks, list):
+            for entry in sidecar_chunks:
+                if isinstance(entry, dict) and entry.get("file"):
+                    chunk_metadata_map[entry["file"]] = entry
+
+        merged_summaries: Dict[str, Any] = {}
+        manifest_summaries = manifest_enrichment.get("summaries")
+        if isinstance(manifest_summaries, dict):
+            merged_summaries.update(manifest_summaries)
+        sidecar_summaries = sidecar_data.get("summaries")
+        if isinstance(sidecar_summaries, dict):
+            merged_summaries.update(sidecar_summaries)
+
         # Look for chunk files in this folder
         for file_path in folder_chunks:
             try:
                 file_info = parse_chunk_filename(file_path.name)
+
+                per_chunk_meta = chunk_metadata_map.get(file_path.name, {})
+                chunk_tags = dedupe_list(per_chunk_meta.get("tags"))
+                if not chunk_tags:
+                    chunk_tags = combined_tags
+
+                chunk_key_terms = dedupe_list(
+                    per_chunk_meta.get("key_terms")
+                    or merged_metadata.get("key_terms")
+                )
+
+                per_chunk_metadata = dict(merged_metadata)
+                if chunk_key_terms:
+                    per_chunk_metadata["key_terms"] = chunk_key_terms
+
+                chunk_id = per_chunk_meta.get("chunk_id")
+                if not chunk_id:
+                    chunk_id = build_chunk_id(
+                        file_info["timestamp"],
+                        file_info["base_name"],
+                        file_info["chunk_index"],
+                    )
+
+                enriched_metadata = {
+                    "file_tags": combined_tags,
+                    "chunk_tags": chunk_tags,
+                    "key_terms": chunk_key_terms,
+                    "metadata": per_chunk_metadata,
+                    "chunk_summary": per_chunk_meta.get("summary", ""),
+                    "file_summary": merged_summaries.get("file_summary", ""),
+                }
+                if enrichment_version:
+                    enriched_metadata["enrichment_version"] = enrichment_version
+                if per_chunk_meta.get("char_length"):
+                    enriched_metadata["char_length"] = per_chunk_meta["char_length"]
+                if per_chunk_meta.get("byte_length"):
+                    enriched_metadata["byte_length"] = per_chunk_meta["byte_length"]
+
                 file_info.update({
                     "file_path": file_path,
+                    "chunk_id": chunk_id,
                     "folder_name": folder_path.name,
-                    "file_size": file_path.stat().st_size
+                    "file_size": file_path.stat().st_size,
+                    "file_tags": combined_tags,
+                    "sidecar_path": str(sidecar_path) if sidecar_path else None,
+                    "manifest_path": manifest_reference,
+                    "source_path": source_path_value,
+                    "enriched_metadata": enriched_metadata,
                 })
                 chunk_files.append(file_info)
             except Exception as e:
@@ -280,21 +446,28 @@ def process_chunk_file_parallel(chunk_info: Dict[str, Any]) -> Optional[Dict[str
         if not chunk_text:
             return None
         
-        # Extract keywords (precomputed in parallel)
-        keywords = extract_keywords(chunk_text)
-        
+        enriched_metadata = chunk_info.get("enriched_metadata", {}) or {}
+        file_tags = enriched_metadata.get("file_tags") or chunk_info.get("file_tags") or []
+        chunk_tags = enriched_metadata.get("chunk_tags") or file_tags
+        key_terms = enriched_metadata.get("key_terms")
+        if key_terms:
+            key_terms = dedupe_list(key_terms)
+        else:
+            key_terms = extract_keywords(chunk_text)
+
         # Prepare metadata
         department = get_department_from_folder(chunk_info["folder_name"])
-        
-        # Convert timestamp to ISO format
-        timestamp_parts = chunk_info["timestamp"].split("_")
-        if len(timestamp_parts) == 6:
-            try:
-                timestamp_iso = f"{timestamp_parts[0]}-{timestamp_parts[1]}-{timestamp_parts[2]}T{timestamp_parts[3]}:{timestamp_parts[4]}:{timestamp_parts[5]}"
-            except Exception:
-                timestamp_iso = datetime.now().isoformat()
-        else:
-            timestamp_iso = datetime.now().isoformat()
+        source_path = chunk_info.get("source_path")
+        timestamp_iso = normalize_timestamp(chunk_info["timestamp"])
+        chunk_id = (
+            chunk_info.get("expected_chunk_id")
+            or chunk_info.get("chunk_id")
+            or build_chunk_id(
+                chunk_info["timestamp"],
+                chunk_info["base_name"],
+                chunk_info["chunk_index"],
+            )
+        )
         
         # Prepare ChromaDB metadata
         chroma_metadata = {
@@ -303,19 +476,57 @@ def process_chunk_file_parallel(chunk_info: Dict[str, Any]) -> Optional[Dict[str
             "chunk_index": str(chunk_info["chunk_index"]),
             "timestamp": timestamp_iso,
             "department": department,
-            "keywords": json.dumps(keywords),
+            "keywords": json.dumps(key_terms),
+            "key_terms": json.dumps(key_terms),
             "file_size": str(chunk_info.get("file_size", 0)),
             "processing_time": "0",
-            "source_folder": chunk_info.get("folder_name", "")
+            "source_folder": chunk_info.get("folder_name", ""),
+            "content_hash": compute_content_hash(chunk_text),
         }
-        
-        # Generate chunk ID
-        chunk_id = f"{timestamp_iso}_{chunk_info['base_name']}_chunk{chunk_info['chunk_index']}"
+
+        if chunk_tags:
+            chroma_metadata["tags"] = json.dumps(chunk_tags)
+        if file_tags:
+            chroma_metadata["file_tags"] = json.dumps(file_tags)
+
+        metadata_payload = enriched_metadata.get("metadata")
+        if isinstance(metadata_payload, dict):
+            for meta_key, meta_value in metadata_payload.items():
+                if meta_value is None:
+                    continue
+                if isinstance(meta_value, (list, dict)):
+                    chroma_metadata[meta_key] = json.dumps(meta_value)
+                else:
+                    chroma_metadata[meta_key] = str(meta_value)
+
+        if enriched_metadata.get("chunk_summary"):
+            chroma_metadata["chunk_summary"] = enriched_metadata["chunk_summary"]
+        if enriched_metadata.get("file_summary"):
+            chroma_metadata.setdefault("file_summary", enriched_metadata["file_summary"])
+        if enriched_metadata.get("enrichment_version"):
+            chroma_metadata["enrichment_version"] = str(enriched_metadata["enrichment_version"])
+
+        char_length = enriched_metadata.get("char_length") or len(chunk_text)
+        chroma_metadata["char_length"] = str(char_length)
+
+        byte_length = enriched_metadata.get("byte_length")
+        if byte_length:
+            chroma_metadata["byte_length"] = str(byte_length)
+
+        manifest_path = chunk_info.get("manifest_path")
+        if manifest_path:
+            chroma_metadata["manifest_path"] = manifest_path
+        sidecar_path = chunk_info.get("sidecar_path")
+        if sidecar_path:
+            chroma_metadata["sidecar_path"] = sidecar_path
+        if source_path:
+            chroma_metadata["source_path"] = source_path
         
         return {
             "id": chunk_id,
             "text": chunk_text,
-            "metadata": chroma_metadata
+            "metadata": chroma_metadata,
+            "source_path": source_path,
         }
     except Exception as e:
         logger.error(f"Failed to process chunk {chunk_info.get('file_path', 'unknown')}: {e}", exc_info=True)
@@ -452,7 +663,9 @@ def backfill_to_knowledge_base(
     config: Dict[str, Any],
     batch_size: int = 1000,
     use_multiprocessing: bool = True,
-    num_workers: Optional[int] = None
+    num_workers: Optional[int] = None,
+    *,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
     Add all chunks to ChromaDB knowledge base using batch operations
@@ -471,6 +684,7 @@ def backfill_to_knowledge_base(
         batch_size: Number of chunks per batch (500-1000 recommended)
         use_multiprocessing: Enable parallel processing (default: True)
         num_workers: Number of parallel workers (default: min(8, cpu_count))
+        force: Reindex even if version tracker reports no changes
         
     Returns:
         Statistics dictionary with performance metrics
@@ -485,12 +699,102 @@ def backfill_to_knowledge_base(
         logger.error("Failed to import ChromaRAG. Make sure rag_integration.py exists.", exc_info=True)
         return {"status": "error", "message": "Import failed"}
     
+    chunk_files = list(chunk_files)
+
     # Initialize ChromaDB
     chroma_persist_dir = config.get("chroma_persist_dir", "./chroma_db")
     chroma_rag = ChromaRAG(persist_directory=chroma_persist_dir)
     
     initial_count = chroma_rag.collection.count()
     logger.info(f"Initialized ChromaDB. Existing chunks: {initial_count}")
+
+    dedup_config = config.get("deduplication", {}) or {}
+    dedup_manager = None
+    if dedup_config.get("enabled"):
+        if DeduplicationManager is None:
+            logger.warning(
+                "Deduplication enabled in config but module unavailable. Skipping dedup checks."
+            )
+        else:
+            try:
+                dedup_manager = DeduplicationManager(
+                    persist_directory=chroma_persist_dir,
+                    config=dedup_config,
+                    preload=True,
+                )
+                logger.info(
+                    "Deduplication manager initialized with %d known hashes",
+                    len(dedup_manager.hash_index),
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize deduplication manager: %s", exc)
+                dedup_manager = None
+
+    incremental_config = config.get("incremental_updates", {}) or {}
+    version_tracker: Optional[VersionTracker] = None
+    source_chunk_id_map: Dict[str, List[str]] = {}
+    incremental_skip_count = 0
+
+    if incremental_config.get("enabled"):
+        try:
+            tracker_config = dict(incremental_config)
+            tracker_config.setdefault("base_dir", str(Path.cwd()))
+            version_tracker = VersionTracker(tracker_config, logger=logger)
+            logger.info(
+                "Backfill incremental tracking enabled using %s",
+                version_tracker.version_file,
+            )
+        except Exception as tracker_error:
+            logger.warning(
+                "Incremental updates: failed to initialize version tracker: %s",
+                tracker_error,
+            )
+            version_tracker = None
+
+    if version_tracker:
+        filtered_chunk_files: List[Dict[str, Any]] = []
+        grouped_infos: Dict[str, Dict[str, Any]] = {}
+
+        for info in chunk_files:
+            chunk_id_value = info.get("chunk_id") or build_chunk_id(
+                info["timestamp"],
+                info["base_name"],
+                info["chunk_index"],
+            )
+            info["expected_chunk_id"] = chunk_id_value
+            source_path = info.get("source_path")
+            if source_path:
+                source_key = str(source_path)
+                group = grouped_infos.setdefault(source_key, {"infos": [], "ids": []})
+                group["infos"].append(info)
+                group["ids"].append(chunk_id_value)
+            else:
+                filtered_chunk_files.append(info)
+
+        skipped_sources: Dict[str, int] = {}
+        for source_path, data in grouped_infos.items():
+            if force or version_tracker.needs_indexing(source_path, data["ids"]):
+                source_chunk_id_map[source_path] = data["ids"]
+                filtered_chunk_files.extend(data["infos"])
+            else:
+                incremental_skip_count += len(data["infos"])
+                skipped_sources[source_path] = len(data["infos"])
+
+        if skipped_sources:
+            logger.info(
+                "Incremental updates: skipping %d chunks across %d unchanged sources",
+                incremental_skip_count,
+                len(skipped_sources),
+            )
+        elif force:
+            logger.info("Incremental updates: forced reindex enabled for backfill run.")
+
+        chunk_files = filtered_chunk_files
+    elif incremental_config.get("enabled"):
+        logger.info(
+            "Incremental updates configured but tracker unavailable; processing all chunks."
+        )
+        version_tracker = None
     
     # Performance tracking
     start_time = time.time()
@@ -501,7 +805,12 @@ def backfill_to_knowledge_base(
         "total_chunks": len(chunk_files),
         "successful": 0,
         "failed": 0,
-        "skipped": 0,
+        "skipped": incremental_skip_count,
+        "dedup_skipped": 0,
+        "incremental": {
+            "skipped": incremental_skip_count,
+            "recorded": 0,
+        },
         "errors": [],
         "batches_processed": 0,
         "batches_failed": 0,
@@ -510,8 +819,8 @@ def backfill_to_knowledge_base(
             "initial_memory_mb": initial_memory / (1024 * 1024) if initial_memory else 0,
             "peak_memory_mb": 0,
             "total_time_seconds": 0,
-            "throughput_chunks_per_second": 0
-        }
+            "throughput_chunks_per_second": 0,
+        },
     }
     
     # Determine number of workers for multiprocessing
@@ -581,32 +890,90 @@ def backfill_to_knowledge_base(
     # Filter out existing chunks and prepare batches
     for chunk_data in processed_chunks:
         chunk_id = chunk_data["id"]
-        
+        chunk_text = chunk_data["text"]
+        chunk_metadata = chunk_data.get("metadata") or {}
+
         # Skip if already exists
         if chunk_id in existing_ids:
             continue
+
+        chunk_hash = compute_content_hash(chunk_text)
+        
+        if dedup_manager:
+            try:
+                is_duplicate, dedup_hash, existing_hash_ids = dedup_manager.is_duplicate(
+                    chunk_text,
+                    chunk_id=chunk_id,
+                )
+            except Exception as dedup_error:
+                logger.warning(
+                    "Deduplication check failed for chunk %s: %s",
+                    chunk_id,
+                    dedup_error,
+                )
+                is_duplicate = False
+                existing_hash_ids = []
+                dedup_hash = chunk_hash
+            else:
+                if dedup_hash:
+                    chunk_hash = dedup_hash
+                    if isinstance(chunk_metadata, dict):
+                        chunk_metadata["content_hash"] = chunk_hash
+
+            if dedup_manager and is_duplicate:
+                stats["dedup_skipped"] += 1
+                stats["skipped"] += 1
+                preview = existing_hash_ids[:3]
+                if len(existing_hash_ids) > 3:
+                    preview.append("...")
+                logger.info(
+                    "Deduplication skipped chunk %s (matches: %s)",
+                    chunk_id,
+                    preview if preview else "existing chunk",
+                )
+                continue
         
         # Ensure unique IDs within batch
         if chunk_id in ids:
-            chunk_id = f"{chunk_id}_{uuid.uuid4().hex[:8]}"
+            new_chunk_id = f"{chunk_id}_{uuid.uuid4().hex[:8]}"
+            logger.debug("Adjusted duplicate chunk ID %s -> %s", chunk_id, new_chunk_id)
+            chunk_id = new_chunk_id
+        
+        if isinstance(chunk_metadata, dict):
+            chunk_metadata = dict(chunk_metadata)
+            chunk_metadata["content_hash"] = chunk_hash
+        else:
+            chunk_metadata = {"content_hash": chunk_hash}
+        
+        if dedup_manager:
+            dedup_manager.add_hash(chunk_hash, chunk_id)
         
         # Add to batch
-        texts.append(chunk_data["text"])
-        metadatas.append(chunk_data["metadata"])
+        texts.append(chunk_text)
+        metadatas.append(chunk_metadata)
         ids.append(chunk_id)
         
         # Create batch when it reaches batch_size (500-1000 recommended)
         if len(texts) >= batch_size:
-            batches_for_insertion.append((texts.copy(), metadatas.copy(), ids.copy()))
+            batches_for_insertion.append(
+                (texts.copy(), metadatas.copy(), ids.copy())
+            )
             texts.clear()
             metadatas.clear()
             ids.clear()
     
     # Add final batch if any remain
     if texts:
-        batches_for_insertion.append((texts.copy(), metadatas.copy(), ids.copy()))
+        batches_for_insertion.append(
+            (texts.copy(), metadatas.copy(), ids.copy())
+        )
     
     logger.info(f"Prepared {len(batches_for_insertion)} batches for ChromaDB insertion")
+    if dedup_manager:
+        logger.info(
+            "Deduplication skipped %d chunk(s) during preparation",
+            stats["dedup_skipped"],
+        )
     
     # Monitor CPU usage
     cpu_percentages = []
@@ -617,7 +984,12 @@ def backfill_to_knowledge_base(
         stats["performance"]["initial_cpu_percent"] = cpu_percent
     
     # Insert batches - use parallel insertion if multiprocessing enabled
-    if use_multiprocessing and num_workers > 1 and len(batches_for_insertion) > 1:
+    use_parallel_inserts = (
+        use_multiprocessing
+        and num_workers > 1
+        and len(batches_for_insertion) > 1
+    )
+    if use_parallel_inserts:
         logger.info(f"Using parallel ChromaDB insertion with {min(num_workers, len(batches_for_insertion))} workers")
         
         # Prepare batch data with persist directory for separate connections
@@ -648,7 +1020,11 @@ def backfill_to_knowledge_base(
     else:
         # Sequential insertion (fallback)
         logger.info("Using sequential ChromaDB insertion")
-        iterator = tqdm(batches_for_insertion, desc="Adding to ChromaDB", unit="batch") if TQDM_AVAILABLE else batches_for_insertion
+        iterator = (
+            tqdm(batches_for_insertion, desc="Adding to ChromaDB", unit="batch")
+            if TQDM_AVAILABLE
+            else batches_for_insertion
+        )
         
         for texts, metadatas, ids in iterator:
             success = add_with_retry(chroma_rag.collection, texts, metadatas, ids)
@@ -717,6 +1093,27 @@ def backfill_to_knowledge_base(
         logger.info(f"  Memory increase: {stats['performance']['peak_memory_mb'] - stats['performance']['initial_memory_mb']:.2f} MB")
     logger.info(f"{'='*60}")
     
+    if version_tracker:
+        recorded_sources = 0
+        for source_path, chunk_ids in source_chunk_id_map.items():
+            if not chunk_ids:
+                continue
+            try:
+                version_tracker.mark_indexed(source_path, chunk_ids=chunk_ids)
+                recorded_sources += 1
+            except Exception as tracker_error:  # noqa: BLE001
+                logger.warning(
+                    "Incremental updates: failed to mark indexed for %s: %s",
+                    source_path,
+                    tracker_error,
+                )
+        stats["incremental"]["recorded"] = recorded_sources
+        if recorded_sources:
+            logger.info(
+                "Incremental updates: marked %d source file(s) as indexed.",
+                recorded_sources,
+            )
+    
     return {
         "status": "success",
         "stats": stats,
@@ -758,6 +1155,7 @@ def main() -> None:
     use_multiprocessing = config.get("backfill_multiprocessing", True)
     num_workers = config.get("backfill_num_workers")
     enable_profile = config.get("backfill_profile", False)
+    force_reindex = "--force" in sys.argv
     
     # Simple command-line parsing (can be enhanced with argparse later)
     if "--no-multiprocessing" in sys.argv:
@@ -794,6 +1192,8 @@ def main() -> None:
         else:
             logger.info(f"Workers: auto (4-8 based on CPU cores)")
     logger.info(f"Estimated batches: {(len(chunk_files) + batch_size - 1) // batch_size}")
+    if force_reindex:
+        logger.info("Incremental updates: force flag detected; backfill will reindex all eligible chunks.")
     response = input("Proceed with backfill? (y/n): ").strip().lower()
     if response != 'y':
         logger.info("Backfill cancelled by user")
@@ -814,7 +1214,8 @@ def main() -> None:
                 config, 
                 batch_size=batch_size,
                 use_multiprocessing=use_multiprocessing,
-                num_workers=num_workers
+                num_workers=num_workers,
+                force=force_reindex,
             )
         finally:
             profiler.disable()
@@ -828,11 +1229,12 @@ def main() -> None:
             stats.print_stats(20)
     else:
         result = backfill_to_knowledge_base(
-            chunk_files, 
-            config, 
+            chunk_files,
+            config,
             batch_size=batch_size,
             use_multiprocessing=use_multiprocessing,
-            num_workers=num_workers
+            num_workers=num_workers,
+            force=force_reindex,
         )
     
     if result.get("status") == "success":

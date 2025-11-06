@@ -139,6 +139,62 @@ For high-volume processing and advanced task management:
    export FLOWER_PASSWORD="your_secure_password"
    ```
 
+## ⚙️ Feature Toggles & Setup
+
+All new subsystems ship **disabled by default** so existing deployments behave exactly as before. Enable individual features by updating `config.json` in the project root.
+
+### Metadata Enrichment (`metadata_enrichment`)
+- Adds semantic tags, key terms, summaries, and source metadata to chunk sidecars and manifests.
+- Output schema documented in `docs/METADATA_SCHEMA.md`.
+- Enable with:
+  ```json
+  "metadata_enrichment": { "enabled": true }
+  ```
+
+### Monitoring & Health Checks (`monitoring`)
+- Background thread performs disk, throughput, and ChromaDB checks and escalates via the notification system.
+- Configure thresholds in `config.json` under the `monitoring` section; default recipients come from `notification_system.py`.
+- Start by setting `"monitoring": { "enabled": true }`.
+
+### Deduplication (`deduplication`)
+- Prevents duplicate chunks from entering ChromaDB in both watcher and backfill flows.
+- Optionally run cleanup via `python deduplication.py --auto-remove`.
+- Already present in `config.json`; flip `"enabled": true` to activate.
+
+### Query Cache (`query_cache`)
+- Enables an in-memory LRU + TTL cache in `rag_integration.py` so repeat queries avoid hitting ChromaDB.
+- Configure `max_size`, `ttl_hours`, and optional `memory_limit_mb` under the `query_cache` section.
+- API users can inspect runtime metrics via `GET /api/cache/stats` once the cache is enabled.
+- Minimal example:
+  ```json
+  "query_cache": {
+    "enabled": true,
+    "max_size": 256,
+    "ttl_hours": 1,
+    "memory_limit_mb": 64
+  }
+  ```
+
+### Incremental Updates (`incremental_updates`)
+- Uses a shared `VersionTracker` to hash inputs, skip untouched files, remove old chunk IDs, and persist deterministic chunk identifiers.
+- Tracker state defaults to `06_config/file_versions.json` (override with `version_file`).
+- Typical configuration:
+  ```json
+  "incremental_updates": {
+    "enabled": true,
+    "version_file": "06_config/file_versions.json",
+    "hash_algorithm": "sha256"
+  }
+  ```
+- After enabling, unchanged files are skipped by the watcher/backfill, while reprocessed sources clean up stale artifacts before writing new chunks.
+
+### Backup Manager (`backup`)
+- Creates compressed archives of ChromaDB and critical directories on a schedule.
+- Configure destination, retention, and schedule in the `backup` section.
+- Manual run: `python backup_manager.py --config config.json create --label on-demand`.
+
+After toggling features, restart the watcher (`python watcher_splitter.py`) so runtime components reinitialize with the new configuration.
+
 ## ✨ Features
 
 ### Core Chunking

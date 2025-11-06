@@ -3,6 +3,7 @@ Celery Task Queue System for Chunker_v2
 Handles async file processing with race condition prevention and batching
 """
 
+import hashlib
 import os
 import json
 import logging
@@ -13,6 +14,11 @@ import shutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from deduplication import DeduplicationManager
+except ImportError:
+    DeduplicationManager = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,57 @@ CELERY_CONFIG = {
     'worker_disable_rate_limits': True,
 }
 
+DEDUP_MANAGER_CACHE: Dict[str, "DeduplicationManager"] = {}
+
+
+def _compute_content_hash(text: str) -> str:
+    normalized = (text or "").strip().lower()
+    normalized = " ".join(normalized.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _dedup_cache_key(config: Dict[str, Any]) -> str:
+    dedup_config = config.get("deduplication", {}) or {}
+    persist_dir = config.get("chroma_persist_dir", "./chroma_db")
+    payload = {
+        "persist": persist_dir,
+        "dedup": dedup_config,
+    }
+    try:
+        return json.dumps(payload, sort_keys=True)
+    except TypeError:
+        # Remove non-serializable entries for cache key
+        sanitized = {k: v for k, v in dedup_config.items() if isinstance(v, (str, int, float, bool, list, dict))}
+        payload["dedup"] = sanitized
+        return json.dumps(payload, sort_keys=True)
+
+
+def _get_dedup_manager(config: Dict[str, Any]):
+    if DeduplicationManager is None:
+        return None
+
+    dedup_config = config.get("deduplication", {}) or {}
+    if not dedup_config.get("enabled"):
+        return None
+
+    cache_key = _dedup_cache_key(config)
+    manager = DEDUP_MANAGER_CACHE.get(cache_key)
+    if manager:
+        return manager
+
+    persist_dir = config.get("chroma_persist_dir", "./chroma_db")
+    try:
+        manager = DeduplicationManager(
+            persist_directory=persist_dir,
+            config=dedup_config,
+            preload=True,
+        )
+    except Exception as exc:
+        logger.warning("Failed to initialize deduplication manager: %s", exc)
+        return None
+
+    DEDUP_MANAGER_CACHE[cache_key] = manager
+    return manager
 # Initialize Celery app (only if available)
 if CELERY_AVAILABLE:
     app = Celery('chunker_v2')
@@ -331,9 +388,15 @@ def add_to_rag_task(self, chunks: List[str], metadata: Dict[str, Any],
         # Try ChromaDB first, fallback to FAISS
         try:
             from rag_integration import ChromaRAG
-            chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
-            
+
+            chroma_rag = ChromaRAG(
+                persist_directory=config.get("chroma_persist_dir", "./chroma_db")
+            )
+            dedup_manager = _get_dedup_manager(config)
+
             results = []
+            skipped_duplicates = 0
+
             for i, chunk in enumerate(chunks):
                 chunk_metadata = {
                     "file_name": metadata["file_info"]["name"],
@@ -343,11 +406,52 @@ def add_to_rag_task(self, chunks: List[str], metadata: Dict[str, Any],
                     "keywords": extract_keywords(chunk),
                     "file_size": metadata["file_info"]["size"]
                 }
-                
+
+                content_hash = None
+                dedup_identifier = f"{chunk_metadata['file_name']}:{chunk_metadata['chunk_index']}"
+
+                if dedup_manager:
+                    try:
+                        is_duplicate, content_hash, existing_ids = dedup_manager.is_duplicate(
+                            chunk,
+                            chunk_id=dedup_identifier,
+                        )
+                    except Exception as dedup_error:
+                        logger.warning(
+                            "Deduplication check failed for chunk %s: %s",
+                            dedup_identifier,
+                            dedup_error,
+                        )
+                        is_duplicate, existing_ids = False, []
+                        content_hash = None
+                    else:
+                        if is_duplicate:
+                            skipped_duplicates += 1
+                            preview = existing_ids[:3]
+                            if len(existing_ids) > 3:
+                                preview.append("...")
+                            logger.info(
+                                "Deduplication skipped duplicate chunk %s (matches: %s)",
+                                dedup_identifier,
+                                preview if preview else "existing chunk",
+                            )
+                            continue
+
+                if content_hash is None:
+                    content_hash = _compute_content_hash(chunk)
+
+                chunk_metadata["content_hash"] = content_hash
+
                 chunk_id = chroma_rag.add_chunk(chunk, chunk_metadata)
                 results.append(chunk_id)
-            
-            return {"status": "success", "method": "chromadb", "chunk_ids": results}
+
+                if dedup_manager:
+                    dedup_manager.add_hash(content_hash, chunk_id)
+
+            response = {"status": "success", "method": "chromadb", "chunk_ids": results}
+            if dedup_manager:
+                response["skipped_duplicates"] = skipped_duplicates
+            return response
             
         except ImportError:
             # Fallback to FAISS

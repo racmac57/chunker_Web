@@ -13,6 +13,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.2.1] - 2025-11-06 - Operational Enhancements & Caching
+
+### Added
+- **Query Cache**: In-memory LRU + TTL cache for RAG searches with optional memory guard, stats API (`GET /api/cache/stats`), and config defaults under `query_cache`.
+- **Incremental Updates**: Thread-safe `VersionTracker` shared by watcher/backfill to hash inputs, skip untouched sources, and clean up stale chunk IDs.
+- **Metadata Enrichment Workflow**: Shared heuristics module powering manifest, sidecar, and ChromaDB tagging with tag-aware chunk filenames.
+- **Backup Manager**: Scheduled tar.gz lifecycle (`backup_manager.py`) with watcher integration and CLI support.
+- **Monitoring System**: Disk/throughput/Chroma checks feeding the notification pipeline with configurable thresholds and cooldowns.
+
+### Changed
+- **watcher_splitter.py**: Unified feature initialization, version tracking, enriched manifest/sidecar writes, duplicate skipping, and automated backup scheduling.
+- **backfill_knowledge_base.py**: Respects incremental tracker state, merges enrichment payloads, and records dedup/query cache metadata for Chroma ingestion.
+- **rag_integration.py** / **api_server.py**: Cache-aware search path with stats surfacing plus resilience improvements for repeated lookups.
+- **config.json**: Expanded with `query_cache`, `incremental_updates`, `monitoring`, and `backup` sections (all disabled by default for backwards compatibility).
+
+### Documentation
+- `README.md`: Refreshed Feature Toggles section with query cache metrics, incremental update behavior, and backup/monitoring guidance.
+- `docs/METADATA_SCHEMA.md`: Documented enrichment schema, tag rules, and ChromaDB metadata fields.
+- `CHANGELOG.md`: Captures integrated feature set and testing steps.
+
+### Testing
+- `pytest tests/test_query_cache.py`
+- `pytest tests/test_incremental_updates.py`
+- `pytest tests/test_backup_manager.py`
+- Targeted watcher/backfill dry runs with feature toggles (metadata enrichment, dedup, incremental updates, query cache, backup, monitoring) enabled.
+
+---
+
+## [v2.2.0] - 2025-11-06 - Feature Toggle Integration & QA
+
+### Added
+- **Metadata Enrichment Pipeline** gated by `metadata_enrichment.enabled`, producing tags, summaries, and manifest enrichment.
+- **Incremental Updates** with `VersionTracker` support across watcher and backfill for hash-based skip + artifact cleanup.
+- **Monitoring System Integration** wiring runtime health checks into the watcher loop with optional alerts.
+- **Backup Scheduler Hooks** to start/stop `BackupManager` from the watcher when enabled.
+- **End-to-End Tests** in `tests/test_enhancements.py` covering metadata sidecars, incremental skips, and dedup stubs.
+
+### Changed
+- **watcher_splitter.py**: Refactored feature initialization, optional metadata flow, incremental cleanup, and dedup stats.
+- **backfill_knowledge_base.py**: Added incremental filtering/recording and shared dedup + metadata handling improvements.
+- **config.json**: Introduced `metadata_enrichment` and `incremental_updates` sections (defaults disabled) and aligned toggle defaults.
+- **rag_integration.py**: Query cache now respects config defaults (already present, documented).
+
+### Documentation
+- `README.md`: New “Feature Toggles & Setup” section covering metadata tagging, monitoring, dedup, caching, incremental updates, and backups.
+- `docs/METADATA_SCHEMA.md`: Serves as canonical schema reference for enriched sidecars/manifests.
+- `CHANGELOG.md`: Updated with integration release notes.
+
+### Testing
+- `pytest tests/test_enhancements.py` validates metadata sidecar generation, incremental skip behaviour, and dedup statistics.
+- Verification scripts (`verify_chunk_completeness.py`, dedup cleanup) executed to ensure regression safety.
+
+---
+
 ## [v2.1.6] - 2025-11-05 - RAG Backfill Optimization and Multiprocessing
 
 ### Added

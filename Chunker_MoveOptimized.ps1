@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$script:HadErrors = $false
 $DestFolder = "C:\_chunker\02_data"
 $KeyFile = "C:\_chunker\06_config\manifest_hmac.key"
 
@@ -83,7 +84,8 @@ function Process-File {
         size_bytes = $fileInfo.Length
         modified_time = $fileInfo.LastWriteTimeUtc.ToString("o")
         created_time = $fileInfo.CreationTimeUtc.ToString("o")
-        operation = "MOVE"  # NEW: Track operation type
+        operation = "MOVE"
+        source_cleanup = "pending"
     }
 
     # Try to MOVE file (primary operation)
@@ -92,27 +94,86 @@ function Process-File {
         Move-Item -Path $SourcePath -Destination $DestPath -Force -ErrorAction Stop
         $moveSuccess = $true
         Write-Host "[MOVE] Successfully moved: $($fileInfo.Name)" -ForegroundColor Green
+
+        # Guard against OneDrive or sync clients restoring the original file immediately after move
+        Start-Sleep -Milliseconds 300
+        if (Test-Path $SourcePath) {
+            try {
+                Remove-Item -Path $SourcePath -Force -ErrorAction Stop
+                Write-Host "[CLEANUP] Removed residual source copy: $($fileInfo.Name)" -ForegroundColor DarkYellow
+                $manifest.source_cleanup = "removed_residual_copy"
+            } catch {
+                Write-Warning "Residual source copy could not be removed for $($fileInfo.Name): $_"
+                $manifest.source_cleanup = "cleanup_failed"
+                $manifest.source_cleanup_error = $_.ToString()
+                $script:HadErrors = $true
+            }
+        } else {
+            $manifest.source_cleanup = "not_required"
+        }
     } catch {
+        $moveError = $_
         # Fallback to COPY if MOVE fails
-        Write-Warning "MOVE failed for $($fileInfo.Name): $_"
+        Write-Warning "MOVE failed for $($fileInfo.Name): $moveError"
         Write-Warning "Falling back to COPY operation"
-        $manifest.operation = "COPY_FALLBACK"  # Track fallback
+        $manifest.operation = "COPY_FALLBACK"
+        $manifest.move_error = $moveError.ToString()
         
         try {
             Copy-Item -Path $SourcePath -Destination $DestPath -Force -ErrorAction Stop
             Write-Host "[COPY] Used fallback for: $($fileInfo.Name)" -ForegroundColor Yellow
             
             # Update manifest to reflect we're using original file
-            $manifest.fallback_reason = $_.ToString()
+            $manifest.fallback_reason = $moveError.ToString()
+
+            Start-Sleep -Milliseconds 300
+            if (Test-Path $SourcePath) {
+                try {
+                    Remove-Item -Path $SourcePath -Force -ErrorAction Stop
+                    Write-Host "[CLEANUP] Removed source after copy fallback: $($fileInfo.Name)" -ForegroundColor DarkYellow
+                    $manifest.source_cleanup = "removed_after_copy"
+                } catch {
+                    Write-Warning "Failed to remove source after copy fallback for $($fileInfo.Name): $_"
+                    $manifest.source_cleanup = "cleanup_failed_after_copy"
+                    $manifest.source_cleanup_error = $_.ToString()
+                    $script:HadErrors = $true
+                }
+            } else {
+                $manifest.source_cleanup = "not_found_after_copy"
+            }
         } catch {
             Write-Warning "Both MOVE and COPY failed for $SourcePath : $_"
+            $manifest.operation = "FAILED"
+            $manifest.copy_error = $_.ToString()
+            $script:HadErrors = $true
             return
         }
+    }
+
+    if (Test-Path $DestPath) {
+        $manifest.destination_status = "present"
+    } else {
+        Write-Warning "Destination missing after operation for $($fileInfo.Name)"
+        $manifest.destination_status = "missing"
+        $script:HadErrors = $true
+    }
+
+    if (Test-Path $SourcePath) {
+        Write-Warning "Source still present after operation for $($fileInfo.Name)"
+        if ($manifest.source_cleanup -eq "pending") {
+            $manifest.source_cleanup = "source_still_present"
+        }
+        $script:HadErrors = $true
+    } elseif ($manifest.source_cleanup -eq "pending") {
+        $manifest.source_cleanup = "cleared"
     }
 
     # Write manifest (regardless of MOVE/COPY)
     try {
         $manifestPath = "$DestPath.origin.json"
+        if (-not $manifest.ContainsKey('source_cleanup')) {
+            $manifest.source_cleanup = "not_applicable"
+        }
         $manifestJson = $manifest | ConvertTo-Json -Depth 10
         
         [System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.Encoding]::UTF8)
@@ -185,5 +246,9 @@ Write-Host "===============================================" -ForegroundColor Wh
 Write-Host "Processing Complete" -ForegroundColor Green
 Write-Host "===============================================" -ForegroundColor White
 
-exit 0
+if ($script:HadErrors) {
+    exit 1
+} else {
+    exit 0
+}
 

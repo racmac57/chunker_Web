@@ -5,13 +5,17 @@ Handles retrieval-augmented generation with ChromaDB and Ollama embeddings
 
 import chromadb
 from chromadb.config import Settings
+from copy import deepcopy
 from datetime import datetime
 import json
 import logging
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+
+from query_cache import QueryCache, CacheKey
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,9 @@ class ChromaRAG:
                  hnsw_m: int = 32, 
                  hnsw_ef_construction: int = 512,
                  hnsw_ef_search: int = 200,
-                 recreate_collection: bool = False):
+                 recreate_collection: bool = False,
+                 query_cache_config: Optional[Dict[str, Any]] = None,
+                 config_path: str = "config.json"):
         """
         Initialize ChromaDB client and collection with HNSW optimization
         
@@ -37,10 +43,23 @@ class ChromaRAG:
             hnsw_ef_search: Size of the dynamic candidate list during search (default: 200)
             recreate_collection: If True, delete existing collection and recreate with new HNSW params (default: False)
         """
+        # Create settings with explicit API implementation
+        chroma_settings = Settings(
+            anonymized_telemetry=False,
+            allow_reset=True,
+            is_persistent=True,
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+            chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager"
+        )
         self.client = chromadb.PersistentClient(
             path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            settings=chroma_settings
         )
+        self._query_cache: Optional[QueryCache] = None
+        self._configure_query_cache(query_cache_config, config_path)
         
         # Create or get collection for chunker knowledge base with HNSW optimization
         # HNSW parameters are immutable after creation, so we try to get existing first
@@ -98,6 +117,9 @@ class ChromaRAG:
             "file_size": str(metadata.get("file_size", 0)),
             "processing_time": str(metadata.get("processing_time", 0))
         }
+        content_hash = metadata.get("content_hash")
+        if content_hash:
+            chroma_metadata["content_hash"] = content_hash
         
         try:
             # Add to collection
@@ -153,12 +175,24 @@ class ChromaRAG:
         # Add ef_search if specified (override default search_ef from collection metadata)
         if ef_search:
             query_kwargs["ef"] = ef_search
+
+        cache_key: Optional[CacheKey] = None
+        if self._query_cache:
+            cache_key = self._build_cache_key(query, n_results, file_type, department, ef_search)
+            cached = self._query_cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Query cache hit for '%s'", query)
+                return deepcopy(cached)
         
         try:
             # Query the collection with optimizations
             results = self.collection.query(**query_kwargs)
+            formatted = self._format_results(results)
+
+            if self._query_cache and cache_key is not None:
+                self._query_cache.put(cache_key, deepcopy(formatted))
             
-            return self._format_results(results)
+            return formatted
             
         except Exception as e:
             logger.error(f"Failed to search ChromaDB: {e}", exc_info=True)
@@ -258,6 +292,84 @@ class ChromaRAG:
                 })
         
         return formatted_results
+
+    # ------------------------------------------------------------------ #
+    # Query cache helpers
+    # ------------------------------------------------------------------ #
+    def _configure_query_cache(
+        self,
+        provided_config: Optional[Dict[str, Any]],
+        config_path: str,
+    ) -> None:
+        config = provided_config or self._load_query_cache_config(config_path)
+        if not config or not isinstance(config, dict):
+            return
+
+        if not config.get("enabled", False):
+            return
+
+        max_size = int(config.get("max_size", 128))
+        ttl_hours = float(config.get("ttl_hours", 1))
+        ttl_seconds = max(ttl_hours, 0.001) * 3600
+
+        memory_limit_mb = config.get("memory_limit_mb")
+        memory_limit_bytes = int(memory_limit_mb * 1024 * 1024) if memory_limit_mb else None
+
+        try:
+            self._query_cache = QueryCache(
+                max_size=max_size,
+                ttl_seconds=ttl_seconds,
+                memory_limit_bytes=memory_limit_bytes,
+            )
+            logger.info(
+                "Query cache enabled (size=%s, ttl_hours=%.2f, memory_limit=%s)",
+                max_size,
+                ttl_hours,
+                f"{memory_limit_mb}MB" if memory_limit_mb else "None",
+            )
+        except Exception as exc:
+            logger.error("Failed to initialize query cache: %s", exc)
+            self._query_cache = None
+
+    @staticmethod
+    def _load_query_cache_config(config_path: str) -> Optional[Dict[str, Any]]:
+        try:
+            path = Path(config_path)
+            if not path.exists():
+                return None
+            import json
+
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("query_cache")
+        except Exception as exc:
+            logger.debug("Unable to load query cache config: %s", exc)
+            return None
+
+    @staticmethod
+    def _build_cache_key(
+        query: str,
+        n_results: int,
+        file_type: Optional[str],
+        department: Optional[str],
+        ef_search: Optional[int],
+    ) -> CacheKey:
+        return (
+            query,
+            n_results,
+            file_type or "",
+            department or "",
+            ef_search or 0,
+        )
+
+    def get_query_cache_stats(self) -> Optional[Dict[str, Any]]:
+        if not self._query_cache:
+            return None
+        return self._query_cache.get_stats()
+
+    def invalidate_query_cache(self) -> None:
+        if self._query_cache:
+            self._query_cache.invalidate()
 
 
 class FaithfulnessScorer:

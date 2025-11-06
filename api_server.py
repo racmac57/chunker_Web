@@ -84,6 +84,19 @@ class StatsResponse(BaseModel):
     collection_name: str
     last_updated: str
 
+class CacheStatsResponse(BaseModel):
+    """Cache stats response model"""
+    max_size: int
+    ttl_seconds: float
+    memory_limit_bytes: Optional[int]
+    current_size: int
+    memory_usage_bytes: int
+    hits: int
+    misses: int
+    hit_rate: float
+    evictions: int
+    invalidations: int
+
 class ContextRequest(BaseModel):
     """Context request for LLM prompts"""
     query: str = Field(..., description="Query for context retrieval")
@@ -113,6 +126,7 @@ async def root():
             "chunk": "GET /api/chunk/{chunk_id}",
             "stats": "GET /api/stats",
             "context": "POST /api/context",
+            "cache_stats": "GET /api/cache/stats",
             "health": "GET /api/health"
         },
         "docs": "/docs",
@@ -211,6 +225,20 @@ async def get_stats():
     except Exception as e:
         logger.error(f"Stats retrieval failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
+
+@app.get("/api/cache/stats", response_model=CacheStatsResponse)
+async def get_cache_stats():
+    """
+    Get query cache statistics (if enabled).
+    """
+    if not rag:
+        raise HTTPException(status_code=503, detail="RAG system not initialized")
+
+    stats = rag.get_query_cache_stats()
+    if stats is None:
+        raise HTTPException(status_code=404, detail="Query cache not enabled")
+
+    return CacheStatsResponse(**stats)
 
 @app.post("/api/context", response_model=ContextResponse)
 async def get_context(request: ContextRequest):

@@ -27,6 +27,8 @@ class NotificationSystem:
             "enable_threshold_alerts": True,
             "enable_error_alerts": True,
             "enable_daily_reports": True,
+            "enable_monitoring_alerts": True,
+            "monitoring_recipients": [],
             "thresholds": {
                 "cpu_warning": 80,
                 "cpu_critical": 90,
@@ -81,6 +83,39 @@ class NotificationSystem:
         except Exception as e:
             self.logger.error(f"Failed to send email: {e}")
             return False
+    
+    def send_monitoring_alert(self, title, message, severity="warning"):
+        """Send monitoring alert notification."""
+        if not self.config.get("enable_monitoring_alerts", True):
+            self.logger.debug("Monitoring alerts disabled; skipping email")
+            return False
+        
+        recipients = (
+            self.config.get("monitoring_recipients")
+            or self.config.get("admin_emails", [])
+        )
+        if not recipients:
+            self.logger.warning("No recipients configured for monitoring alerts")
+            return False
+        
+        severity = (severity or "warning").lower()
+        prefix_map = {
+            "critical": "🚨",
+            "warning": "⚠️",
+            "info": "ℹ️",
+        }
+        subject_prefix = prefix_map.get(severity, "⚠️")
+        subject = f"{subject_prefix} Monitoring Alert: {title}"
+        body = (
+            f"Chunker Monitoring Alert\n\n"
+            f"Title: {title}\n"
+            f"Severity: {severity.upper()}\n"
+            f"Message: {message}\n"
+            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            "This is an automated monitoring alert from the Enterprise Chunker system."
+        )
+        
+        return self.send_email(recipients, subject, body)
     
     def send_threshold_alert(self, metric_name, current_value, threshold, severity):
         """Send threshold alert"""
