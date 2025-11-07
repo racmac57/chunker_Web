@@ -37,3 +37,9 @@ The helper performs the following actions:
 - After the script finishes you’re ready to ship; no manual `git push` is
   required.
 
+## Validation History
+
+- **2025-11-07** – Dry run executed on a clean clone using commit message
+  `test_commit` and tag `v0.0.0-dryrun`. Verified backup creation, interactive
+  clean cancellation, commit/tag generation, and push flow end-to-end.
+
