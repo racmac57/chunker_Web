@@ -1,13 +1,13 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.8** - ChromaDB rebuilt with compatibility fixes, streamlined release automation, refreshed documentation, and smoke-test coverage for the latest helpers.
+**Version 2.1.8** - ChromaDB rebuilt with compatibility fixes, streamlined release automation, refreshed documentation, and comprehensive regression coverage for the latest helpers.
 
 ## What's New in v2.1.8
 
 - **ChromaDB Rebuild**: Upgraded to `chromadb 1.3.4`, recreated the collection, and re-ran the backfill so 2,907 enriched chunks are in sync with the latest pipeline.
 - **Dedup Reliability**: `deduplication.py` now ships with `hnswlib` compatibility shims, letting `python deduplication.py --auto-remove` complete without legacy metadata errors.
-- **Release Helper**: `scripts/release_commit_and_tag.bat` automates doc staging, backups, commit/tag creation, and pushes while rotating logs.
-- **Documentation & Tests**: Added `docs/RELEASE_WORKFLOW.md` and smoke tests for cache, incremental updates, backup manager, and monitoring modules.
+- **Release Helper**: `scripts/release_commit_and_tag.bat` automates doc staging, backups, commit/tag creation, and pushes while rotating logs; the 2025-11-07 dry run and live validation are logged in `docs/RELEASE_WORKFLOW.md`.
+- **Regression Tests**: Replaced placeholder suites with 52-case pytest coverage for query caching, incremental updates, backup management, and monitoring to mirror the production APIs.
 
 > **What changed in v2.1.8?** See the [changelog entry](./CHANGELOG.md#v218---2025-11-07---chromadb-rebuild--release-automation).
 

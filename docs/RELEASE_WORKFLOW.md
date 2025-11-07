@@ -42,4 +42,7 @@ The helper performs the following actions:
 - **2025-11-07** – Dry run executed on a clean clone using commit message
   `test_commit` and tag `v0.0.0-dryrun`. Verified backup creation, interactive
   clean cancellation, commit/tag generation, and push flow end-to-end.
+- **2025-11-07** – Production run on `main` with commit message
+  `Finalize-release-helper-validation` tagging `v2.1.8`; backup archived under
+  `backup_20251107/` and results logged in `release_log.txt`.
 
