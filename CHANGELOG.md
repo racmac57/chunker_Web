@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v2.1.8] - 2025-11-07 - ChromaDB Rebuild & Release Automation
+
+### Added
+- **Release Helper Script**: `scripts/release_commit_and_tag.bat` automates doc staging, backups, commit/tag creation, and pushes with logging and rotation.
+- **Documentation**: `docs/RELEASE_WORKFLOW.md` describes the release flow, logging, and cleanup steps.
+
+### Changed
+- **ChromaDB Maintenance**: Upgraded to `chromadb 1.3.4`, recreated the collection, and re-ran the backfill to repopulate 2,907 enriched chunks.
+- **Deduplication**: `deduplication.py` now resolves legacy HNSW compatibility issues so auto-remove runs succeed.
+- **RAG Integration**: `rag_integration.py` guards against missing `hnswlib.Index.file_handle_count`, ensuring compatibility across wheels.
+
+### Testing
+- `python -m pytest tests/test_query_cache.py tests/test_incremental_updates.py tests/test_backup_manager.py tests/test_monitoring_system.py`
+
+### Links
+- Full diff: https://github.com/racmac57/chunker_Web/compare/v2.1.7...v2.1.8
+
+---
+
 ## [v2.2.1] - 2025-11-06 - Operational Enhancements & Caching
 
 ### Added

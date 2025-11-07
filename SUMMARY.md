@@ -1,8 +1,8 @@
-# Enterprise Chunker v2.1.6 - Project Summary
+# Enterprise Chunker v2.1.8 - Project Summary
 
 ## Overview
 
-Enterprise Chunker is a production-ready file processing system with RAG (Retrieval-Augmented Generation) capabilities. It processes diverse file types, extracts chunks, generates transcripts, and maintains a searchable knowledge base using ChromaDB vector database.
+Enterprise Chunker is a production-ready file processing system with RAG (Retrieval-Augmented Generation) capabilities. It processes diverse file types, extracts chunks, generates transcripts, and maintains a searchable knowledge base using the ChromaDB vector database.
 
 ## Key Directories
 
@@ -22,7 +22,15 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **`manual_process_files.py`** - Manual file processing tool
 - **`verify_chunk_completeness.py`** - Verification script for backfill validation
 
-## Key Features in v2.1.6
+## Changes in v2.1.8
+
+- Upgraded to `chromadb 1.3.4`, rebuilt the collection, and re-ran the backfill so 2,907 enriched chunks reflect the latest pipeline.
+- Hardened `deduplication.py` and `rag_integration.py` with `hnswlib` compatibility shims, enabling successful auto-remove runs.
+- Added `scripts/release_commit_and_tag.bat` to automate backups, staging, commits, tags, and pushes with rotating logs.
+- Documented the release workflow in `docs/RELEASE_WORKFLOW.md` and refreshed the README changelog references.
+- Added smoke tests for query caching, incremental updates, backup manager, and monitoring modules to validate the new helpers.
+
+## Prior Highlights (v2.1.6)
 
 - **Multiprocessing Backfill**: Parallel processing with 4-8 workers for 20x performance improvement
 - **Optimized ChromaDB Inserts**: Separate connections per process for concurrent batch operations
@@ -32,21 +40,10 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **Duplicate Prevention**: Pre-insertion checks prevent duplicate chunks in knowledge base
 - **Batch Optimization**: Configurable batch sizes (500-1000) optimized for ChromaDB performance
 
-## Recent Changes (v2.1.6)
-
-- Implemented multiprocessing for parallel file processing and metadata extraction
-- Added parallel ChromaDB inserts with separate connections per worker process
-- Fixed HNSW parameter configuration for optimal vector search performance
-- Enhanced duplicate detection and chunk existence verification
-- Added empty folder logging and count discrepancy alerts
-- Integrated CPU saturation monitoring and performance profiling support
-- Created verification scripts for backfill completeness validation
-- Optimized batch sizes and processing workflows for 3,200+ chunk datasets
-
 ## Technology Stack
 
 - **Python 3.13** - Core runtime
-- **ChromaDB 1.3.2+** - Vector database for RAG
+- **ChromaDB 1.3.4** - Vector database for RAG
 - **NLTK** - Natural language processing and keyword extraction
 - **psutil** - System resource monitoring
 - **tqdm** - Progress tracking
