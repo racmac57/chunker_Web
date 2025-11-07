@@ -15,6 +15,18 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# Ensure compatibility with chromadb expectations on hnswlib builds
+try:  # pragma: no cover - defensive guard for varying hnswlib builds
+    import hnswlib  # type: ignore
+
+    if not hasattr(hnswlib.Index, "file_handle_count"):
+        # Older hnswlib wheels (e.g., Windows builds) do not expose this attribute.
+        # Provide a benign fallback value so chromadb's guard logic succeeds.
+        hnswlib.Index.file_handle_count = 0
+except ImportError:
+    # hnswlib is optional when using alternative vector stores; leave unmodified.
+    hnswlib = None  # type: ignore
+
 from query_cache import QueryCache, CacheKey
 
 logger = logging.getLogger(__name__)

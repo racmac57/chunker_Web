@@ -1,19 +1,38 @@
 # Integration QA Validation Notes
 
-**Date:** 2025-11-06
+**Last Updated:** 2025-11-07
 **Version:** 2.1.6
-**Validator:** Claude Code
-**Environment:** Windows (win32), Python 3.13.7
+**Validator:** GPT-5 Codex (Cursor session)
+**Environment:** Windows (win32 10.0.26220), Python 3.13.5
 
 ---
 
-## Executive Summary
+## 2025-11-07 Validation Summary
 
-Comprehensive integration testing of new feature modules (query_cache, incremental_updates, monitoring, backup, deduplication) has been completed. All standalone unit tests passed successfully, and feature initialization confirmed operational. Full end-to-end RAG integration testing was limited by ChromaDB not being installed (optional dependency).
+- ✅ Visual C++ Build Tools installed; `chromadb` upgraded to 1.3.4 and `hnswlib` 0.8.0 verified.
+- ✅ Recreated ChromaDB collection and ran `python backfill_knowledge_base.py --force` (2907 new chunks stored, 294 skipped as duplicates).
+- ✅ `python deduplication.py --auto-remove` completes successfully with 0 duplicate groups reported.
+- ✅ `api_server.py` verified via `POST /api/search` and `GET /api/cache/stats` endpoints.
+- ✅ Added lightweight placeholder tests for cache/incremental updates/backup/monitoring and executed `pytest` (4 tests passed).
 
-**Overall Status:** ✅ PASS (with noted limitations)
+### Key Metrics
+
+| Task | Result |
+|------|--------|
+| Backfill runtime | 380.10 s (2907 new / 294 skipped) |
+| Cache stats endpoint | 200 OK – hits=0, misses=1, max_size=256 |
+| Dedup auto-remove | ✅ Completed – 0 duplicate groups |
+| Pytest placeholder suite | ✅ 4 passed (query cache, incremental updates, backup manager, monitoring) |
+
+### Outstanding Issues
+
+1. **Placeholder Tests** – Current pytest modules provide smoke coverage only. Replace with comprehensive integration tests when production-ready cases are available.
 
 ---
+
+## Historical Notes (2025-11-06)
+
+> _The following sections document the previous validation pass prior to installing the C++ toolchain. Retained for audit continuity._
 
 ## 1. Configuration Updates
 

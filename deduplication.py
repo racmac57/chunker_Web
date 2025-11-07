@@ -14,6 +14,13 @@ except ImportError as exc:  # pragma: no cover - handled in consumer modules
     _import_error = exc
 else:
     _import_error = None
+    try:  # pragma: no cover - defensive compatibility guard
+        import hnswlib  # type: ignore
+
+        if not hasattr(hnswlib.Index, "file_handle_count"):
+            hnswlib.Index.file_handle_count = 0
+    except ImportError:
+        hnswlib = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
