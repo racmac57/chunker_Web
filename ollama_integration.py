@@ -6,11 +6,34 @@ Provides local embeddings using Ollama with nomic-embed-text model
 import logging
 import os
 from typing import List, Dict, Any, Optional
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.retrievers import BM25Retriever
-from langchain.schema import Document
+
 import numpy as np
+
+from langchain_ollama import OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+
+try:
+    from langchain_community.docstore import InMemoryDocstore
+except ImportError:
+    from langchain.docstore.in_memory import InMemoryDocstore
+
+try:
+    from langchain_community.retrievers import BM25Retriever
+except ImportError:  # Backwards compatibility for older LangChain installs
+    from langchain.retrievers import BM25Retriever
+
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    from langchain.schema import Document
+
+try:
+    import faiss
+except ImportError as exc:
+    raise ImportError(
+        "faiss (faiss-cpu) is required for OllamaRAGSystem. Please install it via "
+        "`pip install faiss-cpu`."
+    ) from exc
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +56,9 @@ class OllamaRAGSystem:
         self.embeddings = None
         self.vectorstore = None
         self.keyword_retriever = None
-        self.documents = []
-        self.metadatas = []
+        self.documents: List[str] = []
+        self.metadatas: List[Dict[str, Any]] = []
+        self._embedding_dimension: Optional[int] = None
         
         self._initialize_ollama()
         self._initialize_vectorstore()
@@ -51,12 +75,26 @@ class OllamaRAGSystem:
     def _initialize_vectorstore(self) -> None:
         """Initialize FAISS vector store."""
         try:
-            # Create empty FAISS index
-            self.vectorstore = FAISS(self.embeddings.embed_query, index=None)
+            embedding_dimension = self._get_embedding_dimension()
+            index = faiss.IndexFlatL2(embedding_dimension)
+            self.vectorstore = FAISS(
+                embedding_function=self.embeddings,
+                index=index,
+                docstore=InMemoryDocstore({}),
+                index_to_docstore_id={},
+            )
             logger.info("Initialized FAISS vector store")
         except Exception as e:
             logger.error(f"Failed to initialize FAISS vector store: {e}")
             raise
+
+    def _get_embedding_dimension(self) -> int:
+        """Determine embedding dimension for FAISS index."""
+        if self._embedding_dimension is None:
+            test_vector = self.embeddings.embed_query("dimension probe")
+            self._embedding_dimension = len(test_vector)
+            logger.debug("Determined embedding dimension: %d", self._embedding_dimension)
+        return self._embedding_dimension
     
     def add_documents(self, texts: List[str], metadatas: List[Dict[str, Any]]) -> None:
         """
@@ -215,18 +253,26 @@ class OllamaRAGSystem:
         try:
             if os.path.exists(self.persist_dir):
                 self.vectorstore = FAISS.load_local(
-                    self.persist_dir, 
-                    self.embeddings, 
+                    self.persist_dir,
+                    self.embeddings,
                     allow_dangerous_deserialization=True
                 )
-                
-                # Rebuild BM25 retriever
-                if self.documents and self.metadatas:
-                    self.keyword_retriever = BM25Retriever.from_texts(
-                        self.documents, 
-                        metadatas=self.metadatas
-                    )
-                
+
+                # Rehydrate documents and BM25 retriever from stored docstore
+                if hasattr(self.vectorstore, "docstore") and getattr(self.vectorstore.docstore, "_dict", None):
+                    documents = list(self.vectorstore.docstore._dict.values())
+                    self.documents = [doc.page_content for doc in documents]
+                    self.metadatas = [doc.metadata for doc in documents]
+
+                    if documents:
+                        try:
+                            self.keyword_retriever = BM25Retriever.from_documents(documents)
+                        except AttributeError:
+                            self.keyword_retriever = BM25Retriever.from_texts(
+                                self.documents,
+                                metadatas=self.metadatas
+                            )
+
                 logger.info(f"Loaded FAISS index from {self.persist_dir}")
                 return True
             else:

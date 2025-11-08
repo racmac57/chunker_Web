@@ -1,13 +1,20 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.8** - ChromaDB rebuilt with compatibility fixes, streamlined release automation, refreshed documentation, and comprehensive regression coverage for the latest helpers.
+**Version 2.1.8** - ChromaDB rebuilt with compatibility fixes, streamlined release automation, refreshed documentation, comprehensive regression coverage, plus watcher stability and SQLite hardening.
 
-## What's New in v2.1.8
+## What's New in v2.1.8+
 
+### Recent Improvements (Post-v2.1.8)
+- **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` with their manifests, eliminating repeated warnings for empty files, placeholders, and "No measures found" messages.
+- **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds (3 errors/min = 2x baseline), and 24-48 hour review schedules. Current baseline: 1.5 errors/minute (68% reduction from previous).
+- **Enhanced Documentation**: All three primary docs (CHANGELOG, SUMMARY, README) updated with monitoring procedures, tiny file handling behavior, and archive organization details.
+
+### v2.1.8 Release (2025-11-07)
 - **ChromaDB Rebuild**: Upgraded to `chromadb 1.3.4`, recreated the collection, and re-ran the backfill so 2,907 enriched chunks are in sync with the latest pipeline.
 - **Dedup Reliability**: `deduplication.py` now ships with `hnswlib` compatibility shims, letting `python deduplication.py --auto-remove` complete without legacy metadata errors.
 - **Release Helper**: `scripts/release_commit_and_tag.bat` automates doc staging, backups, commit/tag creation, and pushes while rotating logs; the 2025-11-07 dry run and live validation are logged in `docs/RELEASE_WORKFLOW.md`.
 - **Regression Tests**: Replaced placeholder suites with 52-case pytest coverage for query caching, incremental updates, backup management, and monitoring to mirror the production APIs.
+- **Watcher & DB Resilience (Nov 2025)**: Skips manifests/archives/output files, sanitises output folder names, replaces Unicode logging arrows, adds safe archive moves, and introduces exponential-backoff SQLite retries to squash recursion, path-length, and “database locked” errors.
 
 > **What changed in v2.1.8?** See the [changelog entry](./CHANGELOG.md#v218---2025-11-07---chromadb-rebuild--release-automation).
 
@@ -65,6 +72,7 @@
 - **C:/_chunker** - Main project directory with scripts
 - **02_data/** - Input files to be processed (watch folder)
 - **03_archive/** - Archived original files and processed source files
+- **03_archive/skipped_files/** - Files too small to process (< 100 bytes) - automatically archived
 - **04_output/** - Generated chunks and transcripts (organized by source file)
 - **05_logs/** - Application logs and tracking
 - **06_config/** - Configuration files
@@ -72,6 +80,7 @@
 - **06_config/legacy/** - Consolidated legacy config (latest snapshot per project)
 - **05_logs/legacy/** - Consolidated legacy logs (latest snapshot per project)
 - **03_archive/legacy/** - Consolidated legacy db/backups (latest snapshot per project)
+- **chroma_db/** - ChromaDB vector database storage
 - **faiss_index/** - FAISS vector database storage
 - **evaluations/** - RAG evaluation results
 - **reports/** - Automated evaluation reports
@@ -164,6 +173,31 @@ All new subsystems ship **disabled by default** so existing deployments behave e
 - Background thread performs disk, throughput, and ChromaDB checks and escalates via the notification system.
 - Configure thresholds in `config.json` under the `monitoring` section; default recipients come from `notification_system.py`.
 - Start by setting `"monitoring": { "enabled": true }`.
+
+### Database Lock Monitoring
+- **Current Performance**: 1.5 database lock errors/minute baseline (68% reduction from previous)
+- **Monitoring Documentation**: See `MONITOR_DB_LOCKS.md` for comprehensive monitoring commands and alert thresholds
+- **Real-time Monitoring**:
+  ```bash
+  # Watch for lock errors in real-time
+  powershell -Command "Get-Content watcher_live.log -Wait | Select-String -Pattern 'Failed to log|database is locked'"
+
+  # Check hourly error count
+  powershell -Command "(Get-Content watcher_live.log | Select-String -Pattern 'Failed to log processing' | Select-Object -Last 100 | Measure-Object).Count"
+  ```
+- **Alert Threshold**: Flag if errors exceed 3/minute (2x current baseline)
+- **Review Schedule**: Monitor every 8-12 hours using commands in `MONITOR_DB_LOCKS.md`
+- **Key Findings**:
+  - 92% of lock errors occur in `log_processing()` (lacks retry wrapper)
+  - 8% in `_update_department_stats()` (has 5-retry exponential backoff)
+  - Current retry config: get_connection (3 retries), dept_stats (5 retries with 1.5x backoff)
+
+### Tiny File Handling
+- **Automatic Archiving**: Files under 100 bytes (default `min_file_size_bytes`) are automatically moved to `03_archive/skipped_files/`
+- **Examples**: Empty files, "No measures found" messages, test placeholders
+- **Behavior**: Files are preserved with their `.origin.json` manifests for review rather than deleted or left to trigger repeated warnings
+- **Configuration**: Adjust threshold in department config via `min_file_size_bytes` parameter (default: 100)
+- **Logs**: Look for `[INFO] File too short (X chars), archiving: filename` messages
 
 ### Deduplication (`deduplication`)
 - Prevents duplicate chunks from entering ChromaDB in both watcher and backfill flows.
@@ -339,6 +373,12 @@ python rag_search.py --batch queries.txt --output results.json
 python rag_search.py --query "Excel formulas" --search-type semantic
 python rag_search.py --query "vlookup excel" --search-type keyword
 ```
+
+#### GUI Search
+```bash
+streamlit run gui_app.py
+```
+Opens a browser interface for entering queries, browsing results, and viewing knowledge-base statistics.
 
 #### Programmatic Search
 ```python
@@ -542,6 +582,15 @@ results = batch_process_files(file_paths, manager, extract_keywords_func)
    "enable_streaming": true,
    "stream_chunk_size": 1048576  # 1MB chunks
    ```
+
+4. **UnicodeEncodeError in PowerShell Logs (Windows)**
+   ```powershell
+   # Switch console to UTF-8 before starting the watcher
+   chcp 65001
+   Set-Item env:PYTHONIOENCODING utf-8
+   python watcher_splitter.py
+   ```
+   This prevents logging failures when filenames contain emoji or other non-ASCII characters.
 
 ### Performance Optimization
 

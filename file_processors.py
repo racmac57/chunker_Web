@@ -7,7 +7,7 @@ import logging
 import ast
 import json
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 # File processing imports with error handling
@@ -36,6 +36,42 @@ except ImportError:
     YAML_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def read_file_with_fallback(file_path: Path) -> Tuple[str, str]:
+    """
+    Attempt to read a text file using a series of encodings, falling back to a
+    binary read with replacement characters when necessary.
+
+    Returns a tuple of (text_content, encoding_used). The encoding will be
+    "binary-fallback" when the final binary decode path is used.
+    """
+    encodings = ["utf-8", "utf-8-sig", "utf-16", "latin-1", "cp1252"]
+    for encoding in encodings:
+        try:
+            with open(file_path, "r", encoding=encoding) as handle:
+                content = handle.read()
+            logger.debug("Successfully read %s with %s encoding", file_path.name, encoding)
+            return content, encoding
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+        except OSError as os_error:
+            # Re-raise OS level errors (file locked, missing, etc.) to caller
+            logger.debug(
+                "OS error while reading %s with %s encoding: %s",
+                file_path.name,
+                encoding,
+                os_error,
+            )
+            raise
+
+    logger.warning(
+        "All standard encodings failed for %s, decoding with replacement characters",
+        file_path.name,
+    )
+    with open(file_path, "rb") as handle:
+        data = handle.read()
+    return data.decode("utf-8", errors="replace"), "binary-fallback"
 
 
 def extract_python_blocks(text: str) -> List[Dict[str, Any]]:

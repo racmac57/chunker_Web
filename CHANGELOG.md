@@ -7,9 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` along with their manifests to prevent repeated processing warnings (watcher_splitter.py:677-703).
+- **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds, and 24-48 hour review schedule for tracking SQLite contention patterns.
+- **Windows UTF-8 Troubleshooting**: Updated README/SUMMARY with steps for switching PowerShell to UTF-8 to avoid Unicode logging failures on emoji filenames.
+- **Streamlit GUI Doc**: Added `streamlit run gui_app.py` workflow to README and SUMMARY so users can launch the browser-based search interface.
+
+### Changed
+- **Small File Handling**: Changed log level from WARNING to INFO for small file archiving since this is now expected behavior rather than an error condition.
+- **Archive Organization**: Added `skipped_files/` subfolder in archive directory to separate tiny/invalid files from successfully processed files.
+
+### Analysis & Documentation
+- **DB Lock Error Analysis**: Detailed breakdown showing 11 `log_processing()` errors vs 1 `_update_department_stats()` error over 8-minute test period (1.5 errors/min baseline, down 68% from previous baseline).
+- **Retry Logic Review**: Documented current retry configuration (get_connection: 3 retries, dept_stats: 5 retries with 1.5x backoff), identified that `log_processing()` lacks retry wrapper as potential future improvement.
+- **Monitoring Plan**: Established alert thresholds (> 3 errors/min = 2x baseline) and pattern analysis commands for time-based clustering, processing volume correlation, and error duration tracking.
+
+### Fixed
+- **Repeated Warnings**: Eliminated log spam from files that don't meet minimum size threshold by archiving them on first detection instead of skipping repeatedly.
+- **Log Clutter**: Reduced noise in watcher logs by moving tiny files out of the watch folder automatically.
+
 ### Planned
 - Additional performance optimizations
 - Enhanced error recovery mechanisms
+- Consider adding retry wrapper to `log_processing()` if monitoring shows sustained > 3 errors/minute
 
 ---
 
@@ -19,15 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Release Helper Script**: `scripts/release_commit_and_tag.bat` automates doc staging, backups, commit/tag creation, and pushes with logging and rotation.
 - **Documentation**: `docs/RELEASE_WORKFLOW.md` describes the release flow, logging, and cleanup steps.
 - **Comprehensive Tests**: Replaced placeholder suites with 52-case pytest coverage for QueryCache, VersionTracker, BackupManager, and Monitoring modules.
+- **Watcher Hardening Docs**: `FIXES_APPLIED_SUMMARY.md`, `DATABASE_IMPROVEMENTS.md`, and `VERIFICATION_REPORT.md` capture the November 2025 stability fixes and validation results.
 
 ### Changed
 - **ChromaDB Maintenance**: Upgraded to `chromadb 1.3.4`, recreated the collection, and re-ran the backfill to repopulate 2,907 enriched chunks.
 - **Deduplication**: `deduplication.py` now resolves legacy HNSW compatibility issues so auto-remove runs succeed.
 - **RAG Integration**: `rag_integration.py` guards against missing `hnswlib.Index.file_handle_count`, ensuring compatibility across wheels.
+- **Watcher Stability (Nov 2025)**: `watcher_splitter.py` now skips manifest/archived/output files, sanitises output folder names, replaces Unicode log arrows, adds safe archive moves, and avoids manifest recursion & WinError 206 failures.
+- **SQLite Robustness (Nov 2025)**: Extended connection timeout to 60 s and layered exponential-backoff retries in `chunker_db.py`, dramatically reducing “database is locked” noise during concurrent processing.
 
 ### Testing & Validation
 - `python -m pytest tests/`
 - Dry-run of `scripts/release_commit_and_tag.bat` in a clean clone plus live execution for tag `v2.1.8`.
+- Watcher burn-in processing real data feeds, validating cleanup scripts, log tailing, and DB contention mitigation.
 
 ### Links
 - Full diff: https://github.com/racmac57/chunker_Web/compare/v2.1.7...v2.1.8

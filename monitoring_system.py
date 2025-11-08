@@ -41,6 +41,7 @@ class MonitoringSystem:
         self.db = db
         self.notification_system = notification_system
         self.logger = logger or logging.getLogger(__name__)
+        self._start_time = datetime.now(timezone.utc)
 
         self.monitoring_config = config.get("monitoring", {}) or {}
         self.enabled: bool = bool(self.monitoring_config.get("enabled", False))
@@ -266,8 +267,20 @@ class MonitoringSystem:
 
         rate = processed_count / window_minutes if window_minutes else float(processed_count)
 
+        now_utc = datetime.now(timezone.utc)
         status = "ok"
         severity = None
+        if processed_count == 0 and now_utc - self._start_time < timedelta(minutes=window_minutes):
+            self.logger.debug(
+                "[Monitoring] Processing rate warm-up period (window=%s minutes).",
+                window_minutes,
+            )
+            return {
+                "status": "warming",
+                "count": processed_count,
+                "rate_per_minute": rate,
+                "window_minutes": window_minutes,
+            }
         if critical_rate is not None and rate < critical_rate:
             status = "critical"
             severity = "critical"
@@ -330,9 +343,19 @@ class MonitoringSystem:
             return {"status": "warning", "message": message}
 
         try:
+            chroma_settings = Settings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+                is_persistent=True,
+                chroma_api_impl="chromadb.api.segment.SegmentAPI",
+                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+                chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+            )
             client = chromadb.PersistentClient(
                 path=persist_dir,
-                settings=Settings(anonymized_telemetry=False),
+                settings=chroma_settings,
             )
             collections = client.list_collections()
             details = {

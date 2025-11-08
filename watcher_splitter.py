@@ -28,11 +28,12 @@ from metadata_enrichment import (
     SIDECAR_SUFFIX,
     dump_json,
 )
-from incremental_updates import VersionTracker
+from incremental_updates import VersionTracker, build_chunk_id
 from chunker_db import ChunkerDatabase
 from notification_system import NotificationSystem
 from monitoring_system import MonitoringSystem
 from backup_manager import BackupManager
+from file_processors import read_file_with_fallback
 
 try:
     from deduplication import DeduplicationManager
@@ -180,8 +181,9 @@ def initialize_feature_components() -> None:
     dedup_manager = None
     if DEDUP_CONFIG.get("enabled"):
         if DeduplicationManager is None:
-            logger.warning(
-                "Deduplication enabled but deduplication module is unavailable."
+            logger.info(
+                "Deduplication disabled: ChromaDB/hnswlib not installed (optional). "
+                "Install with `pip install chromadb hnswlib` to enable duplicate pruning."
             )
         else:
             try:
@@ -194,6 +196,13 @@ def initialize_feature_components() -> None:
                     "Deduplication initialized with %d known hashes",
                     len(dedup_manager.hash_index),
                 )
+            except ImportError as import_error:
+                logger.info(
+                    "Deduplication disabled: %s. Install with `pip install chromadb hnswlib` "
+                    "to enable duplicate pruning.",
+                    import_error,
+                )
+                dedup_manager = None
             except Exception as dedup_error:
                 logger.warning(
                     "Failed to initialize deduplication manager: %s", dedup_error
@@ -238,22 +247,119 @@ def reload_feature_components() -> None:
 
 initialize_feature_components()
 
-def load_manifest_data(file_path: Path) -> Tuple[Dict[str, Any], Path]:
+def load_manifest_data(file_path: Path) -> Tuple[Dict[str, Any], Path, Optional[str]]:
     """
     Load an existing .origin.json manifest if available; otherwise return an empty dict.
     """
     manifest_path = file_path.with_name(f"{file_path.name}.origin.json")
     manifest_data: Dict[str, Any] = {}
+    content_hash: Optional[str] = None
     if manifest_path.exists():
         try:
-            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+            with open(manifest_path, "r", encoding="utf-8-sig") as manifest_file:
                 manifest_data = json.load(manifest_file)
+            content_hash = manifest_data.get("content_hash") or manifest_data.get(
+                "last_content_hash"
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning(
+                "Failed to parse manifest for %s: %s",
+                file_path.name,
+                exc,
+                exc_info=True,
+            )
+            manifest_data = {}
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Failed to load manifest for %s: %s", file_path.name, exc, exc_info=True
             )
             manifest_data = {}
-    return manifest_data, manifest_path
+    return manifest_data, manifest_path, content_hash
+
+
+def should_process_file(file_path: Path) -> bool:
+    """Check if file should be processed - skip manifests and archives"""
+    file_str = str(file_path)
+
+    # Skip manifest files (.origin.json) - catch both exact suffix and embedded patterns
+    if file_path.name.endswith('.origin.json') or '.origin.json.' in file_path.name:
+        logger.debug(f"Skipping manifest file: {file_path.name}")
+        return False
+
+    # Skip files in archive directory
+    if '03_archive' in file_str or '\\03_archive\\' in file_str:
+        logger.debug(f"Skipping archived file: {file_path.name}")
+        return False
+
+    # Skip files in output directory
+    if '04_output' in file_str or '\\04_output\\' in file_str:
+        logger.debug(f"Skipping output file: {file_path.name}")
+        return False
+
+    return True
+
+
+def sanitize_folder_name(base_name: str, max_length: int = 60) -> str:
+    """Sanitize and limit folder name length to prevent Windows path issues"""
+    import re
+    clean_name = base_name
+
+    # Remove .origin.json suffixes (but not the word "origin" in general)
+    # Use regex to only match the actual suffix pattern
+    clean_name = re.sub(r'\.origin\.json$', '', clean_name)
+    # Remove multiple .origin.json patterns that may have accumulated
+    while '.origin.json' in clean_name:
+        clean_name = re.sub(r'\.origin\.json', '', clean_name)
+
+    # Remove invalid Windows path characters
+    invalid_chars = '<>:"|?*'
+    for char in invalid_chars:
+        clean_name = clean_name.replace(char, '_')
+
+    # Truncate to max length - do NOT add ellipsis to folder names
+    # Windows may not handle "..." in folder names reliably
+    if len(clean_name) > max_length:
+        clean_name = clean_name[:max_length]
+
+    return clean_name
+
+
+def safe_file_move(source_path: Path, dest_path: Path, max_retries: int = 3) -> bool:
+    """Safely move file with retry logic and missing-file detection"""
+    for attempt in range(max_retries):
+        try:
+            # Check if source exists BEFORE attempting move
+            if not source_path.exists():
+                logger.info(f"File already moved/removed (likely by another worker): {source_path.name}")
+                return True  # Not an error - file is gone
+
+            # Ensure destination directory exists
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Perform the move
+            shutil.move(str(source_path), str(dest_path))
+            logger.info(f"Moved: {source_path.name} -> {dest_path}")
+            return True
+
+        except FileNotFoundError:
+            # File vanished between exists() check and move()
+            logger.info(f"File vanished during move (race condition): {source_path.name}")
+            return True  # Success - file is gone
+
+        except PermissionError as e:
+            if attempt < max_retries - 1:
+                wait_time = 0.5 * (attempt + 1)
+                logger.warning(f"Move retry {attempt + 1}/{max_retries} for {source_path.name}, waiting {wait_time}s")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Move failed after {max_retries} attempts: {e}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Unexpected move error: {e}")
+            return False
+
+    return False
 
 
 def update_session_tag_counts(tags: Iterable[str]) -> None:
@@ -450,6 +556,10 @@ def validate_chunk_content_enhanced(chunk, min_length=50, department_config=None
 
 def process_file_enhanced(file_path, config):
     """Enhanced file processing with comprehensive tracking"""
+    # CRITICAL: Skip manifest files and archives to prevent recursion
+    if not should_process_file(file_path):
+        return True
+
     start_time = time.time()
     safe_text_extensions = set(
         config.get(
@@ -475,6 +585,7 @@ def process_file_enhanced(file_path, config):
     logger.info(f"Processing file: {file_path.name} (Department: {department})")
     
     try:
+        content_hash: Optional[str] = None
         # Wait for file stability
         if not wait_for_file_stability(file_path):
             error_msg = f"File not stable, skipping: {file_path.name}"
@@ -489,18 +600,18 @@ def process_file_enhanced(file_path, config):
         # Read file with multiple attempts
         text = None
         original_size = 0
+        used_encoding: Optional[str] = None
         for attempt in range(3):
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    text = f.read()
-                original_size = len(text.encode('utf-8'))
+                text, used_encoding = read_file_with_fallback(file_path)
+                original_size = len(text.encode("utf-8", errors="ignore"))
                 break
             except Exception as e:
                 logger.warning(f"Read attempt {attempt+1} failed for {file_path.name}: {e}")
                 if attempt < 2:
                     time.sleep(1)
         
-        if not text:
+        if text is None:
             error_msg = f"Could not read {file_path.name} after 3 attempts"
             logger.error(error_msg)
             if db:
@@ -510,8 +621,19 @@ def process_file_enhanced(file_path, config):
                     logger.warning(f"Failed to log read error to database: {db_error}")
             return False
 
+        if used_encoding and used_encoding not in {"utf-8", "utf-8-sig"}:
+            if used_encoding == "binary-fallback":
+                logger.warning(
+                    "Processed %s using binary fallback decoding; some characters may be replaced.",
+                    file_path.name,
+                )
+            else:
+                logger.info("Processed %s using %s encoding.", file_path.name, used_encoding)
+
         # Load manifest metadata and enrich (optional)
-        manifest_data, manifest_path = load_manifest_data(file_path)
+        manifest_data, manifest_path, stored_content_hash = load_manifest_data(file_path)
+        if stored_content_hash:
+            content_hash = stored_content_hash
         if METADATA_ENABLED:
             enrichment: EnrichmentResult = enrich_metadata(
                 text,
@@ -555,15 +677,30 @@ def process_file_enhanced(file_path, config):
         # Validate input text
         min_size = department_config.get("min_file_size_bytes", 100)
         if len(text.strip()) < min_size:
-            error_msg = f"File too short ({len(text)} chars), skipping: {file_path.name}"
-            logger.warning(error_msg)
+            error_msg = f"File too short ({len(text)} chars), archiving: {file_path.name}"
+            logger.info(error_msg)
+
+            # Archive tiny files to prevent repeated warnings
+            archive_dir = Path(config.get("archive_dir", "archive"))
+            skipped_folder = archive_dir / "skipped_files"
+            skipped_folder.mkdir(parents=True, exist_ok=True)
+
+            # Move file and its manifest to skipped folder
+            dest_file = skipped_folder / file_path.name
+            manifest_file = Path(str(file_path) + ".origin.json")
+            dest_manifest = skipped_folder / manifest_file.name
+
+            safe_file_move(file_path, dest_file)
+            if manifest_file.exists():
+                safe_file_move(manifest_file, dest_manifest)
+
             if db:
                 try:
-                    db.log_processing(str(file_path), original_size, 0, 0, 
-                                    time.time() - start_time, False, error_msg, department)
+                    db.log_processing(str(file_path), original_size, 0, 0,
+                                    time.time() - start_time, True, error_msg, department)
                 except Exception as db_error:
                     logger.warning(f"Failed to log processing to database: {db_error}")
-            return False
+            return True  # Successfully handled (archived)
 
         if content_hash:
             manifest_data["last_content_hash"] = content_hash
@@ -585,11 +722,19 @@ def process_file_enhanced(file_path, config):
 
         # Prepare output with organized folder structure
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        clean_base = Path(file_path.name).stem.replace(" ", "_")
+        # Sanitize to prevent path length issues and remove .origin.json artifacts
+        raw_base = Path(file_path.name).stem.replace(" ", "_")
+        clean_base = sanitize_folder_name(raw_base, max_length=60)
         output_folder = config.get("output_dir", "output")
-        
+
         # Create folder named after the source file
         file_output_folder = Path(output_folder) / clean_base
+
+        # Safety check: ensure total path length is reasonable
+        if len(str(file_output_folder)) > 200:
+            logger.warning(f"Path too long ({len(str(file_output_folder))}), truncating: {file_output_folder}")
+            clean_base = sanitize_folder_name(raw_base, max_length=40)
+            file_output_folder = Path(output_folder) / clean_base
         if version_tracker and file_output_folder.exists():
             try:
                 shutil.rmtree(file_output_folder)
@@ -846,7 +991,7 @@ def process_file_enhanced(file_path, config):
         
         if move_success:
             session_stats["files_processed"] += 1
-            logger.info(f"File processing complete: {file_path.name} → {valid_chunks} chunks ({processing_time:.2f}s)")
+            logger.info(f"File processing complete: {file_path.name} -> {valid_chunks} chunks ({processing_time:.2f}s)")
             
             # Log to database with retry
             if db:
@@ -1084,10 +1229,9 @@ def move_to_processed_enhanced(file_path, processed_folder, department):
             suffix = file_path.suffix
             dest_path = dept_processed / f"{stem}_{timestamp}_{counter}{suffix}"
             counter += 1
-        
-        shutil.move(str(file_path), str(dest_path))
-        logger.info(f"Moved file to processed/{department}: {dest_path.name}")
-        return True
+
+        # Use safe_file_move with retry logic and file-gone detection
+        return safe_file_move(Path(file_path), dest_path)
         
     except Exception as e:
         logger.error(f"Failed to move {file_path.name}: {e}")
@@ -1194,12 +1338,16 @@ def main():
                 for f in all_files:
                     if f.name in processed_files or not f.is_file() or f.name in excluded_files:
                         continue
-                    
+
+                    # CRITICAL: Skip manifest files and archives to prevent recursion
+                    if not should_process_file(f):
+                        continue
+
                     # Check exclude patterns first
                     if any(pattern in f.name for pattern in exclude_patterns):
                         logger.debug(f"Skipping file with exclude pattern: {f.name}")
                         continue
-                    
+
                     # Apply filter mode
                     if filter_mode == "all":
                         filtered_files.append(f)
