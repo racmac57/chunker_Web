@@ -9,9 +9,11 @@ Author: R. A. Carucci
 import streamlit as st
 import pandas as pd
 import json
+import json as _json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from kb_ask_ollama import ask_kb
 
 # Page configuration
 st.set_page_config(
@@ -58,6 +60,44 @@ def init_rag():
 
 # Initialize
 rag, init_error = init_rag()
+
+if "facets" not in st.session_state:
+    st.session_state["facets"] = {"depts": ["admin", "police", "legal"], "tags": []}
+
+
+def _peek_facets(rag_instance):
+    if not rag_instance:
+        return [], []
+    try:
+        data = rag_instance.collection.peek(2000)
+    except Exception:
+        return [], []
+
+    depts, tags = set(), set()
+    for meta in data.get("metadatas", []):
+        if not meta:
+            continue
+        dept = meta.get("department")
+        if dept:
+            depts.add(str(dept).strip())
+        tag_payload = meta.get("tags")
+        if isinstance(tag_payload, list):
+            tags.update(str(t).strip() for t in tag_payload if str(t).strip())
+        elif isinstance(tag_payload, str):
+            try:
+                parsed = _json.loads(tag_payload)
+                if isinstance(parsed, list):
+                    tags.update(str(t).strip() for t in parsed if str(t).strip())
+                else:
+                    tag_text = str(tag_payload).strip()
+                    if tag_text:
+                        tags.add(tag_text)
+            except Exception:
+                tag_text = str(tag_payload).strip()
+                if tag_text:
+                    tags.add(tag_text)
+
+    return sorted(depts), sorted(tags)
 
 # Sidebar navigation
 st.sidebar.title("📚 Chunker Knowledge Base")
@@ -106,6 +146,16 @@ if page == "Search":
             help="Semantic: Vector similarity search\nKeyword: Keyword-based search"
         )
     
+    if rag and st.button("Refresh facets"):
+        departments, tags = _peek_facets(rag)
+        if departments:
+            st.session_state["facets"]["depts"] = departments
+        if tags:
+            st.session_state["facets"]["tags"] = tags
+
+    sel_tags: List[str] = []
+    ef_search: int = 64
+
     # Advanced filters
     with st.expander("🔧 Advanced Filters", expanded=False):
         col1, col2, col3 = st.columns(3)
@@ -113,95 +163,149 @@ if page == "Search":
             file_type_options = ["All", ".txt", ".md", ".xlsx", ".pdf", ".py", ".docx", ".json"]
             file_type = st.selectbox("File Type", file_type_options)
         with col2:
-            department_options = ["All", "admin", "police", "legal"]
+            department_options = ["All"] + st.session_state["facets"]["depts"]
             department = st.selectbox("Department", department_options)
         with col3:
             n_results = st.slider("Number of Results", 1, 20, 5)
-        
-        ef_search = st.slider(
-            "Search Accuracy (ef_search)",
-            min_value=100,
-            max_value=500,
-            value=200,
-            step=50,
-            help="Higher values = more accurate but slower (HNSW parameter)"
-        )
+        col4, col5 = st.columns([2, 1])
+        with col4:
+            sel_tags = st.multiselect("Tags", options=st.session_state["facets"]["tags"], default=[])
+        with col5:
+            ef_search = st.slider("ef_search", 16, 256, 64, 16)
     
-    # Search button
-    if st.button("🔍 Search", type="primary", use_container_width=True) or query:
-        if query:
+    use_ollama = st.checkbox("Use Ollama for answer synthesis", value=True)
+    ollama_model = st.selectbox(
+        "Ollama model",
+        ["llama3.1:8b", "qwen2.5-coder:7b", "mistral:7b"],
+        index=0
+    )
+    
+    search_clicked = st.button("🔍 Search", type="primary", use_container_width=True)
+    if search_clicked:
+        if not query:
+            st.info("Enter a search query to begin.")
+        else:
             with st.spinner("Searching knowledge base..."):
                 try:
                     start_time = datetime.now()
+                    answer_payload: Optional[Dict[str, Any]] = None
+                    results: List[Dict[str, Any]] = []
                     
                     if search_type == "Semantic":
-                        results = rag.search_similar(
-                            query=query,
-                            n_results=n_results,
-                            file_type=None if file_type == "All" else file_type,
-                            department=None if department == "All" else department,
-                            ef_search=ef_search
-                        )
-                    else:  # Keyword
+                        if use_ollama:
+                            answer_payload = ask_kb(
+                                query=query,
+                                n_results=n_results,
+                                file_type=None if file_type == "All" else file_type,
+                                department=None if department == "All" else department,
+                                tags=sel_tags or None,
+                                model=ollama_model,
+                                temperature=0.2,
+                            )
+                            results = answer_payload.get("hits", [])
+                        else:
+                            results = rag.search_similar(
+                                query=query,
+                                n_results=n_results,
+                                file_type=None if file_type == "All" else file_type,
+                                department=None if department == "All" else department,
+                                tags=sel_tags or None,
+                                ef_search=ef_search,
+                            )
+                    else:
+                        if use_ollama:
+                            st.info("Ollama answer synthesis is only available for semantic search. Running keyword search.")
                         keywords = query.split()
                         results = rag.search_by_keywords(keywords, n_results=n_results)
+                        if sel_tags:
+                            filtered: List[Dict[str, Any]] = []
+                            for item in results:
+                                meta = item.get("metadata") or {}
+                                meta_tags = meta.get("tags", [])
+                                if isinstance(meta_tags, str):
+                                    try:
+                                        meta_tags = _json.loads(meta_tags)
+                                    except Exception:
+                                        meta_tags = [meta_tags]
+                                if not isinstance(meta_tags, list):
+                                    meta_tags = [meta_tags]
+                                normalized = [str(tag).strip() for tag in meta_tags if str(tag).strip()]
+                                if all(tag in normalized for tag in sel_tags):
+                                    filtered.append(item)
+                            results = filtered[:n_results] if len(filtered) > n_results else filtered
                     
                     search_time = (datetime.now() - start_time).total_seconds()
                     
                     if results:
                         st.success(f"✅ Found {len(results)} results in {search_time:.3f} seconds")
                         
-                        # Display results
+                        if answer_payload:
+                            st.subheader("Answer")
+                            st.write(answer_payload.get("answer", ""))
+                            st.caption("Sources")
+                            for idx, hit in enumerate(answer_payload.get("hits", []), 1):
+                                metadata = hit.get("metadata", {}) or {}
+                                st.write(f"[{idx}] {metadata.get('file_name')}#chunk{metadata.get('chunk_index')}")
+                            st.divider()
+                        
                         for i, result in enumerate(results, 1):
                             with st.container():
-                                # Calculate similarity score
-                                distance = result.get("distance", 1.0)
+                                distance = result.get("distance", 1.0) or 1.0
                                 score = max(0.0, min(1.0, 1.0 - distance))
                                 
-                                # Metadata
-                                metadata = result.get("metadata", {})
+                                metadata = result.get("metadata", {}) or {}
                                 file_name = metadata.get("file_name", "Unknown")
-                                file_type = metadata.get("file_type", "unknown")
+                                ftype = metadata.get("file_type", "unknown")
                                 dept = metadata.get("department", "unknown")
                                 chunk_idx = metadata.get("chunk_index", "?")
+                                doc_id = result.get("id", metadata.get("chunk_id", "n/a"))
                                 
-                                # Result card
                                 col1, col2 = st.columns([4, 1])
-                                
                                 with col1:
                                     st.markdown(f"### {i}. {file_name}")
                                     st.caption(
-                                        f"Type: {file_type} | Department: {dept} | "
-                                        f"Chunk: {chunk_idx} | ID: {result['id'][:50]}..."
+                                        f"Type: {ftype} | Department: {dept} | "
+                                        f"Chunk: {chunk_idx} | ID: {str(doc_id)[:50]}..."
                                     )
                                     
                                     with st.expander("📄 View Full Content", expanded=False):
                                         st.text_area(
                                             "Chunk Content",
-                                            result["document"],
+                                            result.get("document", ""),
                                             height=200,
                                             key=f"content_{i}",
                                             label_visibility="collapsed"
                                         )
                                     
-                                    # Keywords if available
-                                    keywords_str = metadata.get("keywords", "")
-                                    if keywords_str:
+                                    keywords_payload = metadata.get("keywords")
+                                    if keywords_payload:
                                         try:
-                                            keywords = json.loads(keywords_str) if isinstance(keywords_str, str) else keywords_str
-                                            if keywords:
-                                                st.caption(f"Keywords: {', '.join(keywords[:5])}")
-                                        except:
+                                            parsed_keywords = (
+                                                _json.loads(keywords_payload)
+                                                if isinstance(keywords_payload, str)
+                                                else keywords_payload
+                                            )
+                                            if isinstance(parsed_keywords, list) and parsed_keywords:
+                                                st.caption(f"Keywords: {', '.join(parsed_keywords[:5])}")
+                                        except Exception:
                                             pass
+                                    
+                                    meta_tags_display = metadata.get("tags", [])
+                                    if isinstance(meta_tags_display, str):
+                                        try:
+                                            meta_tags_display = _json.loads(meta_tags_display)
+                                        except Exception:
+                                            meta_tags_display = [meta_tags_display]
+                                    if meta_tags_display:
+                                        st.caption(f"Tags: {', '.join(str(t) for t in meta_tags_display)}")
                                 
                                 with col2:
                                     st.metric("Relevance", f"{score:.1%}")
-                                    if st.button("📋 Copy ID", key=f"copy_id_{i}"):
-                                        st.code(result["id"], language=None)
+                                    if doc_id and st.button("📋 Copy ID", key=f"copy_id_{i}"):
+                                        st.code(doc_id, language=None)
                                 
                                 st.divider()
                         
-                        # Export results
                         with st.expander("💾 Export Results"):
                             export_format = st.radio("Export Format", ["JSON", "CSV"])
                             
@@ -211,10 +315,10 @@ if page == "Search":
                                     "timestamp": datetime.now().isoformat(),
                                     "results": [
                                         {
-                                            "id": r["id"],
-                                            "content": r["document"],
-                                            "score": 1.0 - r.get("distance", 0.0),
-                                            "metadata": r["metadata"]
+                                            "id": r.get("id"),
+                                            "content": r.get("document"),
+                                            "score": 1.0 - (r.get("distance", 0.0) or 0.0),
+                                            "metadata": r.get("metadata"),
                                         }
                                         for r in results
                                     ]
@@ -225,18 +329,18 @@ if page == "Search":
                                     file_name=f"search_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                                     mime="application/json"
                                 )
-                            else:  # CSV
+                            else:
                                 csv_data = []
                                 for r in results:
-                                    metadata = r.get("metadata", {})
+                                    metadata = r.get("metadata", {}) or {}
                                     csv_data.append({
-                                        "ID": r["id"],
+                                        "ID": r.get("id"),
                                         "File Name": metadata.get("file_name", ""),
                                         "File Type": metadata.get("file_type", ""),
                                         "Department": metadata.get("department", ""),
                                         "Chunk Index": metadata.get("chunk_index", ""),
-                                        "Score": 1.0 - r.get("distance", 0.0),
-                                        "Content Preview": r["document"][:100] + "..."
+                                        "Score": 1.0 - (r.get("distance", 0.0) or 0.0),
+                                        "Content Preview": (r.get("document") or "")[:100] + "...",
                                     })
                                 
                                 df = pd.DataFrame(csv_data)
@@ -249,12 +353,9 @@ if page == "Search":
                                 )
                     else:
                         st.warning("No results found. Try a different query or adjust filters.")
-                        
                 except Exception as e:
                     st.error(f"Search failed: {e}")
                     st.exception(e)
-        else:
-            st.info("Enter a search query to begin")
 
 # Statistics Page
 elif page == "Statistics":

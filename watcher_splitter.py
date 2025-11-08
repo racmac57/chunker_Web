@@ -34,6 +34,7 @@ from notification_system import NotificationSystem
 from monitoring_system import MonitoringSystem
 from backup_manager import BackupManager
 from file_processors import read_file_with_fallback
+from watch_events import run_event_watcher, file_is_settled
 
 try:
     from deduplication import DeduplicationManager
@@ -61,8 +62,15 @@ except:
     nltk.download('punkt', download_dir=nltk_path, quiet=True)
 
 # Load configuration
-with open(os.path.join(base_path, "config.json")) as f:
-    CONFIG = json.load(f)
+def load_cfg(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    for k in ["watch_folder", "archive_dir", "output_dir"]:
+        if k in cfg:
+            cfg[k] = os.path.expandvars(cfg[k])
+    return cfg
+
+CONFIG = load_cfg(os.path.join(base_path, "config.json"))
 
 use_ready_signal = bool(CONFIG.get("use_ready_signal", False))
 failed_dir = Path(CONFIG.get("failed_dir", "03_archive/failed"))
@@ -1302,6 +1310,25 @@ def process_with_retries(file_path: Path, config, max_attempts: int = 3) -> bool
         logger.warning(f"File already moved or missing after failures: {file_path}")
     return False
 
+
+def process_one_file(path: Path) -> bool:
+    """Wrapper to process a single file via the standard pipeline."""
+    try:
+        if not path.exists():
+            logger.debug("Skipping missing file during event processing: %s", path)
+            return False
+
+        logger.info("Event watcher processing file: %s", path.name)
+        result = process_with_retries(path, CONFIG)
+        if result:
+            logger.info("Event watcher completed: %s", path.name)
+        else:
+            logger.error("Event watcher failed: %s", path.name)
+        return result
+    except Exception as exc:
+        logger.exception("Unhandled error in process_one_file for %s: %s", path, exc)
+        return False
+
 def log_session_stats():
     """Log comprehensive session statistics"""
     logger.info("=== ENHANCED SESSION STATISTICS ===")
@@ -1331,6 +1358,9 @@ def main():
     logger.info("=== ENTERPRISE CHUNKER STARTED ===")
     logger.info(f"Monitoring: {watch_folder}")
     supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    suffixes = CONFIG.get("supported_extensions", [])
+    stability_timeout = CONFIG.get("file_stability_timeout", 2)
+    use_events = CONFIG.get("use_event_watcher", True)
     filter_mode = CONFIG.get("file_filter_mode", "all")
     logger.info(f"File types: {', '.join(supported_extensions)} files")
     logger.info(f"Filter mode: {filter_mode}")
@@ -1342,6 +1372,7 @@ def main():
     logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
     logger.info(f"Database tracking: Enabled")
     logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"Event-driven watcher: {'enabled' if use_events else 'disabled'}")
     
     processed_files = set()
     loop_count = 0
@@ -1378,6 +1409,11 @@ def main():
         monitoring.start_monitoring()
 
     try:
+        if use_events:
+            logger.info("Starting event-driven watcher for %s", watch_folder)
+            run_event_watcher(watch_folder, suffixes, worker_fn=process_one_file)
+            return
+
         while True:
             try:
                 # Look for files with supported extensions
@@ -1434,6 +1470,10 @@ def main():
                         if not ready_marker.exists():
                             logger.debug(f"Waiting for ready signal for {f.name}")
                             continue
+
+                    if not file_is_settled(f, seconds=stability_timeout):
+                        logger.debug("Waiting for file to settle: %s", f.name)
+                        continue
 
                     eligible_files.append(f)
 

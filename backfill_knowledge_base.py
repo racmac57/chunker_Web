@@ -88,14 +88,18 @@ except ImportError:
 
 def load_config() -> Dict[str, Any]:
     """
-    Load configuration from config.json
+    Load configuration from config.json and expand environment variables.
     
     Returns:
         Configuration dictionary
     """
     try:
-        with open("config.json", "r") as f:
-            return json.load(f)
+        with open("config.json", "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        for key in ("watch_folder", "archive_dir", "output_dir"):
+            if key in cfg:
+                cfg[key] = os.path.expandvars(cfg[key])
+        return cfg
     except Exception as e:
         logger.error(f"Failed to load config: {e}", exc_info=True)
         sys.exit(1)

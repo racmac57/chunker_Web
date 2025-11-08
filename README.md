@@ -8,6 +8,8 @@
 - **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` with their manifests, eliminating repeated warnings for empty files, placeholders, and "No measures found" messages.
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds (3 errors/min = 2x baseline), and 24-48 hour review schedules. Current baseline: 1.5 errors/minute (68% reduction from previous).
 - **Enhanced Documentation**: All three primary docs (CHANGELOG, SUMMARY, README) updated with monitoring procedures, tiny file handling behavior, and archive organization details.
+- **Watcher Bridge Support**: `watcher_splitter.py` now ignores `.part` staging files until the final rename, optionally waits for `.ready` handshakes, retries processing up to three times, and quarantines stubborn failures to `03_archive/failed/`.
+- **Batched Chroma Ingest**: `ChromaRAG.add_chunks_bulk()` honours `batch.size`, skips null embeddings, and refreshes `hnsw:search_ef` from `config.json` so the vector store keeps pace with high-volume ingest.
 
 ### v2.1.8 Release (2025-11-07)
 - **ChromaDB Rebuild**: Upgraded to `chromadb 1.3.4`, recreated the collection, and re-ran the backfill so 2,907 enriched chunks are in sync with the latest pipeline.

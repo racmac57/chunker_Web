@@ -50,6 +50,7 @@ class ChromaRAG:
                  hnsw_m: int = 32, 
                  hnsw_ef_construction: int = 512,
                  hnsw_ef_search: int = 200,
+                 collection_name: str = "chunker_knowledge_base",
                  recreate_collection: bool = False,
                  query_cache_config: Optional[Dict[str, Any]] = None,
                  config_path: str = "config.json"):
@@ -86,11 +87,14 @@ class ChromaRAG:
         batch_config = (self._global_config or {}).get("batch", {})
         self._batch_size = max(int(batch_config.get("size", 500) or 1), 1)
         self._search_config = (self._global_config or {}).get("search", {})
+        default_ef_value = (self._global_config or {}).get("default_ef_search", 64)
+        try:
+            self.default_ef_search = int(default_ef_value)
+        except (TypeError, ValueError):
+            self.default_ef_search = 64
         
         # Create or get collection for chunker knowledge base with HNSW optimization
         # HNSW parameters are immutable after creation, so we try to get existing first
-        collection_name = "chunker_knowledge_base"
-        
         # If recreate_collection is True, delete existing collection first
         if recreate_collection:
             try:
@@ -118,24 +122,169 @@ class ChromaRAG:
         
         logger.info(f"Initialized ChromaDB collection with {self.collection.count()} existing chunks")
     
-    def add_chunk(self, chunk_text: str, metadata: Dict[str, Any]) -> str:
-        """
-        Add a chunk to the vector database
-        
-        Args:
-            chunk_text: The text content of the chunk
-            metadata: Dictionary containing chunk metadata
-        
-        Returns:
-            chunk_id: Unique identifier for the added chunk
-        """
-        chunk_metadata = dict(metadata)
-        chunk_id = self._build_chunk_id(chunk_metadata)
+    def _prepare_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        raw = dict(metadata or {})
+        file_name = raw.get("file_name") or raw.get("source_file") or "chunk"
+        file_type = raw.get("file_type") or Path(file_name).suffix or ""
+        timestamp = raw.get("timestamp") or datetime.now().isoformat()
+        chunk_index = raw.get("chunk_index", raw.get("chunk_id", 0))
 
-        added_ids = self.add_chunks_bulk([chunk_text], [chunk_metadata], ids=[chunk_id])
+        keywords_raw = raw.get("keywords", [])
+        if isinstance(keywords_raw, str):
+            try:
+                parsed = json.loads(keywords_raw)
+                keywords_list = (
+                    [str(item).strip() for item in parsed if str(item).strip()]
+                    if isinstance(parsed, list)
+                    else ([keywords_raw.strip()] if keywords_raw.strip() else [])
+                )
+            except Exception:
+                keywords_list = [keywords_raw.strip()] if keywords_raw.strip() else []
+        elif isinstance(keywords_raw, (list, tuple, set)):
+            keywords_list = [str(item).strip() for item in keywords_raw if str(item).strip()]
+        elif keywords_raw:
+            keywords_list = [str(keywords_raw).strip()]
+        else:
+            keywords_list = []
+
+        tags_raw = raw.get("tags", [])
+        if isinstance(tags_raw, str):
+            try:
+                parsed = json.loads(tags_raw)
+                tags_list = (
+                    [str(item).strip() for item in parsed if str(item).strip()]
+                    if isinstance(parsed, list)
+                    else ([tags_raw.strip()] if tags_raw.strip() else [])
+                )
+            except Exception:
+                tags_list = [tags_raw.strip()] if tags_raw.strip() else []
+        elif isinstance(tags_raw, (list, tuple, set)):
+            tags_list = [str(item).strip() for item in tags_raw if str(item).strip()]
+        else:
+            tags_list = []
+
+        department = raw.get("department", "admin")
+        file_size = raw.get("file_size", 0)
+        processing_time = raw.get("processing_time", 0)
+        content_hash = raw.get("content_hash", "")
+
+        return {
+            "file_name": file_name,
+            "file_type": file_type,
+            "chunk_index": str(chunk_index),
+            "timestamp": timestamp,
+            "department": department,
+            "keywords": json.dumps(keywords_list),
+            "keywords_list": keywords_list,
+            "tags": tags_list,
+            "file_size": str(file_size),
+            "processing_time": str(processing_time),
+            "content_hash": content_hash,
+        }
+
+    def add_chunk(self, chunk_text: str, metadata: Dict[str, Any]) -> str:
+        prepared_metadata = self._prepare_metadata(metadata)
+        doc_id = self._build_chunk_id(prepared_metadata)
+
+        self.collection.add(
+            documents=[chunk_text],
+            metadatas=[prepared_metadata],
+            ids=[doc_id],
+        )
+        self._update_collection_search_ef()
+        return doc_id
+
+    def add_chunks(
+        self,
+        chunks: List[str],
+        metadatas: List[Dict[str, Any]],
+        ids: Optional[List[str]] = None,
+        embeddings: Optional[List[Any]] = None,
+    ) -> List[str]:
+        batch_size = getattr(self, "_batch_size", 500)
+        batch_documents: List[str] = []
+        batch_metadatas: List[Dict[str, Any]] = []
+        batch_ids: List[str] = []
+        batch_embeddings: List[Any] = []
+        added_ids: List[str] = []
+
+        for index, chunk_text in enumerate(chunks):
+            if not chunk_text or not chunk_text.strip():
+                logger.debug("Skipping empty chunk at index %s", index)
+                continue
+
+            raw_metadata = metadatas[index] if index < len(metadatas) else {}
+            prepared_metadata = self._prepare_metadata(raw_metadata)
+            doc_id = (
+                ids[index]
+                if ids and index < len(ids) and ids[index]
+                else self._build_chunk_id(prepared_metadata)
+            )
+
+            embedding_value = None
+            if embeddings is not None:
+                if index >= len(embeddings):
+                    logger.debug("Missing embedding for chunk index %s; skipping", index)
+                    continue
+                embedding_value = embeddings[index]
+                if embedding_value is None:
+                    logger.debug("Skipping chunk %s due to null embedding", doc_id)
+                    continue
+                if hasattr(embedding_value, "__len__") and len(embedding_value) == 0:
+                    logger.debug("Skipping chunk %s due to empty embedding", doc_id)
+                    continue
+
+            batch_documents.append(chunk_text)
+            batch_metadatas.append(prepared_metadata)
+            batch_ids.append(doc_id)
+            if embeddings is not None:
+                batch_embeddings.append(embedding_value)
+
+            if len(batch_documents) >= batch_size:
+                self._flush_batch(
+                    batch_documents,
+                    batch_metadatas,
+                    batch_ids,
+                    batch_embeddings if embeddings is not None else None,
+                )
+                added_ids.extend(batch_ids)
+                batch_documents, batch_metadatas, batch_ids = [], [], []
+                if embeddings is not None:
+                    batch_embeddings = []
+
+        # Flush remainder
+        if batch_documents:
+            self._flush_batch(
+                batch_documents,
+                batch_metadatas,
+                batch_ids,
+                batch_embeddings if embeddings is not None else None,
+            )
+            added_ids.extend(batch_ids)
+
         if not added_ids:
-            raise ValueError(f"Chunk {chunk_id} was not added to ChromaDB")
-        return added_ids[0]
+            logger.info("No valid chunks to add to ChromaDB")
+            return []
+
+        self._update_collection_search_ef()
+        return added_ids
+
+    def _flush_batch(
+        self,
+        documents: List[str],
+        metadatas: List[Dict[str, Any]],
+        ids: List[str],
+        embeddings: Optional[List[Any]],
+    ) -> None:
+        kwargs: Dict[str, Any] = {
+            "documents": list(documents),
+            "metadatas": list(metadatas),
+            "ids": list(ids),
+        }
+        if embeddings is not None:
+            kwargs["embeddings"] = list(embeddings)
+        self.collection.add(**kwargs)
+        logger.info("Added %s chunks to ChromaDB", len(documents))
 
     def add_chunks_bulk(
         self,
@@ -144,76 +293,12 @@ class ChromaRAG:
         ids: Optional[List[str]] = None,
         embeddings: Optional[List[Any]] = None,
     ) -> List[str]:
-        """Add multiple chunks to the vector database with batching support."""
-        prepared_entries: List[Tuple[str, Dict[str, Any], str, Optional[Any]]] = []
-
-        for index, chunk_text in enumerate(chunks):
-            if not chunk_text or not chunk_text.strip():
-                logger.debug("Skipping empty chunk at index %s", index)
-                continue
-
-            metadata = dict(metadatas[index] if index < len(metadatas) else {})
-            metadata.setdefault("chunk_index", str(metadata.get("chunk_index", index + 1)))
-            metadata.setdefault("file_name", metadata.get("source_file", "chunk"))
-            metadata.setdefault("timestamp", metadata.get("timestamp", datetime.now().isoformat()))
-
-            chunk_id = (
-                ids[index]
-                if ids and index < len(ids)
-                else self._build_chunk_id(metadata)
-            )
-
-            embedding_value = (
-                embeddings[index]
-                if embeddings is not None and index < len(embeddings)
-                else None
-            )
-
-            if embeddings is not None:
-                if embedding_value is None:
-                    logger.debug("Skipping chunk %s due to null embedding", chunk_id)
-                    continue
-                if hasattr(embedding_value, "__len__") and len(embedding_value) == 0:
-                    logger.debug("Skipping chunk %s due to empty embedding", chunk_id)
-                    continue
-
-            prepared_entries.append((chunk_text, metadata, chunk_id, embedding_value))
-
-        if not prepared_entries:
-            logger.info("No valid chunks to add to ChromaDB")
-            return []
-
-        batch_size = getattr(self, "_batch_size", 500)
-        added_ids: List[str] = []
-
-        for start in range(0, len(prepared_entries), batch_size):
-            batch = prepared_entries[start : start + batch_size]
-            docs = [entry[0] for entry in batch]
-            metas = [entry[1] for entry in batch]
-            batch_ids = [entry[2] for entry in batch]
-            kwargs: Dict[str, Any] = {
-                "documents": docs,
-                "metadatas": metas,
-                "ids": batch_ids,
-            }
-
-            if embeddings is not None:
-                kwargs["embeddings"] = [entry[3] for entry in batch]
-
-            self.collection.add(**kwargs)
-            added_ids.extend(batch_ids)
-            logger.info(
-                "Added %s chunks to ChromaDB (batch starting at index %s)",
-                len(batch),
-                start,
-            )
-
-        self._update_collection_search_ef()
-        return added_ids
+        return self.add_chunks(chunks, metadatas, ids=ids, embeddings=embeddings)
     
-    def search_similar(self, query: str, n_results: int = 5, 
-                       file_type: Optional[str] = None, 
+    def search_similar(self, query: str, n_results: int = 5,
+                       file_type: Optional[str] = None,
                        department: Optional[str] = None,
+                       tags: Optional[List[str]] = None,
                        ef_search: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Search for similar chunks using semantic similarity with query optimizations
@@ -233,19 +318,36 @@ class ChromaRAG:
         Returns:
             List of formatted search results
         """
-        where_clause = {}
-        
+        normalized_tags: List[str] = []
+        if tags:
+            normalized_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+
+        filters: List[Dict[str, Any]] = []
         if file_type:
-            where_clause["file_type"] = file_type
+            filters.append({"file_type": file_type})
         if department:
-            where_clause["department"] = department
-        
+            filters.append({"department": department})
+        if normalized_tags:
+            filters.extend({"tags": {"$contains": tag}} for tag in normalized_tags)
+
+        if ef_search is None:
+            ef_search = self.default_ef_search
+
+        if not filters:
+            where_clause: Optional[Dict[str, Any]] = None
+        elif len(filters) == 1:
+            where_clause = filters[0]
+        else:
+            where_clause = {"$and": filters}
+
         # Use optimized ef_search if provided
         query_kwargs = {
             "query_texts": [query],
             "n_results": n_results,
-            "where": where_clause if where_clause else None
+            "include": ["documents", "metadatas", "distances"],
         }
+        if where_clause:
+            query_kwargs["where"] = where_clause
         
         # Add ef_search if specified (override default search_ef from collection metadata)
         if ef_search:
@@ -253,7 +355,14 @@ class ChromaRAG:
 
         cache_key: Optional[CacheKey] = None
         if self._query_cache:
-            cache_key = self._build_cache_key(query, n_results, file_type, department, ef_search)
+            cache_key = self._build_cache_key(
+                query,
+                n_results,
+                file_type,
+                department,
+                tuple(sorted(normalized_tags)) if normalized_tags else (),
+                ef_search,
+            )
             cached = self._query_cache.get(cache_key)
             if cached is not None:
                 logger.debug("Query cache hit for '%s'", query)
@@ -395,23 +504,41 @@ class ChromaRAG:
         if not config.get("enabled", False):
             return
 
-        max_size = int(config.get("max_size", 128))
-        ttl_hours = float(config.get("ttl_hours", 1))
-        ttl_seconds = max(ttl_hours, 0.001) * 3600
+        max_entries = config.get("max_entries", config.get("max_size", 128))
+        ttl_seconds = config.get("ttl_seconds")
+
+        try:
+            max_entries_int = int(max_entries)
+        except (TypeError, ValueError):
+            max_entries_int = 128
+
+        if ttl_seconds is None:
+            ttl_hours = float(config.get("ttl_hours", 1))
+            ttl_seconds_value = max(ttl_hours, 0.001) * 3600
+        else:
+            try:
+                ttl_seconds_value = max(float(ttl_seconds), 0.001)
+            except (TypeError, ValueError):
+                ttl_seconds_value = 600.0
 
         memory_limit_mb = config.get("memory_limit_mb")
-        memory_limit_bytes = int(memory_limit_mb * 1024 * 1024) if memory_limit_mb else None
+        memory_limit_bytes = None
+        if memory_limit_mb:
+            try:
+                memory_limit_bytes = int(memory_limit_mb) * 1024 * 1024
+            except (TypeError, ValueError):
+                memory_limit_bytes = None
 
         try:
             self._query_cache = QueryCache(
-                max_size=max_size,
-                ttl_seconds=ttl_seconds,
+                max_size=max_entries_int,
+                ttl_seconds=ttl_seconds_value,
                 memory_limit_bytes=memory_limit_bytes,
             )
             logger.info(
-                "Query cache enabled (size=%s, ttl_hours=%.2f, memory_limit=%s)",
-                max_size,
-                ttl_hours,
+                "Query cache enabled (entries=%s, ttl_seconds=%.2f, memory_limit=%s)",
+                max_entries_int,
+                ttl_seconds_value,
                 f"{memory_limit_mb}MB" if memory_limit_mb else "None",
             )
         except Exception as exc:
@@ -439,6 +566,7 @@ class ChromaRAG:
         n_results: int,
         file_type: Optional[str],
         department: Optional[str],
+        tags: Tuple[str, ...],
         ef_search: Optional[int],
     ) -> CacheKey:
         return (
@@ -446,6 +574,7 @@ class ChromaRAG:
             n_results,
             file_type or "",
             department or "",
+            tags,
             ef_search or 0,
         )
 
