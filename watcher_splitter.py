@@ -64,6 +64,10 @@ except:
 with open(os.path.join(base_path, "config.json")) as f:
     CONFIG = json.load(f)
 
+use_ready_signal = bool(CONFIG.get("use_ready_signal", False))
+failed_dir = Path(CONFIG.get("failed_dir", "03_archive/failed"))
+failed_dir.mkdir(parents=True, exist_ok=True)
+
 # Feature toggle state (initialized after database/notifications are ready)
 METADATA_CONFIG: Dict[str, Any] = {}
 METADATA_ENABLED: bool = False
@@ -787,7 +791,6 @@ def process_file_enhanced(file_path, config):
                 chunk_filename = f"{chunk_filename_base}.txt"
 
             chunk_id = build_chunk_id(timestamp, clean_base, chunk_index)
-            chunk_file = file_output_folder / chunk_filename
             chunk_dedup_id = chunk_id
             dedup_hash_value = None
 
@@ -1072,7 +1075,7 @@ def process_files_parallel(file_list, config):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all jobs
         future_to_file = {
-            executor.submit(process_file_enhanced, file_path, config): file_path 
+            executor.submit(process_with_retries, file_path, config): file_path
             for file_path in file_list
         }
         
@@ -1242,6 +1245,63 @@ def move_to_processed_enhanced(file_path, processed_folder, department):
                 logger.warning(f"Failed to log file move error to database: {db_error}")
         return False
 
+def quarantine_failed_file(file_path: Path) -> None:
+    try:
+        failed_dir.mkdir(parents=True, exist_ok=True)
+        destination = failed_dir / file_path.name
+        counter = 1
+        while destination.exists():
+            destination = failed_dir / f"{file_path.stem}_{counter}{file_path.suffix}"
+            counter += 1
+        shutil.move(str(file_path), str(destination))
+
+        ready_path = Path(f"{file_path}.ready")
+        if ready_path.exists():
+            try:
+                ready_destination = failed_dir / ready_path.name
+                shutil.move(str(ready_path), str(ready_destination))
+            except Exception as ready_error:
+                logger.warning(f"Failed to quarantine ready signal for {file_path.name}: {ready_error}")
+
+        logger.error(f"Moved {file_path.name} to failed quarantine: {destination}")
+    except FileNotFoundError:
+        logger.warning(f"File missing during quarantine attempt: {file_path}")
+    except Exception as quarantine_error:
+        logger.error(f"Failed to quarantine {file_path.name}: {quarantine_error}")
+
+def process_with_retries(file_path: Path, config, max_attempts: int = 3) -> bool:
+    for attempt in range(max_attempts):
+        try:
+            success = process_file_enhanced(file_path, config)
+            if success:
+                return True
+            logger.warning(
+                "Processing attempt %s/%s failed for %s",
+                attempt + 1,
+                max_attempts,
+                file_path.name,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Processing attempt %s/%s raised an exception for %s: %s",
+                attempt + 1,
+                max_attempts,
+                file_path.name,
+                exc,
+            )
+
+        if attempt < max_attempts - 1:
+            backoff = 2 ** attempt
+            time.sleep(backoff)
+
+    logger.error(f"Processing failed after {max_attempts} attempts for {file_path.name}")
+    session_stats["errors"] = session_stats.get("errors", 0) + 1
+    if Path(file_path).exists():
+        quarantine_failed_file(Path(file_path))
+    else:
+        logger.warning(f"File already moved or missing after failures: {file_path}")
+    return False
+
 def log_session_stats():
     """Log comprehensive session statistics"""
     logger.info("=== ENHANCED SESSION STATISTICS ===")
@@ -1362,8 +1422,22 @@ def main():
                             filtered_files.append(f)
                         else:
                             logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
-                
-                new_files = filtered_files
+
+                eligible_files = []
+                for f in filtered_files:
+                    if f.suffix.lower() == ".part":
+                        logger.debug(f"Skipping partial file awaiting final rename: {f.name}")
+                        continue
+
+                    if use_ready_signal:
+                        ready_marker = Path(f"{f}.ready")
+                        if not ready_marker.exists():
+                            logger.debug(f"Waiting for ready signal for {f.name}")
+                            continue
+
+                    eligible_files.append(f)
+
+                new_files = eligible_files
                 
                 if new_files:
                     logger.info(f"Found {len(new_files)} new files to process")
@@ -1378,22 +1452,7 @@ def main():
                         # Process files sequentially
                         for file_path in new_files:
                             try:
-                                success = process_file_enhanced(file_path, CONFIG)
-                                if monitoring and monitoring.enabled:
-                                    monitoring.record_processing_event(
-                                        bool(success),
-                                        {"file": file_path.name, "mode": "sequential"},
-                                    )
-                                    if not success:
-                                        monitoring.record_error(
-                                            "ProcessingFailure",
-                                            f"Failed to process {file_path.name}",
-                                        )
-                                if success:
-                                    processed_files.add(file_path.name)
-                                    logger.info(f"Successfully processed: {file_path.name}")
-                                else:
-                                    logger.error(f"Failed to process: {file_path.name}")
+                                success = process_with_retries(file_path, CONFIG)
                             except Exception as e:
                                 logger.exception(f"Error processing {file_path.name}: {e}")
                                 if monitoring and monitoring.enabled:
@@ -1408,10 +1467,35 @@ def main():
                                     )
                                 if db:
                                     try:
-                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                        db.log_error(
+                                            "ProcessingError",
+                                            str(e),
+                                            traceback.format_exc(),
+                                            str(file_path),
+                                        )
                                     except Exception as db_error:
-                                        logger.warning(f"Failed to log processing error to database: {db_error}")
-                
+                                        logger.warning(
+                                            f"Failed to log processing error to database: {db_error}"
+                                        )
+                                continue
+
+                            if monitoring and monitoring.enabled:
+                                monitoring.record_processing_event(
+                                    bool(success),
+                                    {"file": file_path.name, "mode": "sequential"},
+                                )
+                                if not success:
+                                    monitoring.record_error(
+                                        "ProcessingFailure",
+                                        f"Failed to process {file_path.name}",
+                                    )
+
+                            if success:
+                                processed_files.add(file_path.name)
+                                logger.info(f"Successfully processed: {file_path.name}")
+                            else:
+                                logger.error(f"Failed to process: {file_path.name}")
+
                 # Periodic maintenance
                 loop_count += 1
                 

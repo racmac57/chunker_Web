@@ -10,7 +10,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -38,6 +38,14 @@ class ChromaRAG:
     Provides CRUD operations for vector database with hybrid search
     """
     
+    @staticmethod
+    def _build_chunk_id(metadata: Dict[str, Any]) -> str:
+        timestamp = metadata.get("timestamp") or datetime.now().isoformat()
+        file_name = metadata.get("file_name") or metadata.get("source_file") or "chunk"
+        chunk_index = metadata.get("chunk_index", 0)
+        chunk_index_str = str(chunk_index)
+        return f"{timestamp}_{file_name}_chunk{chunk_index_str}"
+
     def __init__(self, persist_directory="./chroma_db", 
                  hnsw_m: int = 32, 
                  hnsw_ef_construction: int = 512,
@@ -72,6 +80,12 @@ class ChromaRAG:
         )
         self._query_cache: Optional[QueryCache] = None
         self._configure_query_cache(query_cache_config, config_path)
+
+        self._config_path = config_path
+        self._global_config = self._load_global_config(config_path)
+        batch_config = (self._global_config or {}).get("batch", {})
+        self._batch_size = max(int(batch_config.get("size", 500) or 1), 1)
+        self._search_config = (self._global_config or {}).get("search", {})
         
         # Create or get collection for chunker knowledge base with HNSW optimization
         # HNSW parameters are immutable after creation, so we try to get existing first
@@ -115,38 +129,87 @@ class ChromaRAG:
         Returns:
             chunk_id: Unique identifier for the added chunk
         """
-        # Generate unique chunk ID
-        chunk_id = f"{metadata['timestamp']}_{metadata['file_name']}_chunk{metadata['chunk_index']}"
-        
-        # Prepare metadata for ChromaDB (ensure values are serializable)
-        chroma_metadata = {
-            "file_name": metadata["file_name"],
-            "file_type": metadata["file_type"],
-            "chunk_index": str(metadata["chunk_index"]),
-            "timestamp": metadata["timestamp"],
-            "department": metadata.get("department", "admin"),
-            "keywords": json.dumps(metadata.get("keywords", [])),
-            "file_size": str(metadata.get("file_size", 0)),
-            "processing_time": str(metadata.get("processing_time", 0))
-        }
-        content_hash = metadata.get("content_hash")
-        if content_hash:
-            chroma_metadata["content_hash"] = content_hash
-        
-        try:
-            # Add to collection
-            self.collection.add(
-                documents=[chunk_text],
-                metadatas=[chroma_metadata],
-                ids=[chunk_id]
+        chunk_metadata = dict(metadata)
+        chunk_id = self._build_chunk_id(chunk_metadata)
+
+        added_ids = self.add_chunks_bulk([chunk_text], [chunk_metadata], ids=[chunk_id])
+        if not added_ids:
+            raise ValueError(f"Chunk {chunk_id} was not added to ChromaDB")
+        return added_ids[0]
+
+    def add_chunks_bulk(
+        self,
+        chunks: List[str],
+        metadatas: List[Dict[str, Any]],
+        ids: Optional[List[str]] = None,
+        embeddings: Optional[List[Any]] = None,
+    ) -> List[str]:
+        """Add multiple chunks to the vector database with batching support."""
+        prepared_entries: List[Tuple[str, Dict[str, Any], str, Optional[Any]]] = []
+
+        for index, chunk_text in enumerate(chunks):
+            if not chunk_text or not chunk_text.strip():
+                logger.debug("Skipping empty chunk at index %s", index)
+                continue
+
+            metadata = dict(metadatas[index] if index < len(metadatas) else {})
+            metadata.setdefault("chunk_index", str(metadata.get("chunk_index", index + 1)))
+            metadata.setdefault("file_name", metadata.get("source_file", "chunk"))
+            metadata.setdefault("timestamp", metadata.get("timestamp", datetime.now().isoformat()))
+
+            chunk_id = (
+                ids[index]
+                if ids and index < len(ids)
+                else self._build_chunk_id(metadata)
             )
-            
-            logger.info(f"Added chunk to ChromaDB: {chunk_id}")
-            return chunk_id
-            
-        except Exception as e:
-            logger.error(f"Failed to add chunk to ChromaDB: {e}")
-            raise
+
+            embedding_value = (
+                embeddings[index]
+                if embeddings is not None and index < len(embeddings)
+                else None
+            )
+
+            if embeddings is not None:
+                if embedding_value is None:
+                    logger.debug("Skipping chunk %s due to null embedding", chunk_id)
+                    continue
+                if hasattr(embedding_value, "__len__") and len(embedding_value) == 0:
+                    logger.debug("Skipping chunk %s due to empty embedding", chunk_id)
+                    continue
+
+            prepared_entries.append((chunk_text, metadata, chunk_id, embedding_value))
+
+        if not prepared_entries:
+            logger.info("No valid chunks to add to ChromaDB")
+            return []
+
+        batch_size = getattr(self, "_batch_size", 500)
+        added_ids: List[str] = []
+
+        for start in range(0, len(prepared_entries), batch_size):
+            batch = prepared_entries[start : start + batch_size]
+            docs = [entry[0] for entry in batch]
+            metas = [entry[1] for entry in batch]
+            batch_ids = [entry[2] for entry in batch]
+            kwargs: Dict[str, Any] = {
+                "documents": docs,
+                "metadatas": metas,
+                "ids": batch_ids,
+            }
+
+            if embeddings is not None:
+                kwargs["embeddings"] = [entry[3] for entry in batch]
+
+            self.collection.add(**kwargs)
+            added_ids.extend(batch_ids)
+            logger.info(
+                "Added %s chunks to ChromaDB (batch starting at index %s)",
+                len(batch),
+                start,
+            )
+
+        self._update_collection_search_ef()
+        return added_ids
     
     def search_similar(self, query: str, n_results: int = 5, 
                        file_type: Optional[str] = None, 
@@ -305,6 +368,18 @@ class ChromaRAG:
         
         return formatted_results
 
+    @staticmethod
+    def _load_global_config(config_path: str) -> Dict[str, Any]:
+        try:
+            path = Path(config_path)
+            if not path.exists():
+                return {}
+            with path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception as exc:
+            logger.debug("Unable to load global config: %s", exc)
+            return {}
+
     # ------------------------------------------------------------------ #
     # Query cache helpers
     # ------------------------------------------------------------------ #
@@ -382,6 +457,31 @@ class ChromaRAG:
     def invalidate_query_cache(self) -> None:
         if self._query_cache:
             self._query_cache.invalidate()
+
+    def _update_collection_search_ef(self) -> None:
+        if not isinstance(getattr(self, "_search_config", None), dict):
+            return
+
+        target = self._search_config.get("ef_search")
+        if target is None:
+            return
+
+        try:
+            target_value = int(target)
+        except (TypeError, ValueError):
+            logger.debug("Invalid ef_search value configured: %s", target)
+            return
+
+        modify = getattr(self.collection, "modify", None)
+        if not callable(modify):
+            logger.debug("Chroma collection does not support modify(); skipping ef update")
+            return
+
+        try:
+            modify(metadata={"hnsw:search_ef": target_value})
+            logger.debug("Updated hnsw:search_ef to %s", target_value)
+        except Exception as exc:
+            logger.debug("Unable to update hnsw:search_ef: %s", exc)
 
 
 class FaithfulnessScorer:

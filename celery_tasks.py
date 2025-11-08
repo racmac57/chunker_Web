@@ -978,7 +978,8 @@ def add_chunks_to_vector_db(chunks: List[str], metadata: Dict[str, Any],
             from rag_integration import ChromaRAG
             chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
             
-            results = []
+            documents: List[str] = []
+            metadatas: List[Dict[str, Any]] = []
             for i, chunk in enumerate(chunks):
                 chunk_metadata = {
                     "file_name": metadata["file_info"]["name"],
@@ -988,9 +989,11 @@ def add_chunks_to_vector_db(chunks: List[str], metadata: Dict[str, Any],
                     "keywords": extract_keywords(chunk),
                     "file_size": metadata["file_info"]["size"]
                 }
-                
-                chunk_id = chroma_rag.add_chunk(chunk, chunk_metadata)
-                results.append(chunk_id)
+
+                documents.append(chunk)
+                metadatas.append(chunk_metadata)
+            
+            results = chroma_rag.add_chunks_bulk(documents, metadatas)
             
             return {"status": "success", "method": "chromadb", "chunk_ids": results}
             
