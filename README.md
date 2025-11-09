@@ -721,3 +721,4 @@ For detailed Git setup information, see `GIT_SETUP_STATUS.md`.
 **Log Location:** `05_logs/maintenance/2025_10_31_19_16_35/`
 
 **Git Status:** ✅ Repository initialized, connected to GitHub, and regularly backed up
+[![Release](https://img.shields.io/github/v/release/racmac57/chunker_Web?display_name=tag&sort=semver)](https://github.com/racmac57/chunker_Web/releases/latest)
