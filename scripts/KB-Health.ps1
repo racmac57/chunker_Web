@@ -9,9 +9,9 @@ $out   = Join-Path $OD "KB_Shared\04_output"
 $pidFile = Join-Path $RepoRoot "watcher_pid.txt"
 
 $watcher = if (Test-Path $pidFile) {
-  $pid = Get-Content $pidFile | Select-Object -First 1
-  if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) {
-    "Running (PID=$pid)"
+  $watcherPid = Get-Content $pidFile | Select-Object -First 1
+  if ($watcherPid -and (Get-Process -Id $watcherPid -ErrorAction SilentlyContinue)) {
+    "Running (PID=$watcherPid)"
   } else {
     "Not running"
   }
@@ -20,7 +20,7 @@ $watcher = if (Test-Path $pidFile) {
 }
 
 $chromadb = Test-Path (Join-Path $RepoRoot "chroma_db")
-$offline  = Test-Path $watch -and Test-Path $arc -and Test-Path $out
+$offline  = (Test-Path $watch) -and (Test-Path $arc) -and (Test-Path $out)
 
 [pscustomobject]@{
   Watcher     = $watcher

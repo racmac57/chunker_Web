@@ -18,20 +18,20 @@ if (-not $mutex.WaitOne(0, $false)) {
 }
 
 if (Test-Path $pidFile) {
-  $pid = Get-Content $pidFile | Select-Object -First 1
-  if ($pid -and (Get-Process -Id $pid -ErrorAction SilentlyContinue)) {
-    Write-Host "Watcher already running. PID=$pid"
+  $watcherPid = Get-Content $pidFile | Select-Object -First 1
+  if ($watcherPid -and (Get-Process -Id $watcherPid -ErrorAction SilentlyContinue)) {
+    Write-Host "Watcher already running. PID=$watcherPid"
     $mutex.ReleaseMutex() | Out-Null
     exit 0
   }
 }
 
-Start-Process -FilePath "python" -ArgumentList "watcher_splitter.py" -WorkingDirectory $RepoRoot -NoNewWindow
+$process = Start-Process -FilePath "python" -ArgumentList "watcher_splitter.py" -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
 Start-Sleep -Seconds 2
-$proc = Get-Process python | Where-Object { $_.Path -like "*python*" } | Sort-Object StartTime -Descending | Select-Object -First 1
-if ($null -ne $proc) {
-  $proc.Id | Out-File -Encoding ascii -FilePath $pidFile -Force
-  Write-Host "Watcher started. PID=$($proc.Id)"
+$watcherPid = $process.Id
+if ($null -ne $watcherPid -and (Get-Process -Id $watcherPid -ErrorAction SilentlyContinue)) {
+  $watcherPid | Out-File -Encoding ascii -FilePath $pidFile -Force
+  Write-Host "Watcher started. PID=$watcherPid"
 } else {
   Write-Host "Watcher process not found after start attempt."
   $mutex.ReleaseMutex() | Out-Null
@@ -44,8 +44,8 @@ if ($health -is [System.Array]) {
 }
 if ($health.Watcher -notlike "Running*") {
   Write-Host "Watcher health check failed: $($health.Watcher)"
-  if ($null -ne $proc -and (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) {
-    Stop-Process -Id $proc.Id -Force
+  if ($null -ne $watcherPid -and (Get-Process -Id $watcherPid -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $watcherPid -Force
   }
   if (Test-Path $pidFile) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue

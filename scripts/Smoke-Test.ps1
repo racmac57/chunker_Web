@@ -9,10 +9,21 @@ $out   = Join-Path $OD "KB_Shared\04_output"
 $new   = Join-Path $watch $Name
 
 "smoke test $(Get-Date -Format s)" | Set-Content -Encoding UTF8 $new
-Start-Sleep -Seconds 4
 
-$archived = Test-Path (Join-Path $arc $Name)
-$latestOut = Get-ChildItem $out -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+$archivedPath = Join-Path $arc $Name
+$archived = $false
+for ($i = 0; $i -lt 15; $i++) {
+  if (Test-Path $archivedPath) {
+    $archived = $true
+    break
+  }
+  Start-Sleep -Seconds 1
+}
+
+$latestOut = @()
+if (Test-Path $out) {
+  $latestOut = Get-ChildItem $out -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+}
 
 [pscustomobject]@{
   Dropped    = $new
