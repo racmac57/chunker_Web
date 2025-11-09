@@ -309,6 +309,7 @@ Notes
 - Config check: `npm run kb:cfg:check`
 - Toggle dedupe: `npm run kb:cfg:dedupe:on` / `npm run kb:cfg:dedupe:off`
 - Toggle incremental updates: `npm run kb:cfg:incr:on` / `npm run kb:cfg:incr:off`
+- Consistency check: `npm run kb:consistency`
 
 **Secondary PC**
 - Do not start the watcher.
@@ -320,6 +321,7 @@ Notes
 - Duplicate protection is active through incremental updates and de-dup logic.
 - To auto-start on login, import `scripts/KB_Watcher_StartOnLogin.xml` in Task Scheduler (Action → Import Task) and confirm the action path points to `C:\_chunker`.
 - After import or any restart, run `npm run kb:health` to verify a single `Running (PID=…)` instance.
+- Weekly maintenance: import `scripts/KB_Weekly_Dedupe.xml` to schedule Monday 09:00 cleanups (dedupe + run report) or run manually with `npm run kb:report`.
 
 ## 🔄 Consolidation (2025-10-29)
 - New sidecar flags (config.json):
