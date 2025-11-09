@@ -1,0 +1,523 @@
+Laptop-Specific config.py**
+```python
+# 🕒 2025-06-20-18-10-00
+# Police_Data_Analysis/laptop_config
+# Author: R. A. Carucci
+# Purpose: Laptop-specific configuration for SCRPA development
+
+import os
+import logging
+from datetime import datetime, timedelta, date
+
+# === LAPTOP PATHS ===
+LAPTOP_BASE = r"C:\SCRPA_Laptop"
+APR_PATH = os.path.join(LAPTOP_BASE, "project", "7_Day_Templet_SCRPA_Time.aprx")
+REPORT_BASE_DIR = os.path.join(LAPTOP_BASE, "output", "reports")
+
+# Check if we're on laptop vs desktop
+if "SCRPA_Laptop" in os.getcwd() or not os.path.exists(r"C:\Users\carucci_r\OneDrive - City of Hackensack"):
+    # Laptop mode
+    DEVELOPMENT_MODE = True
+else:
+    # Desktop mode - use your original paths
+    DEVELOPMENT_MODE = False
+    APR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\7_Day_Templet_SCRPA_Time.aprx"
+    REPORT_BASE_DIR = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\ScriptsTimeSCRPATemplet\7_day_crime_report_tool_scripts\SCRPA_Reports"
+
+print(f"🔧 Running in {'LAPTOP' if DEVELOPMENT_MODE else 'DESKTOP'} mode")
+print(f"📁 ArcGIS Project: {APR_PATH}")
+print(f"📁 Output Base: {REPORT_BASE_DIR}")
+
+# === CRIME TYPES - Your Working List ===
+CRIME_TYPES = [
+    "Motor Vehicle Theft",
+    "Burglary - Comm & Res", 
+    "Burglary Auto",
+    "Sexual Offenses",
+    "Robbery"
+]
+
+# === CRIME FOLDER MAPPING ===
+CRIME_FOLDER_MAPPING = {
+    "Motor Vehicle Theft": "MV_Theft",
+    "Burglary - Comm & Res": "Burglary_Comm_And_Res",
+    "Burglary Auto": "Burglary_Auto", 
+    "Sexual Offenses": "Sexual_Offenses",
+    "Robbery": "Robbery"
+}
+
+# === LAYER NAME MAPPING ===
+LAYER_NAME_MAP = {
+    "Motor Vehicle Theft": "MV Theft",
+    "Burglary - Comm & Res": "Burglary - Comm & Res",
+    "Burglary Auto": "Burglary - Auto",
+    "Sexual Offenses": "Sexual Offenses",
+    "Robbery": "Robbery"
+}
+
+# === SQL PATTERNS ===
+CRIME_SQL_PATTERNS = {
+    "Motor Vehicle Theft": ["AUTO THEFT", "MOTOR VEHICLE THEFT"],
+    "Burglary Auto": ["BURGLARY AUTO", "BURGLARY - AUTO"],
+    "Burglary - Comm & Res": ["BURGLARY COMMERCIAL", "BURGLARY RESIDENTIAL"],
+    "Robbery": ["ROBBERY"],
+    "Sexual Offenses": ["SEXUAL ASSAULT", "SEXUAL OFFENSE"]
+}
+
+def get_sql_pattern_for_crime(crime_type):
+    """Get SQL pattern for crime type"""
+    return CRIME_SQL_PATTERNS.get(crime_type, [crime_type])
+
+# === DATE UTILITIES ===
+def get_7day_period_dates(report_date):
+    """Get 7-day period"""
+    if isinstance(report_date, str):
+        report_date = datetime.strptime(report_date, "%Y_%m_%d").date()
+    elif isinstance(report_date, datetime):
+        report_date = report_date.date()
+    
+    end_date = report_date - timedelta(days=1)
+    start_date = end_date - timedelta(days=6)
+    
+    return start_date, end_date
+
+def get_28day_period_dates(report_date):
+    """Get 28-day period"""
+    if isinstance(report_date, str):
+        report_date = datetime.strptime(report_date, "%Y_%m_%d").date()
+    elif isinstance(report_date, datetime):
+        report_date = report_date.date()
+    
+    end_date = report_date - timedelta(days=1)
+    start_date = end_date - timedelta(days=27)
+    
+    return start_date, end_date
+
+def get_ytd_period_dates(report_date):
+    """Get YTD period"""
+    if isinstance(report_date, str):
+        report_date = datetime.strptime(report_date, "%Y_%m_%d").date()
+    elif isinstance(report_date, datetime):
+        report_date = report_date.date()
+    
+    start_date = date(report_date.year, 1, 1)
+    end_date = report_date - timedelta(days=1)
+    
+    return start_date, end_date
+
+# === OUTPUT FUNCTIONS ===
+def get_cycle_code(report_date_str):
+    """Generate cycle code"""
+    try:
+        dt = datetime.strptime(report_date_str, "%Y_%m_%d")
+        start_of_year = datetime(2025, 1, 1)
+        days_diff = (dt - start_of_year).days
+        week_num = (days_diff // 7) + 1
+        cycle_num = ((week_num - 1) // 4) + 1
+        return f"C{cycle_num:02d}W{week_num:02d}"
+    except:
+        return "C06W23"
+
+def get_output_folder(report_date_str):
+    """Get main output folder"""
+    cycle_code = get_cycle_code(report_date_str)
+    folder_name = f"{cycle_code}_{report_date_str}"
+    return os.path.join(REPORT_BASE_DIR, folder_name)
+
+def get_crime_type_folder(crime_type, report_date_str):
+    """Get crime-specific subfolder"""
+    main_folder = get_output_folder(report_date_str)
+    crime_folder_name = CRIME_FOLDER_MAPPING.get(crime_type, crime_type.replace(' ', '_'))
+    return os.path.join(main_folder, crime_folder_name)
+
+def get_standardized_filename(crime_type):
+    """Get standardized filename prefix"""
+    return CRIME_FOLDER_MAPPING.get(crime_type, crime_type.replace(' ', '_'))
+
+def validate_all_paths():
+    """Validate critical paths exist"""
+    paths_to_check = {
+        "ArcGIS Pro Project": APR_PATH,
+        "Reports Base Directory": REPORT_BASE_DIR
+    }
+    
+    all_valid = True
+    for name, path in paths_to_check.items():
+        if not os.path.exists(path):
+            print(f"❌ {name} not found: {path}")
+            if name == "Reports Base Directory":
+                print(f"📁 Creating: {path}")
+                os.makedirs(path, exist_ok=True)
+                print(f"✅ Created: {path}")
+            else:
+                logging.error(f"{name} not found: {path}")
+                all_valid = False
+        else:
+            print(f"✅ {name} found")
+    
+    return all_valid
+
+# === COMPATIBILITY ALIASES ===
+FOLDER_NAME_MAPPING = CRIME_FOLDER_MAPPING
+SCRPA_SYMBOLOGY_CONFIG = LAYER_NAME_MAP
+POWERPOINT_TEMPLATES = {
+    "main": "",
+    "7day": ""
+}
+
+# === REPORT CYCLES ===
+REPORT_CYCLES = {
+    "7-Day": get_7day_period_dates,
+    "28-Day": get_28day_period_dates,
+    "YTD": get_ytd_period_dates
+}
+```
+
+## **Phase 2: Test ArcGIS Pro Project Access (10 minutes)**
+
+### **1. Quick ArcGIS Pro Test**
+```python
+# test_arcgis_access.py
+import arcpy
+import os
+
+def test_arcgis_project():
+    """Test if we can access the ArcGIS Pro project"""
+    try:
+        aprx_path = r"C:\SCRPA_Laptop\project\7_Day_Templet_SCRPA_Time.aprx"
+        
+        if not os.path.exists(aprx_path):
+            print(f"❌ Project file not found: {aprx_path}")
+            return False
+        
+        print(f"✅ Project file found: {aprx_path}")
+        
+        # Try to open project
+        aprx = arcpy.mp.ArcGISProject(aprx_path)
+        print(f"✅ Project opened successfully")
+        
+        # List maps
+        maps = aprx.listMaps()
+        print(f"📊 Found {len(maps)} maps:")
+        for map_obj in maps:
+            print(f"  - {map_obj.name}")
+        
+        # List layouts
+        layouts = aprx.listLayouts()
+        print(f"📋 Found {len(layouts)} layouts:")
+        for layout in layouts:
+            print(f"  - {layout.name}")
+        
+        # List layers in first map
+        if maps:
+            layers = maps[0].listLayers()
+            print(f"🗺️ Found {len(layers)} layers in '{maps[0].name}':")
+            for layer in layers:
+                print(f"  - {layer.name}")
+        
+        del aprx
+        return True
+        
+    except Exception as e:
+        print(f"❌ ArcGIS Pro test failed: {e}")
+        return False
+
+if __name__ == "__main__":
+    test_arcgis_project()
+```
+
+## **Phase 3: Comprehensive Testing (20 minutes)**
+
+### **1. Test Individual Components**
+```python
+# test_components.py
+import sys
+import os
+sys.path.append(r"C:\SCRPA_Laptop\scripts")
+
+def test_config():
+    """Test config module"""
+    print("🧪 Testing config module...")
+    try:
+        from config import (
+            get_7day_period_dates,
+            get_output_folder,
+            get_crime_type_folder,
+            get_sql_pattern_for_crime,
+            validate_all_paths
+        )
+        
+        # Test with specific date
+        test_date = "2025_06_10"
+        
+        # Test date functions
+        start, end = get_7day_period_dates(test_date)
+        print(f"✅ 7-day period: {start} to {end}")
+        
+        # Test folder functions
+        output_folder = get_output_folder(test_date)
+        print(f"✅ Output folder: {output_folder}")
+        
+        # Test crime folder
+        crime_folder = get_crime_type_folder("Motor Vehicle Theft", test_date)
+        print(f"✅ Crime folder: {crime_folder}")
+        
+        # Test SQL patterns
+        pattern = get_sql_pattern_for_crime("Motor Vehicle Theft")
+        print(f"✅ SQL pattern: {pattern}")
+        
+        # Test path validation
+        paths_valid = validate_all_paths()
+        print(f"✅ Path validation: {paths_valid}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Config test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_chart_export():
+    """Test chart export"""
+    print("\n🧪 Testing chart export...")
+    try:
+        from chart_export import export_chart
+        
+        # Test with Motor Vehicle Theft
+        success = export_chart("Motor Vehicle Theft", "2025_06_10")
+        
+        if success:
+            print("✅ Chart export successful")
+        else:
+            print("❌ Chart export failed")
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ Chart test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_map_export():
+    """Test map export"""
+    print("\n🧪 Testing map export...")
+    try:
+        from map_export import export_maps
+        
+        # Mock args for map export
+        args = [
+            "main.py",
+            "2025_06_10",  # date
+            "true",        # export_maps
+            "true",        # export_charts
+            "false",       # export_reports
+            "7",           # day_span
+            "false",       # debug
+            "2025_06_10"   # date again
+        ]
+        
+        output_folder = r"C:\SCRPA_Laptop\output\reports"
+        
+        success = export_maps("Motor Vehicle Theft", output_folder, args)
+        
+        if success:
+            print("✅ Map export successful")
+        else:
+            print("❌ Map export failed")
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ Map test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def test_main_integration():
+    """Test main.py integration"""
+    print("\n🧪 Testing main.py integration...")
+    try:
+        # Set up arguments
+        sys.argv = [
+            "main.py",
+            "true",    # export_maps
+            "true",    # export_charts
+            "false",   # export_reports
+            "7",       # day_span
+            "false",   # debug
+            "2025_06_10"  # date
+        ]
+        
+        from main import main
+        
+        # This will test the full flow
+        main()
+        
+        print("✅ Main integration test completed")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Main integration test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    print("🚀 SCRPA Component Testing Suite")
+    print("=" * 50)
+    
+    tests = [
+        ("Config Module", test_config),
+        ("Chart Export", test_chart_export),
+        ("Map Export", test_map_export),
+        ("Main Integration", test_main_integration)
+    ]
+    
+    results = {}
+    for test_name, test_func in tests:
+        print(f"\n📋 Running: {test_name}")
+        print("-" * 30)
+        results[test_name] = test_func()
+    
+    print("\n" + "=" * 50)
+    print("📊 Final Test Results:")
+    print("=" * 50)
+    
+    for test_name, passed in results.items():
+        status = "✅ PASS" if passed else "❌ FAIL"
+        print(f"{test_name:20} : {status}")
+    
+    passed_count = sum(results.values())
+    total_count = len(results)
+    
+    print(f"\nResults: {passed_count}/{total_count} tests passed")
+    
+    if passed_count == total_count:
+        print("🎉 ALL TESTS PASSED - Ready for deployment!") else:
+        print("⚠️ Some tests failed - Review errors above")
+```
+
+## **Phase 4: Quick Deployment Script (5 minutes)**
+
+### **1. Create Deployment Script**
+```python
+# deploy_to_desktop.py
+import shutil
+import os
+from pathlib import Path
+
+def deploy_to_desktop():
+    """Deploy fixed scripts back to desktop via OneDrive"""
+    
+    laptop_scripts = r"C:\SCRPA_Laptop\scripts"
+    onedrive_scripts = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\GIS_Tools\Scripts\ScriptsTimeSCRPATemplet\7_day_crime_report_tool_scripts"
+    
+    if not os.path.exists(laptop_scripts):
+        print(f"❌ Laptop scripts not found: {laptop_scripts}")
+        return False
+    
+    if not os.path.exists(onedrive_scripts):
+        print(f"❌ OneDrive destination not found: {onedrive_scripts}")
+        return False
+    
+    # Files to deploy
+    files_to_copy = [
+        "config.py",
+        "main.py", 
+        "chart_export.py",
+        "map_export.py"
+    ]
+    
+    print("📁 Deploying fixed scripts to OneDrive...")
+    
+    for filename in files_to_copy:
+        source = os.path.join(laptop_scripts, filename)
+        destination = os.path.join(onedrive_scripts, filename)
+        
+        if os.path.exists(source):
+            # Backup original
+            if os.path.exists(destination):
+                backup_path = destination + ".backup"
+                shutil.copy2(destination, backup_path)
+                print(f"💾 Backed up: {filename}")
+            
+            # Copy new version
+            shutil.copy2(source, destination)
+            print(f"✅ Deployed: {filename}")
+        else:
+            print(f"⚠️ Source not found: {filename}")
+    
+    print("🎉 Deployment complete!") print("📋 Next steps:")
+    print("  1. Wait for OneDrive sync")
+    print("  2. Test on desktop with: python main.py true true false 7 false 2025_06_10")
+    
+    return True
+
+if __name__ == "__main__":
+    deploy_to_desktop()
+```
+
+## **Tonight's Action Plan** 📋
+
+### **1. Setup (15 min)**
+- Create `C:\SCRPA_Laptop\` folder structure
+- Copy scripts and .aprx from OneDrive
+- Install the laptop-specific config.py
+
+### **2. Test ArcGIS Access (10 min)**
+- Run `test_arcgis_access.py`
+- Verify project opens and layers are accessible
+
+### **3. Fix Scripts (30 min)**
+- Use the recovery config.py and map_export.py from my artifacts
+- Test each component individually
+
+### **4. Integration Test (15 min)**
+- Run full component test suite
+- Fix any remaining issues
+
+### **5. Deploy (5 min)**
+- Run deployment script to copy back to OneDrive
+- Document what was fixed
+
+**Total time: ~75 minutes to have a fully working system**
+
+**This approach gives you complete control and testing capability on your laptop, then seamless deployment back to your desktop! **
+````
+
+## **Tonight's Laptop Development Plan** 🎯
+
+### **Quick Start Steps:**
+
+1. **Create folder structure** - 5 minutes
+2. **Copy your OneDrive scripts** to laptop - 5 minutes  
+3. **Install the recovery config.py** from my artifacts - 2 minutes
+4. **Test ArcGIS Pro project access** - 10 minutes
+5. **Fix remaining script issues** - 30 minutes
+6. **Run full integration test** - 15 minutes
+7. **Deploy back to OneDrive** - 5 minutes
+
+**Total: ~75 minutes to complete fix**
+
+## **Key Advantages of Laptop Development:**
+
+✅ **Complete ArcGIS Pro access** - test everything  
+✅ **Faster iteration** - no remote desktop delays  
+✅ **Full debugging capability** - step through code  
+✅ **Safe testing environment** - won't break desktop  
+✅ **Easy deployment** - copy back via OneDrive  
+
+## **First Step Tonight:**
+
+**Create the project structure and copy your OneDrive files to `C:\SCRPA_Laptop\`**
+
+Then use the recovery scripts I provided in the artifacts above. The laptop-specific config.py will automatically detect whether you're on laptop vs desktop and adjust paths accordingly. **Ready to start? Which component would you like to tackle first - the folder setup or testing ArcGIS Pro access? **
+
+
+
+## Prompt:
+6/21/2025, 1:03:47 AM
+
+!

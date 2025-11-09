@@ -1,0 +1,673 @@
+Args:
+        text: Input text to chunk. limit: Target number of sentences per chunk. department_config: Department-specific configuration. Returns:
+        List of chunked text.
+    """ logger.info(f"Starting chunking process - Text length: {len(text)} chars, Chunk limit: {limit} sentences")
+    
+    if not text or len(text.strip()) < 10:
+        logger.warning("Text too short for chunking - skipping")
+        return []
+    
+    try:
+        sentences = sent_tokenize(text)
+        logger.info(f"Tokenized text into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in text - skipping")
+            return []
+        
+        if department_config.get("enable_redaction"):
+            sentences = apply_redaction_rules(sentences)
+            logger.info(f"Applied redaction rules - {len(sentences)} sentences after redaction")
+        
+        chunks = []
+        max_chars = department_config.get("max_chunk_chars", CONFIG.get("max_chunk_chars", 30000))
+        current_chunk = []
+        current_length = 0
+        chunk_count = 0
+        
+        for sentence in sentences:
+            sentence_length = len(sentence)
+            
+            if (len(current_chunk) >= limit or 
+                current_length + sentence_length > max_chars) and current_chunk:
+                
+                chunk_text = " ".join(current_chunk)
+                if len(chunk_text.strip()) > 0:
+                    chunks.append(chunk_text)
+                    chunk_count += 1
+                    logger.debug(f"Created chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+                
+                current_chunk = [sentence]
+                current_length = sentence_length
+            else:
+                current_chunk.append(sentence)
+                current_length += sentence_length
+        
+        if current_chunk:
+            chunk_text = " ".join(current_chunk)
+            if len(chunk_text.strip()) > 0:
+                chunks.append(chunk_text)
+                chunk_count += 1
+                logger.debug(f"Created final chunk {chunk_count}: {len(current_chunk)} sentences, {len(chunk_text)} chars")
+        
+        logger.info(f"Completed chunking - Created {chunk_count} chunks, Total sentences: {len(sentences)}")
+        return chunks
+    
+    except Exception as e:
+        logger.error(f"Chunking failed: {e}", exc_info=True)
+        return []
+
+def stream_large_file(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """
+    Stream large text files to reduce memory usage. Args:
+        file_path: Path to the file. chunk_size: Size of chunks to read at a time (in bytes). Returns:
+        File content as a string.
+    """ try:
+        content = []
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                content.append(chunk)
+        return "".join(content)
+    except Exception as e:
+        logger.error(f"Error streaming file {file_path}: {e}")
+        return ""
+
+def apply_redaction_rules(sentences: List[str]) -> List[str]:
+    """
+    Apply department-specific redaction rules for sensitive data. Args:
+        sentences: List of sentences to redact. Returns:
+        Redacted sentences.
+    """ redacted = []
+    for sentence in sentences:
+        sentence = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '[SSN]', sentence)
+        sentence = re.sub(r'\b\d{4} \d{4} \d{4} \d{4}\b', '[CC]', sentence)
+        sentence = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\. [A-Z|a-z]{2,}\b', '[EMAIL]', sentence)
+        redacted.append(sentence)
+    return redacted
+
+def process_file_enhanced(file_path: Path, config: Dict) -> bool:
+    """
+    Process a file with enhanced chunking and RAG integration. Args:
+        file_path: Path to the file. config: Configuration dictionary. Returns:
+        True if successful, False otherwise.
+    """ start_time = time.time()
+    logger.info(f"Processing file: {file_path.name} - Size: {file_path.stat().st_size} bytes")
+    
+    try:
+        file_type = file_path.suffix.lower()
+        text = ""
+        
+        # Stream large text-based files
+        if file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log"] and file_path.stat().st_size > 1024 * 1024:
+            text = stream_large_file(file_path)
+        elif file_type in [".txt", ".md", ".json", ".csv", ".sql", ".yaml", ".xml", ".log"]:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        
+        # Process specific file types
+        if file_type == ".xlsx":
+            text = process_excel_file(text, str(file_path))
+        elif file_type == ".pdf":
+            text = process_pdf_file(text, str(file_path))
+        elif file_type == ".py":
+            text = process_python_file(text, str(file_path))
+        elif file_type == ".docx":
+            text = process_docx_file(text, str(file_path))
+        elif file_type == ".yaml":
+            text = process_yaml_file(text, str(file_path))
+        elif file_type == ".xml":
+            text = process_xml_file(text, str(file_path))
+        elif file_type == ".log":
+            text = process_log_file(text, str(file_path))
+        elif file_type == ".sql":
+            text = process_sql_file(text, str(file_path))
+        
+        logger.info(f"Read {len(text)} characters from file")
+        
+        if not text.strip():
+            logger.warning(f"Empty file after stripping whitespace: {file_path.name}")
+            session_stats['zero_byte_prevented'] += 1
+            return False
+        
+        dept_config = get_department_config(file_path)
+        chunks = chunk_text_enhanced(text, dept_config['chunk_size'], dept_config)
+        
+        if not chunks:
+            logger.warning(f"No chunks created for file: {file_path.name}")
+            return False
+        
+        timestamp = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
+        output_dir = Path(config['output_dir']) / f'{timestamp}_{file_path.stem}'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created output directory: {output_dir}")
+        
+        chunk_files = []
+        for i, chunk in enumerate(chunks, 1):
+            chunk_file = output_dir / f'{timestamp}_chunk_{i}.txt'
+            with open(chunk_file, 'w', encoding='utf-8') as f:
+                f.write(chunk)
+            chunk_files.append(chunk_file)
+        
+        session_stats['chunks_created'] += len(chunks)
+        session_stats['total_sentences_processed'] += len(sent_tokenize(text))
+        session_stats['total_bytes_created'] += sum(len(chunk) for chunk in chunks)
+        
+        dept = dept_config['department']
+        if dept not in session_stats['department_breakdown']:
+            session_stats['department_breakdown'][dept] = {'files': 0, 'chunks': 0}
+        session_stats['department_breakdown'][dept]['files'] += 1
+        session_stats['department_breakdown'][dept]['chunks'] += len(chunks)
+        
+        if db:
+            try:
+                db.log_processing(file_path.name, dept, len(chunks), len(text), time.time() - start_time)
+            except Exception as db_error:
+                logger.warning(f"Failed to log processing to database: {db_error}")
+        
+        notifications.send_file_processed_notification(file_path.name, len(chunks), dept)
+        
+        if config.get("rag_enabled"):
+            try:
+                chroma_rag = ChromaRAG(persist_directory=config.get("chroma_persist_dir", "./chroma_db"))
+                for i, chunk in enumerate(chunks):
+                    metadata = {
+                        "file_name": file_path.name,
+                        "file_type": file_path.suffix,
+                        "chunk_index": i + 1,
+                        "timestamp": datetime.now().isoformat(),
+                        "department": dept,
+                        "keywords": apply_redaction_rules(extract_keywords(chunk)),
+                        "file_size": file_path.stat().st_size,
+                        "processing_time": time.time() - start_time
+                    }
+                    chunk_id = chroma_rag.add_chunk(chunk, metadata)
+                    logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+            except Exception as e:
+                logger.error(f"Failed to add to ChromaDB: {e}")
+        
+        archive_dir = Path(config['archive_dir'])
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / file_path.name
+        shutil.move(str(file_path), str(archive_path))
+        logger.info(f"Archived file to: {archive_path}")
+        
+        processing_time = time.time() - start_time
+        session_stats['performance_metrics']['avg_processing_time'] = (
+            session_stats['performance_metrics']['avg_processing_time'] * session_stats['files_processed'] + processing_time
+        ) / (session_stats['files_processed'] + 1)
+        session_stats['files_processed'] += 1
+        return True
+    
+    except Exception as e:
+        logger.exception(f"Error processing file {file_path.name}: {e}")
+        session_stats['errors'] += 1
+        if db:
+            try:
+                db.log_error('ProcessingError', str(e), traceback.format_exc(), file_path.name)
+            except Exception as db_error:
+                logger.warning(f"Failed to log error to database: {db_error}")
+        try:
+            notifications.send_error_alert(str(e), file_path.name, traceback.format_exc())
+        except Exception as notify_error:
+            logger.warning(f"Failed to send error alert: {notify_error}")
+        return False
+
+def process_files_parallel(files: List[Path], config: Dict) -> List[bool]:
+    """
+    Process files in parallel using ThreadPoolExecutor. Args:
+        files: List of file paths. config: Configuration dictionary. Returns:
+        List of processing results.
+    """ with ThreadPoolExecutor(max_workers=min(4, multiprocessing.cpu_count())) as executor:
+        futures = [executor.submit(process_file_enhanced, file, config) for file in files]
+        results = [f.result() for f in futures]
+    session_stats['parallel_jobs_completed'] += len(results)
+    return results
+
+def log_session_stats() -> None:
+    """
+    Log session statistics.
+    """ logger.info("=== Session Statistics ===")
+    logger.info(f"Files Processed: {session_stats['files_processed']}")
+    logger.info(f"Chunks Created: {session_stats['chunks_created']}")
+    logger.info(f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}")
+    logger.info(f"Errors: {session_stats['errors']}")
+    logger.info(f"Avg Processing Time: {session_stats['performance_metrics']['avg_processing_time']:.2f}s")
+    logger.info(f"Peak CPU: {session_stats['performance_metrics']['peak_cpu_usage']}%")
+    logger.info(f"Peak Memory: {session_stats['performance_metrics']['peak_memory_usage']}%")
+    logger.info("Department Breakdown:")
+    for dept, stats in session_stats['department_breakdown'].items():
+        logger.info(f"  {dept}: {stats['files']} files, {stats['chunks']} chunks")
+    logger.info("==========================")
+    if db:
+        try:
+            db.log_session_stats(session_stats)
+        except Exception as db_error:
+            logger.warning(f"Failed to log session stats to database: {db_error}")
+
+def main() -> None:
+    """
+    Main watcher loop for monitoring and processing files.
+    """ try:
+        validate_config(CONFIG)
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
+    
+    watch_folder = CONFIG['watch_folder']
+    logger.info("=== ENTERPRISE CHUNKER STARTED ===")
+    logger.info(f"Monitoring: {watch_folder}")
+    supported_extensions = CONFIG.get("supported_extensions", [".txt", ".md"])
+    logger.info(f"File types: {', '.join(supported_extensions)} files")
+    filter_mode = CONFIG.get("file_filter_mode", "all")
+    logger.info(f"Filter mode: {filter_mode}")
+    if filter_mode == "patterns":
+        patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+        logger.info(f"Required patterns: {', '.join(patterns)}")
+    elif filter_mode == "suffix":
+        logger.info("Required suffix: _full_conversation")
+    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    logger.info(f"Database tracking: Enabled")
+    logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
+    logger.info(f"RAG Enabled: {CONFIG.get('rag_enabled', False)}")
+    
+    processed_files = set()
+    loop_count = 0
+    last_cleanup = datetime.now()
+    last_report = datetime.now()
+    
+    notifications.send_email(
+        notifications.config["admin_emails"],
+        "🚀 Chunker System Started",
+        f"Enterprise Chunker system started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Monitoring: {watch_folder}\n"
+        f"File types: {', '.join(supported_extensions)} files\n"
+        f"Filter mode: {filter_mode}\n"
+        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Database: Enabled\n"
+        f"RAG: {'Enabled' if CONFIG.get('rag_enabled') else 'Disabled'}\n"
+        f"Dashboard: http://localhost:5000"
+    )
+    
+    try:
+        while True:
+            try:
+                all_files = []
+                for ext in supported_extensions:
+                    all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
+                
+                excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
+                filter_mode = CONFIG.get("file_filter_mode", "all")
+                file_patterns = CONFIG.get("file_patterns", ["_full_conversation"])
+                exclude_patterns = CONFIG.get("exclude_patterns", [])
+                
+                filtered_files = []
+                for f in all_files:
+                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                        continue
+                    
+                    if any(pattern in f.name for pattern in exclude_patterns):
+                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        continue
+                    
+                    if filter_mode == "all":
+                        filtered_files.append(f)
+                    elif filter_mode == "patterns":
+                        if any(pattern in f.name for pattern in file_patterns):
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                    elif filter_mode == "suffix":
+                        if "_full_conversation" in f.name:
+                            filtered_files.append(f)
+                        else:
+                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                new_files = filtered_files
+                
+                if new_files:
+                    logger.info(f"Found {len(new_files)} new files to process")
+                    
+                    if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
+                        results = process_files_parallel(new_files, CONFIG)
+                        for i, result in enumerate(results):
+                            if result:
+                                processed_files.add(new_files[i].name)
+                    else:
+                        for file_path in new_files:
+                            try:
+                                if process_file_enhanced(file_path, CONFIG):
+                                    processed_files.add(file_path.name)
+                                    logger.info(f"Successfully processed: {file_path.name}")
+                                else:
+                                    logger.error(f"Failed to process: {file_path.name}")
+                            except Exception as e:
+                                logger.exception(f"Error processing {file_path.name}: {e}")
+                                if db:
+                                    try:
+                                        db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
+                                    except Exception as db_error:
+                                        logger.warning(f"Failed to log processing error to database: {db_error}")
+                
+                loop_count += 1
+                
+                if loop_count % 12 == 0:
+                    log_session_stats()
+                
+                if loop_count % 60 == 0:
+                    log_system_metrics()
+                
+                if datetime.now() - last_cleanup > timedelta(hours=24):
+                    if db:
+                        try:
+                            db.cleanup_old_data(days=30)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to run database cleanup: {db_error}")
+                    last_cleanup = datetime.now()
+                
+                if datetime.now() - last_report > timedelta(hours=24):
+                    if db:
+                        try:
+                            analytics = db.get_analytics(days=1)
+                            notifications.send_daily_summary(session_stats, analytics)
+                        except Exception as db_error:
+                            logger.warning(f"Failed to get analytics or send daily summary: {db_error}")
+                    last_report = datetime.now()
+                
+                time.sleep(CONFIG.get("polling_interval", 5))
+                
+            except KeyboardInterrupt:
+                logger.info("Watcher stopped by user")
+                break
+            except Exception as e:
+                logger.exception("Critical error in main loop")
+                if db:
+                    try:
+                        db.log_error("MainLoopError", str(e), traceback.format_exc())
+                    except Exception as db_error:
+                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                try:
+                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
+                except Exception as notify_error:
+                    logger.warning(f"Failed to send error alert: {notify_error}")
+                time.sleep(10)
+                
+    finally:
+        log_session_stats()
+        
+        notifications.send_email(
+            notifications.config["admin_emails"],
+            "🛑 Chunker System Stopped",
+            f"Enterprise Chunker system stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Session Summary:\n"
+            f"Files Processed: {session_stats['files_processed']}\n"
+            f"Chunks Created: {session_stats['chunks_created']}\n"
+            f"Zero-byte Prevented: {session_stats['zero_byte_prevented']}\n"
+            f"Errors: {session_stats['errors']}\n"
+            f"Uptime: {datetime.now() - datetime.strptime(session_stats['session_start'], '%Y-%m-%d %H:%M:%S')}"
+        )
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+### 3. Updated File: `rag_integration.py`
+This file is updated to include type hints, fix NLTK stopwords import, and add security redaction for keywords. ```python
+"""
+RAG Integration Module for Chunker_v2
+Handles retrieval-augmented generation with ChromaDB and Ollama embeddings
+"""
+
+import logging
+import re
+import json
+from typing import List, Dict, Any, Optional
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+import chromadb
+from chromadb.config import Settings
+from datetime import datetime
+from nltk.corpus import stopwords
+from collections import Counter
+
+logger = logging.getLogger(__name__)
+
+class ChromaRAG:
+    """
+    ChromaDB-based RAG implementation for knowledge base management
+    Provides CRUD operations for vector database with hybrid search
+    """
+    
+    def __init__(self, persist_directory: str = "./chroma_db") -> None:
+        """
+        Initialize ChromaDB client and collection. Args:
+            persist_directory: Directory to persist ChromaDB database.
+        """ self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        
+        self.collection = self.client.get_or_create_collection(
+            name="chunker_knowledge_base",
+            metadata={"description": "Enterprise chunker knowledge base with RAG capabilities"}
+        )
+        
+        logger.info(f"Initialized ChromaDB collection with {self.collection.count()} existing chunks")
+    
+    def add_chunk(self, chunk_text: str, metadata: Dict[str, Any]) -> str:
+        """
+        Add a chunk to the vector database. Args:
+            chunk_text: The text content of the chunk. metadata: Dictionary containing chunk metadata. Returns:
+            chunk_id: Unique identifier for the added chunk.
+        """ chunk_id = f"{metadata['timestamp']}_{metadata['file_name']}_chunk{metadata['chunk_index']}"
+        
+        chroma_metadata = {
+            "file_name": metadata["file_name"],
+            "file_type": metadata["file_type"],
+            "chunk_index": str(metadata["chunk_index"]),
+            "timestamp": metadata["timestamp"],
+            "department": metadata.get("department", "admin"),
+            "keywords": json.dumps(metadata.get("keywords", [])),
+            "file_size": str(metadata.get("file_size", 0)),
+            "processing_time": str(metadata.get("processing_time", 0))
+        }
+        
+        try:
+            self.collection.add(
+                documents=[chunk_text],
+                metadatas=[chroma_metadata],
+                ids=[chunk_id]
+            )
+            
+            logger.info(f"Added chunk to ChromaDB: {chunk_id}")
+            return chunk_id
+            
+        except Exception as e:
+            logger.error(f"Failed to add chunk to ChromaDB: {e}")
+            raise
+    
+    def search_similar(self, query: str, n_results: int = 5, 
+                      file_type: Optional[str] = None, 
+                      department: Optional[str] = None) -> List[Dict]:
+        """
+        Search for similar chunks using semantic similarity. Args:
+            query: Search query text. n_results: Number of results to return. file_type: Filter by file type (optional). department: Filter by department (optional). Returns:
+            List of formatted search results.
+        """ where_clause = {}
+        
+        if file_type:
+            where_clause["file_type"] = file_type
+        if department:
+            where_clause["department"] = department
+        
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where_clause if where_clause else None
+        )
+        
+        return self._format_results(results)
+    
+    def search_by_keywords(self, keywords: List[str], n_results: int = 5) -> List[Dict]:
+        """
+        Search by specific keywords. Args:
+            keywords: List of keywords to search. n_results: Number of results to return. Returns:
+            List of formatted search results.
+        """ query = " ".join(keywords)
+        return self.search_similar(query, n_results)
+    
+    def get_chunk_by_id(self, chunk_id: str) -> List[Dict]:
+        """
+        Retrieve specific chunk by ID. Args:
+            chunk_id: Unique chunk identifier. Returns:
+            List of formatted chunk data.
+        """ results = self.collection.get(ids=[chunk_id])
+        return self._format_results(results)
+    
+    def update_chunk(self, chunk_id: str, new_text: str, new_metadata: Dict[str, Any]) -> None:
+        """
+        Update existing chunk. Args:
+            chunk_id: Unique chunk identifier. new_text: Updated chunk text. new_metadata: Updated metadata dictionary.
+        """ self.collection.update(
+            ids=[chunk_id],
+            documents=[new_text],
+            metadatas=[new_metadata]
+        )
+    
+    def delete_chunk(self, chunk_id: str) -> None:
+        """
+        Delete chunk from database. Args:
+            chunk_id: Unique chunk identifier.
+        """ self.collection.delete(ids=[chunk_id])
+    
+    def get_collection_stats(self) -> Dict[str, Any]:
+        """
+        Get statistics about the collection. Returns:
+            Dictionary with collection statistics.
+        """ count = self.collection.count()
+        return {
+            "total_chunks": count,
+            "collection_name": self.collection.name,
+            "last_updated": datetime.now().isoformat()
+        }
+    
+    def _format_results(self, results: Dict) -> List[Dict]:
+        """
+        Format ChromaDB results for easier use. Args:
+            results: Raw ChromaDB query results. Returns:
+            List of formatted results.
+        """ formatted_results = []
+        
+        if results.get("documents"):
+            for i, doc in enumerate(results["documents"][0]):
+                formatted_results.append({
+                    "id": results["ids"][0][i],
+                    "document": doc,
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i] if results.get("distances") else None
+                })
+        
+        return formatted_results
+
+class FaithfulnessScorer:
+    """
+    Evaluates the faithfulness of generated answers against source context.
+    """ def __init__(self) -> None:
+        """Initialize scorer with SentenceTransformer model.""" self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.stop_words = set(stopwords.words('english'))
+    
+    def extract_claims(self, answer: str) -> List[str]:
+        """
+        Extract factual claims from the answer. Args:
+            answer: Generated answer text. Returns:
+            List of extracted claims.
+        """ sentences = nltk.sent_tokenize(answer)
+        claims = []
+        
+        for sentence in sentences:
+            if not re.search(r'\?|I think|I believe|in my opinion', sentence, re.IGNORECASE):
+                if re.search(r'\b(is|are|was|were|has|have|will|can|should)\b', sentence, re.IGNORECASE):
+                    claims.append(sentence.strip())
+        
+        return claims
+    
+    def calculate_faithfulness(self, answer: str, context: str, threshold: float = 0.7) -> float:
+        """
+        Calculate faithfulness score (0-1) based on how well answer claims are supported by the context. Args:
+            answer: Generated answer text. context: Source context text. threshold: Similarity threshold for claim support. Returns:
+            Faithfulness score (0-1).
+        """ claims = self.extract_claims(answer)
+        if not claims:
+            return 1.0
+        
+        claim_embeddings = self.model.encode(claims)
+        context_embeddings = self.model.encode([context])
+        
+        faithfulness_scores = []
+        
+        for claim_emb in claim_embeddings:
+            similarities = cosine_similarity([claim_emb], context_embeddings)[0]
+            max_similarity = np.max(similarities)
+            faithfulness_scores.append(1.0 if max_similarity >= threshold else max_similarity)
+        
+        return float(np.mean(faithfulness_scores))
+    
+    def detailed_faithfulness_analysis(self, answer: str, context: str) -> Dict[str, Any]:
+        """
+        Provide detailed analysis of faithfulness. Args:
+            answer: Generated answer text. context: Source context text. Returns:
+            Dictionary with analysis details.
+        """ claims = self.extract_claims(answer)
+        analysis = {
+            "total_claims": len(claims),
+            "supported_claims": 0,
+            "unsupported_claims": 0,
+            "claim_details": []
+        }
+        
+        for claim in claims:
+            claim_emb = self.model.encode([claim])
+            context_emb = self.model.encode([context])
+            similarity = cosine_similarity(claim_emb, context_emb)[0][0]
+            
+            is_supported = similarity >= 0.7
+            if is_supported:
+                analysis["supported_claims"] += 1
+            else:
+                analysis["unsupported_claims"] += 1
+            
+            analysis["claim_details"].append({
+                "claim": claim,
+                "similarity": float(similarity),
+                "supported": is_supported
+            })
+        
+        analysis["faithfulness_score"] = analysis["supported_claims"] / analysis["total_claims"] if analysis["total_claims"] > 0 else 1.0
+        return analysis
+
+def extract_keywords(text: str, max_keywords: int = 5) -> List[str]:
+    """
+    Extract keywords from text using frequency analysis. Args:
+        text: Input text. max_keywords: Maximum number of keywords to return. Returns:
+        List of extracted keywords.
+    """ try:
+        stop_words = set(stopwords.words('english'))
+    except LookupError:
+        logger.warning("NLTK stopwords not found, using minimal set")
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with'}
+    
+    words = re.findall(r'\b\w+\b', text.lower())
+    keywords = [word for word in words if word not in stop_words]
+    counter = Counter(keywords)
+    return [word for word, _ in counter.most_common(max_keywords)]
+
+def integrate_chroma_with_watcher() -> callable:
+    """
+    Integration example for ChromaDB with existing watcher system. Returns:
+        Function for processing files with ChromaDB integration.
+    """

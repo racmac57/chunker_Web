@@ -1,0 +1,720 @@
+````
+
+Let me search more specifically for the M Code with Crime_Category logic:
+
+**project_knowledge_search**
+
+*Request*
+
+````javascript
+{
+  "query": "Crime_Category column Table.AddColumn Incident_Type reference table lookup Power Query M"
+}
+````
+
+*Response*
+
+````plaintext
+Incident Table Automation with Placeholders.txt
+:
+            if lyr.name == layer_name:
+                target_layer = lyr
+                break
+        
+        if not target_layer:
+            print(f"❌ 7-Day layer not found: {layer_name}")
+            return incidents
+        
+        # Build SQL filter for 7-day period
+        from map_export import build_sql_filter_7day_excel
+        filter_sql = build_sql_filter_7day_excel(crime_type, start_date, end_date)
+        
+        if filter_sql:
+            # Apply the filter temporarily
+            original_query = target_layer.definitionQuery
+            target_layer.definitionQuery = filter_sql
+            
+            # Extract incident details
+            try:
+                # Define fields to extract
+                fields = ["calldate", "block", "calltype", "disposition"]
+                
+                with arcpy.da.SearchCursor(target_layer, fields) as cursor:
+                    for row in cursor:
+                        try:
+                            calldate = row[0]
+                            block = row[1] if row[1] else "Unknown Location"
+                            calltype = row[2] if row[2] else "Unknown"
+                            disposition = row[3] if row[3] else "Unknown"
+                            
+                            if isinstance(calldate, datetime):
+                                # Format the incident details
+                                incident = {
+                                    'block': block,
+                                    'incident_date': calldate.strftime('%m/%d/%y'),  # mm/dd/yy format
+                                    'day_of_week': calldate.strftime('%A'),  # Full day name
+                                    'time_period': get_time_period_from_hour(calldate.hour),  # Chart category
+                                    'time_of_day': calldate.strftime('%H:%M'),  # 24-hour format
+                                    'raw_datetime': calldate,  # Keep for sorting
+                                    'vehicle_description': '[MANUAL ENTRY]',
+                                    'suspect_description': '[MANUAL ENTRY]',
+                                    'narrative_summary
+````
+
+````plaintext
+Incident Table Automation with Placeholders.txt
+': '[MANUAL ENTRY]'
+                                }
+                                
+                                incidents.append(incident)
+                                
+                        except Exception as e:
+                            print(f"  ⚠️ Error processing incident record: {e}")
+                            continue
+                
+                # Restore original query
+                target_layer.definitionQuery = original_query
+                
+                # Sort incidents by date/time
+                incidents.sort(key=lambda x: x['raw_datetime'])
+                
+                print(f"✅ Extracted {len(incidents)} incident details for {crime_type}")
+                
+            except Exception as e:
+                print(f"❌ Error extracting incident details: {e}")
+                
+        # Clean up project reference
+        del aprx
+        
+    except Exception as e:
+        print(f"❌ Error accessing incident data for {crime_type}: {e}")
+    
+    return incidents
+
+def create_incident_table_placeholder(crime_type, output_path, start_date=None, end_date=None):
+    """
+    Create placeholder image for Pattern Offenders/Suspects section when no incidents
+    Dimensions: 8" x 2.3" at 200 DPI = 1600 x 460 pixels
+    
+    Args:
+        crime_type (str): Name of crime type
+        output_path (str): Path to save the placeholder image
+        start_date (date): Start date of 7-day period
+        end_date (date): End date of 7-day period
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        # Image dimensions matching PowerPoint shape: 8" x 2.3" at 200 DPI
+        width = 1600  # 8 inches * 200 DPI
+        height = 460  # 2.3 inches * 200 DPI
+        
+        # Create white background
+        img = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(img)
+        
+        # Try to use system fonts - sized for the horizontal layout
+        try:
+            title_font = ImageFont.truetype("arial.ttf", 28)
+            subtitle_font = ImageFont.truetype("arial.ttf", 22)
+            text_font = ImageFont.truetype("arial.ttf", 18)
+            small_font = Im
+````
+
+````plaintext
+_7Day_28Day_250414_.txt
+? ? 2025-06-30-12-41-52 (EST)
+# Time_SCRPA_Master_Macro/_7Day_28Day_250414_
+# Author: R. A. Carucci
+# Purpose: M code export for query '_7Day_28Day_250414_'
+================================================================================
+let
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\7Day_28Day_Cycle_20250414.xlsx"), null, true),
+    Data = Source{[Item="7Day_28Day_250414", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    #"Changed Type" = Table.TransformColumnTypes(PromotedHeaders, {
+        {"Report_Due_Date", type date},
+        {"7_Day_Start", type date},
+        {"7_Day_End", type date},
+        {"28_Day_Start", type date},
+        {"28_Day_End", type date},
+        {"Report_Name", type text},
+        {"Is_Due", type logical}
+    })
+in
+    #"Changed Type"
+````
+
+````plaintext
+SCRPA PowerPoint Template Fixes & Block Code Integration.md
+### **5. Complete Integration Code**
+Here's the complete updated code to add to your existing files:
+
+#### **A. Add to `incident_table_automation.py`:**
+`​`​`python
+# Add this import at the top
+from extract_block_from_address import extract_block_and_type
+
+# Replace the existing get_7day_incident_details function with this enhanced version:
+def get_7day_incident_details_enhanced(crime_type, target_date):
+    """
+    Extract detailed incident information with proper Block M code formatting
+    """
+    incidents = []
+    
+    try:
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if not start_date or not end_date:
+            print(f"❌ Could not determine Excel 7-day period for {target_date}")
+            return incidents
+            
+        print(f"📅 Getting incident details for period: {start_date} to {end_date}")
+        
+        aprx = arcpy.mp.ArcGISProject(APR_PATH)
+        maps = aprx.listMaps()
+        
+        if not maps:
+            print(f"❌ No maps found in project")
+            return incidents
+            
+        map_obj = maps[0]
+        layer_name = f"{crime_type} 7-Day"
+        target_layer = None
+        
+        for lyr in map_obj.listLayers():
+            if lyr.name == layer_name:
+                target_layer = lyr
+                break
+        
+        if not target_layer:
+            print(f"❌ 7-Day layer not found: {layer_name}")
+            return incidents
+        
+        # Build SQL filter
+        from map_export import build_sql_filter_7day_excel
+        filter_sql = build_sql_filter_7day_excel(crime_type, start_date, end_date)
+        
+        if filter_sql:
+            original_query = target_layer.definitionQuery
+            target_layer.definitionQuery = filter_sql
+            
+            try:
+                # Updated field list to include address fields
+                fields = ["calldate", "fulladdr", "FullAddress2", "calltype", "disposition", "SHAPE@XY"]
+                
+                with arcpy.da.SearchCursor(target_layer, fields) as cursor:
+                    for row in cursor:
+                        try:
+                            calldate = row[0]
+                            fulladdr = row[1] if row[1] else ""
+                            fulladdress2 = row[2] if row[2] else ""
+                            calltype = row[3] if row[3] else "Unknown"
+                            disposition = row[4] if row[4] else "Unknown"
+                            coordinates = row[5] if row[5] else (0, 0)
+                            
+                            # Use Block M code for proper ad
+````
+
+````plaintext
+chart_export.py
+crime_type)
+                
+                if isinstance(sql_pattern, list):
+                    conditions = []
+                    for p in sql_pattern:
+                        conditions.append(f"calltype LIKE '%{p}%'")
+                    crime_condition = f"({' OR '.join(conditions)})"
+                else:
+                    crime_condition = f"calltype LIKE '%{sql_pattern}%'"
+                
+                # Build SQL filter with CORRECTED date range
+                timestamp = timestamp_dates[period]
+                sql_filter = f"{crime_condition} And disposition LIKE '%See Report%' And calldate >= timestamp '{timestamp}'"
+                
+                # For 7-day, add end date to limit to exact window
+                if period == "7-Day":
+                    end_timestamp = f"{end_date_7day.strftime('%Y-%m-%d')} 23:59:59.999"
+                    sql_filter += f" And calldate <= timestamp '{end_timestamp}'"
+                    print(f"🔎 7-Day SQL (MATCHING MAP): {sql_filter}")
+                else:
+                    print(f"🔎 {period} SQL Filter (MATCHING MAP): {sql_filter}")
+                
+                # Apply the filter temporarily
+                original_query = target_layer.definitionQuery
+                target_layer.definitionQuery = sql_filter
+                
+                # Get feature count
+                feature_count = int(arcpy.GetCount_management(target_layer).getOutput(0))
+                print(f"📊 {period} features found: {feature_count}")
+                
+                if feature_count > 0:
+                    # Ext
+````
+
+````plaintext
+main.py
+me_type}")
+            return False
+    
+    try:
+        from chart_export import export_chart
+        modules_status['chart_export'] = True
+        logging.info("OK chart_export imported successfully")
+    except ImportError as e:
+        logging.warning(f"WARNING: chart_export import failed: {e}")
+        modules_status['chart_export'] = False
+        def export_chart(crime_type):
+            logging.warning(f"Chart export skipped for {crime_type} - chart_export.py not available")
+            return True
+    
+    try:
+        from incident_table_automation import export_incident_table_data_with_autofit, create_incident_table_placeholder
+        modules_status['incident_table'] = True
+        logging.info("OK incident_table_automation imported successfully")
+    except ImportError as e:
+        logging.warning(f"WARNING: incident_table_automation import failed: {e}")
+        modules_status['incident_table'] = False
+        def export_incident_table_data_with_autofit(crime_type, target_date):
+            logging.warning(f"Incident table export skipped for {crime_type}")
+            return True
+        def create_incident_table_placeholder(crime_type, output_path):
+            logging.warning(f"Incident table placeholder skipped for {crime_type}")
+            return True
+    
+    return modules_status, export_maps, export_chart, export_incident_table_data_with_autofit, create_incident_table_placeholder
+
+modules_status, export_maps, export_chart, export_incident_table_data_with_autofit, create_incident_table_placeholder = import_local_modules()
+from pptx import Presentation
+from pptx.util import Inches
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+POWERPOINT_COORDINATES = {
+    'chart': {'left': 0.5, 'top': 2.8, 'width': 5.84, 'height': 4.00},
+    'map': {'left': 6.8, 'top': 2.8, 'width': 5.60, 'height': 4.03},
+    'table': {'left': 6.8, 'top': 0.8, 'width': 8.33, 'height': 1.98}
+}
+
+def get_date_string():
+    """Helper to get current date string"""
+    return dt_date.today().strftime("%Y_%m_%d")
+
+def auto_assemble_powerpoint_final(output_folder, crime_types, report_date_str):
+    """Final PowerPoint assembly - overlays new images on existing template"""
+    try:
+        ppt_files = glob.glob(os.path.join(output_folder, "*.pptx"))
+        if not ppt_files:
+            logging.error(f"No PowerPoint file found in: {output_folder}")
+            all_files = os.listdir(output_folder) if os.path.exists(output_folder) else []
+            logging.info(f"Available files in output folder: {all_files}")
+            return False
+            
+        ppt_file = ppt_
+````
+
+````plaintext
+Incident Table Generator with Data Layout.txt
+t)
+        
+        # Table setup
+        table_start_y = 70
+        table_height = height - table_start_y - 20
+        
+        # Column definitions (optimized for 8" width)
+        columns = [
+            {'name': 'Date', 'width': 120, 'align': 'center'},
+            {'name': 'Day', 'width': 100, 'align': 'center'},
+            {'name': 'Time', 'width': 80, 'align': 'center'},
+            {'name': 'Block', 'width': 200, 'align': 'left'},
+            {'name': 'Vehicle', 'width': 300, 'align': 'left'},
+            {'name': 'Suspect', 'width': 300, 'align': 'left'},
+            {'name': 'Summary', 'width': 480, 'align': 'left'}
+        ]
+        
+        # Calculate starting positions
+        current_x = 20
+        for col in columns:
+            col['start_x'] = current_x
+            current_x += col['width']
+        
+        # Draw table header
+        header_y = table_start_y
+        header_height = 30
+        
+        # Header background
+        draw.rectangle([20, header_y, width-20, header_y + header_height], 
+                      fill=header_bg, outline=border_color, width=2)
+        
+        # Header text
+        for col in columns:
+            text_x = col['start_x'] + 5
+            if col['align'] == 'center':
+                text_bbox = draw.textbbox((0, 0), col['name'], font=header_font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_x = col['start_x'] + (col['width'] - text_width) // 2
+            
+            draw.text((text_x, header_y + 8), col['name'], fill=text_color, font=header_font)
+        
+        # Draw column separators in header
+        for i, col in enumerate(columns[:-1]):  # Don't draw line after last column
+            line_x = col['start_x'] + col['width']
+            draw.line([line_x, header_y, line_x, header_y + header_height], 
+                     fill=border_color, width=1)
+        
+        # Draw data rows
+        row_height = 25
+        max_rows = min(len(incidents_data), (table_height - header_height) // row_height)
+        
+        for i, incident in enumerate(incidents_data[:max_rows]):
+            row_y = header_y + header_height + (i * row_height)
+            
+            # Alternate row background
+            if i % 2 == 1:
+                draw.rectangle([20, row_y, width-20, row_y + row_height],
+````
+
+````plaintext
+SCRPA PowerPoint Template Fixes & Block Code Integration.md
+_path):
+                slide.shapes.add_picture(
+                    map_path, map_left, map_top, map_width, map_height
+                )
+                print(f"  ✅ Added map: {filename_prefix}_Map.png")
+            else:
+                # Add placeholder for no incidents
+                placeholder_path = os.path.join(crime_folder, f"{filename_prefix}_Map_Placeholder.png")
+                if os.path.exists(placeholder_path):
+                    slide.shapes.add_picture(
+                        placeholder_path, map_left, map_top, map_width, map_height
+                    )
+                    print(f"  ✅ Added map placeholder: {filename_prefix}_Map_Placeholder.png")
+            
+            # Add incident table (will overlay Pattern Offenders/Suspects area)
+            table_paths = [
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_AutoFit.png"),
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+            ]
+            
+            for table_path in table_paths:
+                if os.path.exists(table_path):
+                    slide.shapes.add_picture(
+                        table_path, table_left, table_top, table_width, table_height
+                    )
+                    print(f"  ✅ Added incident table: {os.path.basename(table_path)}")
+                    break
+        
+        # Save updated presentation
+        prs.save(ppt_files[0])
+        print(f"✅ PowerPoint assembly completed: {os.path.basename(ppt_files[0])}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ PowerPoint assembly failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# Update the main processing function to call PowerPoint assembly
+def main_with_powerpoint_assembly(report_date_str):
+    """
+    Updated main function that includes PowerPoint assembly
+    """
+    try:
+        # ... existing main function code ...
+        
+        # After all crime types are processed, assemble PowerPoint
+        if all_processing_complete:
+            print("\n🎯 ASSEMBLING POWERPOINT PRESENTATION")
+            print("=" * 50)
+            
+            powerpoint_success = auto_assemble_powerpoint_final(output_folder, CRIME_TYPES)
+            
+            if powerpoint_success:
+                print("✅ PowerPoint assembly completed successfully!") else:
+                print("❌ PowerPoint assembly failed - manual assembly required")
+        
+        # ... rest of existing main function ...
+        
+    except Exception as e:
+        print(f"❌ Main function failed: {e}")
+`​`​`
+
+---
+
+## 📋 **EXACT IMPLEMENTATION STEPS**
+
+### **Step 1: Add Block M Code (5 minutes)**
+1. **Copy** your `extract_block_from_address.py` to the same folder as your other scripts
+2. **Add the import** to `incident_table_automation.py`
+3. **Replace** the incident extraction function with the enhanced version above
+
+### **Step 2: Update Map Export (10 minutes)**  
+1. ````
+
+Based on the search results, I can see you need the M Code with Crime_Category logic. Let me search for the specific M Code that adds the Crime_Category column:
+
+**project_knowledge_search**
+
+*Request*
+
+````javascript
+{
+  "query": "Table.AddColumn Crime_Category CallTypeUpdatedWithCategories.csv reference Motor Vehicle Theft Burglary Auto"
+}
+````
+
+*Response*
+
+````plaintext
+Complete Config.py - Final Version.txt
+# 🕒 2025-06-10-21-50-00
+# Police_Data_Analysis/complete_config_final
+# Author: R. A. Carucci
+# Purpose: Complete config.py with Excel integration and corrected paths
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import os
+import openpyxl
+import logging
+import sys
+from datetime import datetime, date, timedelta
+
+# =============================================================================
+# CORRECTED PATHS BASED ON YOUR ONEDRIVE STRUCTURE
+# =============================================================================
+
+# Excel cycle file
+EXCEL_CYCLE_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\7Day_28Day_Cycle_20250414.xlsx"
+
+# Base directory for reports
+REPORT_BASE_DIR = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+
+# CORRECTED ArcGIS Pro project path - updated to actual filename
+APR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\7_Day_Templet_SCRPA_Time_PD_BCI_LT.aprx"
+
+# PowerPoint templates
+POWERPOINT_TEMPLATES = {
+    "main": r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\SCRPA_REPORT.pptx",
+    "7day": r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\SCRPA_REPORT.pptx"
+}
+
+# Crime type to folder mapping
+CRIME_FOLDER_MAPPING = {
+    "MV Theft": "MV_Theft",
+    "Burglary - Auto": "Burglary_Auto", 
+    "Burglary - Comm & Res": "Burglary_Comm_And_Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual_Offenses"
+}
+
+# Crime type SQL patterns for filtering data
+CRIME_SQL_PATTERNS = {
+    "MV Theft": "AUTO THEFT",
+    "Burglary - Auto": "BURGLARY AUTO",
+    "Burglary - Comm & Res": ["BURGLARY COMMERCIAL", "BURGLARY RESIDENTIAL"], 
+    "Robbery": "ROBBERY",
+    "Sexual Offenses": ["SEXUAL ASSAULT", "SEXUAL OFFENSE"]
+}
+
+# For compatibility with any existing code that might reference FOLDER_NAME_MAPPING
+FO
+````
+
+````plaintext
+config.py
+# If it is truly optional and not needed for your workflow, set this to None
+# to prevent the "NOT FOUND (optional)" warning. PROCESSED_EXCEL_PATH: Union[str, None] = os.path.join(USER_HOME, r"OneDrive - City of Hackensack\_Hackensack_Data_Repository\Processed_SCRPA_Data.xlsx")
+# Example if not needed: PROCESSED_EXCEL_PATH = None
+
+# Laptop-specific paths
+REPORT_BASE_DIR = os.path.join(LAPTOP_ROOT, "temp_reports")
+# UPDATED APR_PATH TO NEW USER-PROVIDED PATH
+APR_PATH = r"C:\Users\carucci_r\SCRPA_LAPTOP\projects\7_Day_Templet_SCRPA_Time_PD_BCI_LTP.aprx"
+
+# PowerPoint templates - OneDrive should sync to same location
+POWERPOINT_TEMPLATES = {
+    "main": os.path.join(USER_HOME, r"OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\SCRPA_REPORT.pptx"),
+    "7day": os.path.join(USER_HOME, r"OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\SCRPA_REPORT.pptx")
+}
+
+# ArcGIS settings
+CITY_BOUNDARIES_LAYER_NAME = "City Boundaries"
+
+# Crime types and folder mapping
+CRIME_FOLDER_MAPPING = {
+    "MV Theft": "MV_Theft",
+    "Burglary - Auto": "Burglary_Auto", # <<< FIXED TYPO HERE: Burglury -> Burglary
+    "Burglary - Comm & Res": "Burglary_Comm_And_Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual_Offenses"
+}
+
+# SQL patterns - 'CORRECTED' implies previous versions might have had issues. # Ensure these patterns accurately reflect the data field values. CRIME_SQL_PATTERNS = {
+    "MV Theft": "MOTOR VEHICLE THEFT",
+    "Burglary - Auto": "BURGLARY AUTO",
+    "Burglary - Comm & Res": ["BURGLARY COMMERCIAL", "BURGLARY RESIDENTIAL"],
+    "Robbery": "ROBBERY",
+    "Sexual Offenses": ["SEXUAL ASSAULT", "SEXUAL OFFENSE"]
+}
+
+# For compatibility (aliases)
+FOLDER_NAME_MAPPING = CRIME_FOLDER_MAPPING
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+
+# Optional settings
+SYM_LAYER_PATH = "" # Path to symbology layer file if used
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+
+# PowerPoint positioning coordinates - Consider making these configurable externally
+# if they are subject to frequent changes, e.g., in a JSON/YAML file. ````
+
+````plaintext
+query_incidents.py
+# query_incidents.py
+
+import pandas as pd
+from datetime import datetime
+
+def query_incidents(crime_type: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """
+    Placeholder version. Replace with real SQL query logic later. Simulates SQL-based filtering by returning time-of-day bin counts for a given crime.
+    """ print(f"Simulating query for {crime_type} between {start_date} and {end_date}")
+
+    # Fake bin counts (Morning, Midday, Afternoon, Evening, Night, Overnight)
+    # In a real implementation, you'd execute a SQL query and bin results by time. demo_bins = {
+        "Motor Vehicle Theft":    [2, 4, 3, 6, 5, 1],
+        "Burglary - Comm & Res": [1, 2, 4, 5, 2, 3],
+        "Burglary Auto":         [0, 1, 3, 2, 2, 4],
+        "Sexual Offenses":       [1, 1, 0, 2, 3, 1],
+        "Robbery":               [0, 2, 2, 4, 3, 1],
+    }
+
+    counts = demo_bins.get(crime_type, [0, 0, 0, 0, 0, 0])
+    df = pd.DataFrame({
+        "Bin": ["Early AM", "Morning", "Afternoon", "Evening", "Night", "Late Night"],
+        "Count": counts
+    })
+
+    return df
+````
+
+````plaintext
+Incident Table Automation with Placeholders.txt
+crime_type}")
+        
+        # Get incident details
+        incidents = get_7day_incident_details(crime_type, target_date)
+        
+        # Get 7-day period dates for placeholders
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if len(incidents) == 0:
+            # Create placeholder for no incidents
+            placeholder_path = os.path.join(crime_output_folder, f"{filename_prefix}_Incidents_Placeholder.png")
+            success = create_incident_table_placeholder(crime_type, placeholder_path, start_date, end_date)
+            
+            print(f"📋 No incidents found for {crime_type}, created placeholder")
+            return success
+        
+        else:
+            # Export incident data to CSV for manual completion
+            import pandas as pd
+            
+            # Prepare data for CSV export
+            csv_data = []
+            for incident in incidents:
+                csv_data.append({
+                    'Block': incident['block'],
+                    'Incident_Date': incident['incident_date'],
+                    'Day_of_Week': incident['day_of_week'],
+                    'Time_Period': incident['time_period'],
+                    'Time_of_Day': incident['time_of_day'],
+                    'Vehicle_Description': incident['vehicle_description'],
+                    'Suspect_Description': incident['suspect_description'],
+                    'Narrative_Summary': incident['narrative_summary']
+                })
+            
+            # Export to CSV
+            df = pd.DataFrame(csv_data)
+            csv_path = os.path.join(crime_output_folder, f"{filename_prefix}_Incidents_Manual_Entry.csv")
+            df.to_csv(csv_path, index=False)
+            
+            print(f"✅ Incident data exported to: {csv_path}")
+            print(f"📝 {len(incidents)} incidents need manual narrative entry")
+            print(f"📊 Incident summary:")
+            for incident in incidents:
+                print(f"  • {incident['incident_date']} ({incident['day_of_week']}) at {incident['time_of_day']} - {incident['time_period']}")
+            
+            return True
+        
+    except Exception
+````
+
+````plaintext
+ChatGPT Chat Summary SCRPA Project 21b4484370c080138f2efc3a045a471e.md
+Grok: Done. Press any key to close... User: Press any key to continue . . . User: dir "C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C06W23_2025_06_03_7Day" /T:W
+
+Grok: dir output shows:
+
+Grok: Directory of C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports\C06W23_2025_06_03_7Day
+
+Grok: 06/23/25  01:30
+
+. Grok: 06/23/25  01:37
+
+..
+
+Grok: 06/23/25  03:40
+
+Burglary_Auto
+
+Grok: 06/23/25  03:40
+
+Burglary_Comm_And_Res
+
+Grok: 06/23/25  03:40         5,333,732 C06W23_2025_06_03_7Day.pptx
+
+Grok: 06/23/25  03:39
+
+MV_Theft
+
+Grok: 06/23/25  03:40
+
+Robbery
+
+Grok: 06/23/25  03:40
+
+Sexual_Offenses
+
+Grok:                1 File(s)      5,333,732 bytes
+
+Grok:                7 Dir(s)  516,584,435,712 bytes free
+
+**Structured Markdown Summary (.md)**
+
+# **SCRPA Report Generation Session**
+
+# **Conversation Outline**
+
+**✅ Topics Covered**
+
+- **Date Input Handling**: Normalized 2025_06_03, supports today, yesterday, tomorrow. - **ArcGIS Python Setup**: Hardcoded path to arcgispro-py3 Python environment. - **Main Script Execution**: Ran main.py with parameters true true false 30 false 2025_06_03. - **Chart Generation**: Successfully generated charts for MV Theft, Burglary (Auto, Comm & Res), Robbery, Sexual Offenses. - **Incident Table Warnings**: No incident tables found for all crime types (non-blocking). - **Timestamp Discrepancy**: Investigated folder modified time (01:30) vs. actual file times (03:39–03:40). **🧠 Final Working Code(s)**
+
+- **Batch Script (run_report_hardcoded.bat)**: Executes main.py with robust logging and runtime tracking. **Code ID**: CODE_20250623_001
+- **Python Script (main.py)**: Generates crime reports and PowerPoint slides. **Code ID**: CODE_20250623_002
+- **Python Script (chart_export.py)**: Generates charts with ArcPy and Excel integration. **Code ID**: CODE_20250623_003
+
+**🔍 What Worked**
+
+- Fixed Unicode emoji issues in chart_export.py to prevent UnicodeEncodeError. - Hardcoded ArcGIS Pro Python path resolved environment detection issues. - Auto-detected main.py path correctly. - Generated all charts and saved to OneDrive folder. - Logged runtime and status to run.log and runtime_log.csv. **⚠️ Still Unresolved**
+
+- **Folder Timestamp Mismatch**: Parent folder shows 01:30, while contents modified at 03:39–03:40 (likely OneDrive sync delay). - **Incident Table Warnings**: No .csv tables generated for any crime type (expected behavior?). **🔄 Next Steps**
+
+- Confirm if incident table warnings require table generation or are by design. - Optionally add script to update folder timestamps to match latest file. - Consider zipping project files for distribution. **🧰 Tools/Tech Used**
+
+- **Batch**: Windows Command Script for automation. - **Python**: ArcPy, matplotlib, Excel integration. - **ArcGIS Pro**: GIS data processing and chart generation. - **PowerShell**: Used for file searching and date parsing. - **OneDrive**: Report storage and syncing.

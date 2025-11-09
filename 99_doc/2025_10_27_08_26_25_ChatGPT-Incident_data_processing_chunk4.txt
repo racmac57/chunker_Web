@@ -1,0 +1,562 @@
+R. A. Carucci</div>
+    <div><strong>Submitted to:</strong> Captain Smith</div>
+    <div><strong>Version:</strong> 1.0</div>
+  </div>
+
+  <div id="sections"></div>
+
+  <table class="summary" id="summaryTable" aria-label="Incident Summary Table" style="display:none">
+    <thead>
+      <tr>
+        <th>Case #</th>
+        <th>Cycle</th>
+        <th>Type</th>
+        <th>Date/Time</th>
+        <th>Loss Total</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <footer>
+    <div>Hackensack Police Department — Strategic Crime Analysis Unit | Cycle: <span id="cycleFooter">—</span></div>
+    <div>Generated: <span id="genDate"></span></div>
+  </footer>
+</main>
+
+<script>
+/* --- Minimal CSV parser supporting quotes, commas, and newlines --- */
+function parseCSV(text){
+  const rows = [];
+  let i = 0, field = '', row = [], inQuotes = false;
+  while(i < text.length){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field = ''; }
+      else if(c === '\n' || c === '\r'){
+        if(field !== '' || row.length > 0){ row.push(field); rows.push(row); row = []; field = ''; }
+        // swallow \r\n pair
+        if(c === '\r' && text[i+1] === '\n') i++;
+      } else {
+        field += c;
+      }
+    }
+    i++;
+  }
+  if(field !== '' || row.length > 0){ row.push(field); rows.push(row); }
+  return rows;
+}
+
+/* --- Helpers --- */
+const fmtMoney = v => {
+  if(v == null || v === '' || isNaN(+v)) return 'N/A';
+  const n = Number(v);
+  return '$' + n.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+};
+const safe = (v, fallback='Data Incomplete') => (v==null || String(v).trim()==='') ? `<span class="badge-incomplete">${fallback}</span>` : String(v);
+const pad2 = n => String(n).padStart(2,'0');
+function toDT(dateStr,timeStr){
+  // Accepts formats like 09/03/25 and 05:30:00; returns Date or null
+  if(!dateStr) return null;
+  // Normalize MM/DD/YY to YYYY-MM-DD
+  let [m,d,y] = dateStr.split(/[\/-]/);
+  if(!y) return null;
+  y = (y.length===2 ? (Number(y)>=70 ? '19'+y : '20'+y) : y);
+  const t = (timeStr && timeStr!=='12/31/99 14:03:17' ? timeStr : '00:00:00').split(' ')[0];
+  const parts = t.split(':'); const hh=+(parts[0]||'0'), mm=+(parts[1]||'0'), ss=+(parts[2]||'0');
+  const dt = new Date(Number(y), Number(m)-1, Number(d), hh, mm, ss);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+function fmtDT(dt){
+  if(!dt) return '—';
+  return `${pad2(dt.getMonth()+1)}/${pad2(dt.getDate())}/${String(dt.getFullYear()).slice(-2)} `+
+         `${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+}
+function deriveType(rec){
+  // Prefer Crime_Category; fallback Incident Type(s)
+  const cat = (rec['Crime_Category']||rec['Category_Type']||'').trim();
+  if(cat) return cat;
+  const t1 = (rec['Incident Type_1']||'').trim();
+  if(/sexual|2C:14/i.test(t1)) return 'Sexual Offense';
+  if(/robbery/i.test(t1)) return 'Robbery';
+  if(/motor vehicle theft|2C:20-3/i.test(t1)) return 'Motor Vehicle Theft';
+  if(/burglary. *res/i.test(t1)) return 'Burglary – Residence';
+  if(/burglary. *comm/i.test(t1)) return 'Burglary – Commercial';
+  if(/burglary. *auto/i.test(t1)) return 'Burglary – Auto';
+  return t1 || 'Other';
+}
+function sectionKeyFor(type){
+  const t = type.toLowerCase();
+  if(t.includes('sexual')) return 'Sexual Offenses';
+  if(t.includes('motor vehicle theft')) return 'Motor Vehicle Theft';
+  if(t.includes('robbery')) return 'Robbery';
+  if(t.includes('burglary – residence') || (t.includes('burglary') && t.includes('res'))) return 'Burglary – Residence';
+  if(t.includes('burglary – commercial') || (t.includes('burglary') && t.includes('comm'))) return 'Burglary – Commercial';
+  if(t.includes('burglary – auto') || (t.includes('burglary') && t.includes('auto'))) return 'Burglary – Auto';
+  return 'Other';
+}
+
+/* Build briefing from CSV text */
+function buildBriefing(csvText){
+  const rows = parseCSV(csvText);
+  if(!rows.length) return;
+
+  const headers = rows[0].map(h=>h.trim());
+  const data = rows.slice(1).filter(r => r.some(c => String(c).trim()!==''))
+                 .map(r => Object.fromEntries(headers.map((h,i)=>[h, r[i] ? ? ''])));
+
+  // Determine cycle & 7-day range from Period==7-Day if present; else from all incidents' min/max
+  const by7 = data.filter(r => (r['Period']||'').trim()==='7-Day');
+  const cycleName = (by7[0]?. ['cycle_name'] || data[0]?. ['cycle_name'] || '').trim() || '—';
+  let minDt=null, maxDt=null;
+  const consider = (by7.length ? by7 : data);
+  consider.forEach(r=>{
+    const dt = toDT(r['Incident_Date']||r['Incident Date']||r['Incident Date_Between'], r['Incident_Time']||r['Incident Time']);
+    if(dt){ if(!minDt || dt<minDt) minDt=dt; if(!maxDt || dt>maxDt) maxDt=dt; }
+  });
+  const rangeStr = (minDt&&maxDt) ? `${pad2(minDt.getMonth()+1)}/${pad2(minDt.getDate())}/${String(minDt.getFullYear()).slice(-2)} – ${pad2(maxDt.getMonth()+1)}/${pad2(maxDt.getDate())}/${String(maxDt.getFullYear()).slice(-2)}` : '—';
+
+  // Sort incidents by Incident Date/Time ascending
+  data.forEach(r=>{
+    r.__dt = toDT(r['Incident_Date']||r['Incident Date']||r['Incident Date_Between'], r['Incident_Time']||r['Incident Time']);
+    r.__type = deriveType(r);
+    r.__section = sectionKeyFor(r.__type);
+  });
+  data.sort((a,b)=> (a.__dt?.getTime()||0) - (b.__dt?.getTime()||0));
+
+  // Group by section
+  const groups = {};
+  data.forEach(r=>{
+    const key = r.__section;
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+
+  // Header lines
+  document.getElementById('cycleName').textContent = cycleName;
+  document.getElementById('cycleFooter').textContent = cycleName;
+  document.getElementById('cycleRange').textContent = rangeStr;
+  document.getElementById('genDate').textContent = new Date().toLocaleDateString();
+
+  // Render sections (only those with incidents)
+  const container = document.getElementById('sections');
+  container.innerHTML = '';
+  const order = ['Sexual Offenses','Motor Vehicle Theft','Robbery','Burglary – Commercial','Burglary – Residence','Burglary – Auto','Other'];
+  order.forEach(section=>{
+    const items = groups[section];
+    if(!items || !items.length) return;
+
+    const h2 = document.createElement('h2');
+    h2.className = 'section';
+    h2.textContent = section;
+    container.appendChild(h2);
+
+    items.forEach(rec=>{
+      const dt = rec.__dt ? fmtDT(rec.__dt) : '—';
+      const caseNum = (rec['Case Number']||rec['Case Number ']||rec['Case_Number']||rec['Case #']||'').trim() || '—';
+      const addr = rec['FullAddress'] || rec['Full Address'] || rec['Address'] || '';
+      const grid = rec['Grid'] || '';
+      const zone = rec['Zone'] || '';
+      const vehicle = (rec['Make1']||'').trim() && (rec['Model1']||'').trim() ? `${rec['Make1']} ${rec['Model1']}` : '';
+      const reg = rec['Registration 1'] || rec['Plate'] || '';
+      const regState = rec['Reg State 1'] || '';
+      const suspect = rec['Suspect Description(s)'] || rec['Suspect Description'] || '';
+      const victim = rec['Victim Details'] || '';
+      const loss = rec['Total Value Stolen'] || '';
+      const status = rec['Case_Status'] || rec['Status'] || '';
+      const narrative = rec['Narrative'] || '';
+      const entryPoint = rec['Scene/Entry Details'] || rec['Point of Entry'] || '';
+      const parking = rec['Parking/Location Context'] || rec['Parking Location'] || '';
+
+      const card = document.createElement('section');
+      card.className = 'case';
+      card.innerHTML = `
+        <div class="headline">Case ${caseNum} | ${dt} | ${rec.__type}</div>
+        <ul>
+          <li><strong>Location:</strong> ${safe(addr)}</li>
+          <li><strong>Grid/Zone:</strong> ${safe(grid||'—','Data Incomplete')} / ${safe(zone||'—','Data Incomplete')}</li>
+          ${parking ? `<li><strong>Parking Location:</strong> ${parking}</li>` : ''}
+          ${vehicle || reg ? `<li><strong>Victim Vehicle:</strong> ${safe([vehicle, reg ? `(${reg}${regState?`, ${regState}`:''})`:''].filter(Boolean).join(' '))}</li>` : ''}
+          ${suspect ? `<li><strong>Suspect Description:</strong> ${suspect}</li>` : `<li><strong>Suspect Description:</strong> <span class="badge-incomplete">Data Incomplete</span></li>`}
+          ${victim ? `<li><strong>Victim:</strong> ${victim}</li>` : ''}
+          ${entryPoint ? `<li><strong>Point/Means of Entry:</strong> ${entryPoint}</li>` : ''}
+          ${narrative ? `<li><strong>Narrative:</strong> ${narrative}</li>` : ''}
+          <li><strong>Loss:</strong> ${loss==='' ? '<span class="badge-incomplete">Data Incomplete</span>' : (isNaN(+loss) ? loss : fmtMoney(loss))}</li>
+          <li><strong>Status:</strong> ${safe(status,'Data Incomplete')}</li>
+        </ul>`;
+      container.appendChild(card);
+    });
+  });
+
+  // Summary table
+  const tbody = document.querySelector('#summaryTable tbody');
+  tbody.innerHTML = '';
+  data.forEach(rec=>{
+    const caseNum = (rec['Case Number']||rec['Case Number ']||rec['Case_Number']||rec['Case #']||'').trim() || '—';
+    const dt = rec.__dt ? fmtDT(rec.__dt) : '—';
+    const loss = rec['Total Value Stolen'] || '';
+    const status = rec['Case_Status'] || rec['Status'] || '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${caseNum}</td>
+      <td>${(rec['cycle_name']||'').trim() || cycleName}</td>
+      <td>${rec.__type}</td>
+      <td>${dt}</td>
+      <td class="money">${loss==='' ? 'N/A' : (isNaN(+loss) ? loss : fmtMoney(loss))}</td>
+      <td>${status || '—'}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('summaryTable').style.display = '';
+}
+
+// File input hook
+document.getElementById('csvFile').addEventListener('change', async (e)=>{
+  const file = e.target.files?. [0];
+  if(!file) return;
+  const text = await file.text();
+  buildBriefing(text);
+});
+</script>
+</body>
+</html>
+```
+
+This produces the **same polished look** as your previous one-pager, but it pulls **live case rows from your CSV**:
+
+*   Sorts each section **chronologically** (oldest→newest). *   Includes sections **only if present** in the CSV. *   Flags gaps as **Data Incomplete**. *   Standardizes loss values to `$X,XXX.00` when numeric. *   Adds a **Cycle column** in the summary table using `cycle_name` (or falls back to the first/7-Day cycle found). *   Computes the **7-Day range** from rows marked `Period = 7-Day` (or overall min/max if missing). If you want this to auto-save a static HTML after parsing (so you can email the exact output), I can add a **“Download Final HTML”** button that writes the rendered page to a file named `SCR_Briefing_{cycle}.html`. ## Prompt:
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-CwL5uh9FChtu9mMmbx1LXN&ts=489324&p=fs&cid=1&sig=cbcb297bed6ad513d7977b061021bb23b719014cfd6d9a10c928e01aaf8d0d89&v=0)
+
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-8W7L8BVMv2PXoQMScmmTnv&ts=489324&p=fs&cid=1&sig=e584c10b43a3eb4725ef370b2f16e02cde99d3fc8be2a2657a9cfc5bf1a4fff2&v=0)
+
+the version from last week was much cleaner and more appropriate for the Captain's summary. the html las the load csv so that will show when I save the .html and add it it to my .pdf report. Also I rather have the bullet pointes extracted from the narrative rather than having the captain read several lines from the narrative
+
+## Response:
+Thought for a second
+
+Thought for 35s
+
+You got it — here’s a **clean, one-pager HTML** that matches last week’s style, **removes the visible loader after you import the CSV**, and **auto-extracts concise bullet points from long narratives**. Print → Save as PDF will be spotless (no builder UI). 2025\_09\_16\_00\_42\_02\_scrpa\_summa…
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Strategic Crime Reduction Briefing – Patrol Captain (from CSV)</title>
+<style>
+  :root{
+    --primary:#0c233d;
+    --text:#1a1a1a;
+    --muted:#6b7280;
+    --border:#e5e7eb;
+    --bg:#ffffff;
+    --danger:#b91c1c;
+  }
+  html,body{font-family:"DIN","Bahnschrift","Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;line-height:1.38;}
+  @page{size:Letter;margin:0.6in;}
+  .page{max-width:8.5in;margin:0 auto;padding:0.6in;}
+  header{margin-bottom:14px;}
+  h1{font-size:22px;margin:0;color:var(--primary);font-weight:800;}
+  .sub{margin-top:4px;font-size:12.5px;color:var(--muted);}
+  .meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:12px;}
+  h2.section{color:var(--primary);border-bottom:2px solid var(--primary);padding-bottom:2px;margin:14px 0 8px;font-size:15.5px;font-weight:800;}
+  .case{margin:8px 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;}
+  .headline{font-weight:700;color:var(--primary);margin-bottom:6px;font-size:13.5px;}
+  .case ul{margin:0;padding-left:16px;font-size:12.75px;}
+  .badge-incomplete{font-style:italic;color:var(--danger);font-weight:600;}
+  table.summary{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;border:1px solid var(--border);}
+  .summary th,.summary td{border-bottom:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top;}
+  .summary th{background:#f8fafc;color:var(--primary);font-weight:800;font-size:12.25px;}
+  .summary td.money{text-align:right;font-variant-numeric:tabular-nums;}
+  footer{margin-top:12px;padding-top:8px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;display:flex;justify-content:space-between;}
+  /* Builder (auto-hides after load) */
+  .builder{border:1px dashed var(--border);padding:12px;border-radius:10px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+  .hint{color:var(--muted);font-size:12px}
+  @media print{.builder{display:none!important}}
+</style>
+</head>
+<body>
+<main class="page">
+  <!-- Builder: auto-removed once CSV is loaded -->
+  <div class="builder" id="builder">
+    <label><strong>Load CSV:</strong> <input id="csvFile" type="file" accept=".csv,.txt" /></label>
+    <span class="hint">Select <code>SCRPA_RMS_Export.csv</code>. The UI will disappear after loading.</span>
+  </div>
+
+  <header>
+    <h1>Strategic Crime Reduction Briefing – Patrol Captain</h1>
+    <div class="sub">Cycle: <strong id="cycleName">—</strong> | Range: <strong id="cycleRange">—</strong></div>
+  </header>
+
+  <div class="meta">
+    <div><strong>Prepared by:</strong> P.O. R. A. Carucci</div>
+    <div><strong>Submitted to:</strong> Captain Smith</div>
+    <div><strong>Version:</strong> 1.0</div>
+  </div>
+
+  <div id="sections"></div>
+
+  <table class="summary" id="summaryTable" aria-label="Incident Summary Table" style="display:none">
+    <thead>
+      <tr>
+        <th>Case #</th>
+        <th>Cycle</th>
+        <th>Type</th>
+        <th>Date/Time</th>
+        <th>Loss Total</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <footer>
+    <div>Hackensack Police Department — Strategic Crime Analysis Unit | Cycle: <span id="cycleFooter">—</span></div>
+    <div>Generated: <span id="genDate"></span></div>
+  </footer>
+</main>
+
+<script>
+/* --- Compact CSV parser --- */
+function parseCSV(text){
+  const rows=[]; let i=0, f='', row=[], q=false;
+  while(i<text.length){ const c=text[i];
+    if(q){ if(c=='"'){ if(text[i+1]=='"'){f+='"'; i++;} else q=false; } else f+=c; }
+    else { if(c=='"') q=true; else if(c==','){row.push(f); f='';}
+      else if(c=='\n'||c=='\r'){ if(f!==''||row.length){row.push(f); rows.push(row); row=[]; f='';} if(c=='\r'&&text[i+1]=='\n') i++; }
+      else f+=c; }
+    i++;
+  } if(f!==''||row.length){row.push(f); rows.push(row);} return rows;
+}
+/* --- Helpers --- */
+const pad2=n=>String(n).padStart(2,'0');
+const fmtMoney=v=> (v==null||v===''||isNaN(+v)) ? 'N/A' : ('$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+const safe=(v,f='Data Incomplete')=> (v==null||String(v).trim()==='')?`<span class="badge-incomplete">${f}</span>`:String(v);
+/* normalize date/time */
+function toDT(d,t){
+  if(!d) return null; let [m,dd,y]=String(d).split(/[\/-]/);
+  if(!y) return null; y=(y.length===2? (Number(y)>=70? '19'+y:'20'+y):y);
+  let time=(t||'').split(' ')[0]||'00:00:00'; const [hh,mm,ss]=time.split(':').map(x=>+x||0);
+  const dt=new Date(+y, +m-1, +dd, hh, mm, ss); return isNaN(dt)?null:dt;
+}
+function fmtDT(dt){ return dt?`${pad2(dt.getMonth()+1)}/${pad2(dt.getDate())}/${String(dt.getFullYear()).slice(-2)} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`:'—'; }
+/* type + section mapping */
+function deriveType(r){
+  const cat=(r['Crime_Category']||r['Category_Type']||'').trim();
+  if(cat) return cat;
+  const t=(r['Incident Type_1']||'').toLowerCase();
+  if(t.includes('sexual')||t.includes('2c:14')) return 'Sexual Offense';
+  if(t.includes('motor vehicle theft')||t.includes('2c:20-3')) return 'Motor Vehicle Theft';
+  if(t.includes('robbery')||t.includes('2c:15')) return 'Robbery';
+  if(t.includes('burglary')&&t.includes('res')) return 'Burglary – Residence';
+  if(t.includes('burglary')&&t.includes('comm')) return 'Burglary – Commercial';
+  if(t.includes('burglary')&&t.includes('auto')) return 'Burglary – Auto';
+  return (r['Incident Type_1']||'Other');
+}
+function sectionKeyFor(type){
+  const t=type.toLowerCase();
+  if(t.includes('sexual')) return 'Sexual Offenses';
+  if(t.includes('motor vehicle theft')) return 'Motor Vehicle Theft';
+  if(t.includes('robbery')) return 'Robbery';
+  if(t.includes('commercial')|| (t.includes('burglary')&&t.includes('comm'))) return 'Burglary – Commercial';
+  if(t.includes('residence')|| (t.includes('burglary')&&t.includes('res'))) return 'Burglary – Residence';
+  if(t.includes('auto')|| (t.includes('burglary')&&t.includes('auto'))) return 'Burglary – Auto';
+  return 'Other';
+}
+/* narrative → bullets (concise) */
+function summarizeNarrative(text, maxBullets=4){
+  if(!text||!text.trim()) return '';
+  // Split into sentences; keep the most informative ones (longer than 6 words, not boilerplate)
+  const sents=text.replace(/\s+/g,' ').split(/(?<=[\.\?! ])\s+/).filter(s=>{
+    const l=s.trim().length, w=s.trim().split(' ').length;
+    if(l<25||w<6) return false;
+    return !/upon arrival|responded to|met with|advised|report(ed)? that supervisor|i (then )?spoke/i.test(s);
+  });
+  // Light cleanup
+  const cleaned=sents.map(s=>s
+      .replace(/^on [a-z]+,?\s*\d{1,2}\/\d{1,2}\/\d{2,4},?\s*/i,'')
+      .replace(/\bthe suspect\b/gi,'Suspect')
+      .replace(/\bthe victim\b/gi,'Victim')
+      .replace(/\bhe\b/gi,'He').replace(/\bshe\b/gi,'She')
+      .replace(/\.\s*$/,'').trim());
+  const picks=(cleaned.length?cleaned: text.split(/\n+/)).slice(0,maxBullets);
+  return picks.map(x=>`<li>${x}</li>`).join('');
+}
+/* build briefing */
+function buildBriefing(text){
+  const rows=parseCSV(text); if(!rows.length) return;
+  const headers=rows[0].map(h=>h.trim());
+  const data=rows.slice(1).filter(r=>r.some(c=>String(c).trim()!==''))
+    .map(r=>Object.fromEntries(headers.map((h,i)=>[h, r[i]?? ''])));
+  // cycle & range
+  const by7=data.filter(r=>(r['Period']||'').trim()==='7-Day');
+  const cycle=(by7[0]?.['cycle_name']||data[0]?. ['cycle_name']||'').trim()||'—';
+  let minDt=null,maxDt=null; (by7.length?by7:data).forEach(r=>{
+    const dt=toDT(r['Incident_Date']||r['Incident Date']||r['Incident Date_Between'], r['Incident_Time']||r['Incident Time']);
+    if(dt){ if(!minDt||dt<minDt) minDt=dt; if(!maxDt||dt>maxDt) maxDt=dt; }
+  });
+  const range=(minDt&&maxDt)?`${pad2(minDt.getMonth()+1)}/${pad2(minDt.getDate())}/${String(minDt.getFullYear()).slice(-2)} – ${pad2(maxDt.getMonth()+1)}/${pad2(maxDt.getDate())}/${String(maxDt.getFullYear()).slice(-2)}`:'—';
+  document.getElementById('cycleName').textContent=cycle;
+  document.getElementById('cycleFooter').textContent=cycle;
+  document.getElementById('cycleRange').textContent=range;
+  document.getElementById('genDate').textContent=new Date().toLocaleDateString();
+  // prep records
+  data.forEach(r=>{
+    r.__dt=toDT(r['Incident_Date']||r['Incident Date']||r['Incident Date_Between'], r['Incident_Time']||r['Incident Time']);
+    r.__type=deriveType(r); r.__section=sectionKeyFor(r.__type);
+  });
+  data.sort((a,b)=>(a.__dt?.getTime()||0)-(b.__dt?.getTime()||0));
+  const groups={}; data.forEach(r=>{ (groups[r.__section]=(groups[r.__section]||[])).push(r); });
+  const order=['Sexual Offenses','Motor Vehicle Theft','Robbery','Burglary – Commercial','Burglary – Residence','Burglary – Auto','Other'];
+  const container=document.getElementById('sections'); container.innerHTML='';
+  order.forEach(sec=>{
+    const items=groups[sec]; if(!items||!items.length) return;
+    const h2=document.createElement('h2'); h2.className='section'; h2.textContent=sec; container.appendChild(h2);
+    items.forEach(rec=>{
+      const dt=rec.__dt?fmtDT(rec.__dt):'—';
+      const caseNum=(rec['Case Number']||rec['Case_Number']||rec['Case #']||'').trim()||'—';
+      const addr=rec['FullAddress']||rec['Full Address']||rec['Address']||'';
+      const grid=rec['Grid']||''; const zone=rec['Zone']||'';
+      const vehicle=(rec['Make1']||'').trim()&&(rec['Model1']||'').trim()?`${rec['Make1']} ${rec['Model1']}`:'';
+      const reg=rec['Registration 1']||rec['Plate']||''; const regState=rec['Reg State 1']||'';
+      const suspect=rec['Suspect Description(s)']||rec['Suspect Description']||'';
+      const victim=rec['Victim Details']||'';
+      const loss=rec['Total Value Stolen']||'';
+      const status=rec['Case_Status']||rec['Status']||'';
+      const entry=rec['Scene/Entry Details']||rec['Point of Entry']||rec['Means of Entry']||'';
+      const parking=rec['Parking/Location Context']||rec['Parking Location']||'';
+      const method=rec['Method']||'';
+      const narrative=rec['Narrative']||'';
+      const bullets=summarizeNarrative(narrative, 4);
+
+      const card=document.createElement('section'); card.className='case';
+      card.innerHTML=`
+        <div class="headline">Case ${caseNum} | ${dt} | ${rec.__type}</div>
+        <ul>
+          <li><strong>Location:</strong> ${safe(addr)}</li>
+          <li><strong>Grid/Zone:</strong> ${safe(grid||'—','Data Incomplete')} / ${safe(zone||'—','Data Incomplete')}</li>
+          ${parking?`<li><strong>Parking Location:</strong> ${parking}</li>`:''}
+          ${(vehicle||reg)?`<li><strong>Victim Vehicle:</strong> ${safe([vehicle, reg?`(${reg}${regState?`, ${regState}`:''})`:''].filter(Boolean).join(' '))}</li>`:''}
+          ${suspect?`<li><strong>Suspect Description:</strong> ${suspect}</li>`:`<li><strong>Suspect Description:</strong> <span class="badge-incomplete">Data Incomplete</span></li>`}
+          ${victim?`<li><strong>Victim:</strong> ${victim}</li>`:''}
+          ${entry?`<li><strong>Point/Means of Entry:</strong> ${entry}</li>`:''}
+          ${method?`<li><strong>Method:</strong> ${method}</li>`:''}
+          ${bullets?`<li><strong>Narrative (key points):</strong><ul>${bullets}</ul></li>`:''}
+          <li><strong>Loss:</strong> ${loss===''? 'N/A':(isNaN(+loss)?loss:fmtMoney(loss))}</li>
+          <li><strong>Status:</strong> ${safe(status,'Data Incomplete')}</li>
+        </ul>`;
+      container.appendChild(card);
+    });
+  });
+  // summary table
+  const tbody=document.querySelector('#summaryTable tbody'); tbody.innerHTML='';
+  data.forEach(r=>{
+    const caseNum=(r['Case Number']||r['Case_Number']||r['Case #']||'').trim()||'—';
+    const dt=r.__dt?fmtDT(r.__dt):'—';
+    const loss=r['Total Value Stolen']||'';
+    const status=r['Case_Status']||r['Status']||'';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${caseNum}</td>
+      <td>${(r['cycle_name']||'').trim()||cycle}</td>
+      <td>${r.__type}</td>
+      <td>${dt}</td>
+      <td class="money">${loss===''? 'N/A':(isNaN(+loss)?loss:fmtMoney(loss))}</td>
+      <td>${status||'—'}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('summaryTable').style.display='';
+  // remove the builder so it won't appear when saving/printing
+  const b=document.getElementById('builder'); if(b) b.remove();
+}
+document.getElementById('csvFile').addEventListener('change', async (e)=>{
+  const f=e.target.files?. [0]; if(!f) return;
+  const text=await f.text(); buildBriefing(text);
+});
+</script>
+</body>
+</html>
+```
+
+**What changed vs the previous builder:**
+
+*   The **builder bar auto-removes** itself immediately after your CSV is loaded, so it **won’t appear in your saved HTML or PDF**. *   Long **narratives are summarized** to **up to 4 bullet points** (simple heuristic: keeps informative sentences, strips boilerplate). *   Keeps your clean **DIN/#0c233d** styling, case cards, and the **Cycle column** in the summary table. *   No “Key Takeaways” or recommendations, per your spec. If you want the bullets even tighter (e.g., force verbs like “Suspect… / Victim… / Entry… / Property…”), I can tweak the summarizer to enforce that pattern. ## Prompt:
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-Uo8tnzEj9ipcXJsctdwSH8&ts=489324&p=fs&cid=1&sig=c6038c348abd6c0863e0a45652209f346fe8d7c25fc5c2545dbba1f60adf199b&v=0)
+
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-3b9dGGxPSZ33vDYQEXoncQ&ts=489324&p=fs&cid=1&sig=876c7eaee75d66570102da27a4e5f6f74803bee3b3dd46fd28f54aa44265d8c2&v=0)
+
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-9GU36CkE47xbvof2f7mTqF&ts=489324&p=fs&cid=1&sig=d9aca2e292b84e1f2a968448f0700793023420aa9a8a6df7d42cd3c1de475759&v=0)
+
+SCRPA RMS Export
+
+Unable to display visualization
+
+why is the cycle not added? the date range for the week is wrong it should be 9/16/25 to 9/22/25
+the loss bullet points for the burglary - residence and Auto should have values based on the narratives
+the footer should have the cycle in it 
+replace Strategic Crime Analysis Unit to "Safe Streets Operations Control Center"
+
+## Response:
+Thought for a second
+
+Thought for 57s
+
+Thanks for the screenshots—super helpful. Here’s what I changed and why:
+
+*   **Cycle not added:** your CSV doesn’t always include `cycle_name`, so the page showed “—”. I added a **fallback**: if `cycle_name` is missing, I compute it as `C{MM}W{ISOweek}` (e.g., **C09W38**). *   **Wrong date range:** the old logic used the min/max dates in the file. Now I anchor the 7-day window to the **most recent incident’s week running Tue→Mon** (per your example). For your data that becomes **09/16/25 – 09/22/25**. *   **Loss bullets:** I added an `extractLoss()` that scans the **narrative** for dollar amounts/phrases and shows concise bullet items plus a **Total** (or `N/A` / `$0.00` when appropriate). *   **Footer & header unit name:** changed to **Safe Streets Operations Control Center**, and the **cycle appears in the footer**. Drop this in as your new builder (it removes itself after loading, so nothing extra appears in your PDF). ```html
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Strategic Crime Reduction Briefing – Patrol Captain (from CSV)</title>
+<style>
+  :root{ --primary:#0c233d; --text:#1a1a1a; --muted:#6b7280; --border:#e5e7eb; --bg:#ffffff; --danger:#b91c1c; }
+  html,body{font-family:"DIN","Bahnschrift","Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;line-height:1.38;}
+  @page{size:Letter;margin:0.6in;}
+  .page{max-width:8.5in;margin:0 auto;padding:0.6in;}
+  header{margin-bottom:14px;}
+  h1{font-size:22px;margin:0;color:var(--primary);font-weight:800;}
+  .sub{margin-top:4px;font-size:12.5px;color:var(--muted);}
+  .meta{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:12px;}
+  h2.section{color:var(--primary);border-bottom:2px solid var(--primary);padding-bottom:2px;margin:14px 0 8px;font-size:15.5px;font-weight:800;}
+  .case{margin:8px 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;}
+  .headline{font-weight:700;color:var(--primary);margin-bottom:6px;font-size:13.5px;}
+  .case ul{margin:0;padding-left:16px;font-size:12.75px;}
+  .badge-incomplete{font-style:italic;color:var(--danger);font-weight:600;}
+  table.summary{width:100%;border-collapse:collapse;margin-top:10px;font-size:12.5px;border:1px solid var(--border);}
+  .summary th,.summary td{border-bottom:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top;}
+  .summary th{background:#f8fafc;color:var(--primary);font-weight:800;font-size:12.25px;}
+  .summary td.money{text-align:right;font-variant-numeric:tabular-nums;}
+  footer{margin-top:12px;padding-top:8px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;display:flex;justify-content:space-between;}
+  /* Builder (auto-hides when CSV is loaded) */
+  .builder{border:1px dashed var(--border);padding:12px;border-radius:10px;margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+  .hint{color:var(--muted);font-size:12px}
+  @media print{.builder{display:none!important}}
+</style>
+</head>
+<body>
+<main class="page">
+  <!-- Builder: removed once CSV is loaded -->
+  <div class="builder" id="builder">
+    <label><strong>Load CSV:</strong> <input id="csvFile" type="file" accept=".csv,.txt" /></label>
+    <span class="hint">Select <code>SCRPA_RMS_Export.csv</code>. The UI will disappear after loading.</span>
+  </div>
+
+  <header>
+    <h1>Strategic Crime Reduction Briefing – Patrol Captain</h1>
+    <div class="sub">Cycle: <strong id="cycleName">—</strong> | Range: <strong id="cycleRange">—</strong></div>
+  </header>
+
+  <div class="meta">
+    <div><strong>Prepared by:</strong> P.O.

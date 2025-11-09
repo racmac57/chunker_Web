@@ -1,0 +1,499 @@
+Let me fix the `Record.HasFields` and `Record.Field` usage:
+
+**Fixed M Code for CSV Data Source** ∙ Version 4
+
+````powerquery
+// 🕒 2025-08-01-16-15-00
+// SCRPA_Time_v2/CSV_Data_Source_Fix
+// Author: R. A. Carucci  
+// Purpose: Process CSV file with dynamic column detection for RMS data standardization
+
+let
+    // ✅ DIRECT CSV SOURCE - No folder processing needed
+    Source = Csv.Document(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2\04_powerbi\rms_data_standardized_spatial_ready.csv"),[Delimiter=",", Columns=null, Encoding=1252, QuoteStyle=QuoteStyle.None]),
+    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+    
+    // ✅ DYNAMIC COLUMN DETECTION - Check what columns actually exist
+    AvailableColumns = Table.ColumnNames(#"Promoted Headers"),
+    
+    // ✅ SMART COLUMN MAPPING - Find columns by common patterns
+    CaseNumberCol = List.First(List.Select(AvailableColumns, each Text.Contains(Text.Upper(_), "CASE") and Text.Contains(Text.Upper(_), "NUMBER")), "CaseNumber"),
+    IncidentDateCol = List.First(List.Select(AvailableColumns, each Text.Contains(Text.Upper(_), "INCIDENT") and Text.Contains(Text.Upper(_), "DATE") and not Text.Contains(Text.Upper(_), "BETWEEN")), "IncidentDate"),
+    IncidentTimeCol = List.First(List.Select(AvailableColumns, each Text.Contains(Text.Upper(_), "INCIDENT") and Text.Contains(Text.Upper(_), "TIME") and not Text.Contains(Text.Upper(_), "BETWEEN")), "IncidentTime"),
+    FullAddressCol = List.First(List.Select(AvailableColumns, each Text.Contains(Text.Upper(_), "ADDRESS")), "FullAddress"),
+    
+    // ✅ SAFE TYPE CONVERSION - Only convert columns that exist
+    SafeTypeConversion = 
+        let
+            TypeList = List.RemoveNulls({
+                if List.Contains(AvailableColumns, CaseNumberCol) then {CaseNumberCol, type text} else null,
+                if List.Contains(AvailableColumns, IncidentDateCol) then {IncidentDateCol, type date} else null,
+                if List.Contains(AvailableColumns, IncidentTimeCol) then {IncidentTimeCol, type time} else null,
+                if List.Contains(AvailableColumns, FullAddressCol) then {FullAddressCol, type text} else null,
+                if List.Contains(AvailableColumns, "Incident Date_Between") then {"Incident Date_Between", type date} else null,
+                if List.Contains(AvailableColumns, "Incident Time_Between") then {"Incident Time_Between", type time} else null,
+                if List.Contains(AvailableColumns, "Report Date") then {"Report Date", type date} else null,
+                if List.Contains(AvailableColumns, "Report Time") then {"Report Time", type time} else null,
+                if List.Contains(AvailableColumns, "Incident Type_1") then {"Incident Type_1", type text} else null,
+                if List.Contains(AvailableColumns, "Incident Type_2") then {"Incident Type_2", type text} else null,
+                if List.Contains(AvailableColumns, "Incident Type_3") then {"Incident Type_3", type text} else null,
+                if List.Contains(AvailableColumns, "Officer of Record") then {"Officer of Record", type text} else null,
+                if List.Contains(AvailableColumns, "Squad") then {"Squad", type text} else null
+            })
+        in
+            if List.Count(TypeList) > 0 then
+                Table.TransformColumnTypes(#"Promoted Headers", TypeList)
+            else
+                #"Promoted Headers",
+    
+    #"Changed Type" = SafeTypeConversion,
+    
+    // ✅ NORMALIZED TEXT COLUMNS - Only process columns that exist
+    WithNormalizedText = 
+        let
+            BaseTable = #"Changed Type",
+            // Process each column individually if it exists
+            Step1 = if List.Contains(AvailableColumns, "Squad") then 
+                Table.TransformColumns(BaseTable, {{"Squad", each if _ <> null then Text.Upper(_) else null, type text}})
+                else BaseTable,
+            Step2 = if List.Contains(AvailableColumns, "Reviewed By") then 
+                Table.TransformColumns(Step1, {{"Reviewed By", each if _ <> null then Text.Proper(_) else null, type text}})
+                else Step1,
+            Step3 = if List.Contains(AvailableColumns, "Registration 1") then 
+                Table.TransformColumns(Step2, {{"Registration 1", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step2,
+            Step4 = if List.Contains(AvailableColumns, "Make1") then 
+                Table.TransformColumns(Step3, {{"Make1", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step3,
+            Step5 = if List.Contains(AvailableColumns, "Model1") then 
+                Table.TransformColumns(Step4, {{"Model1", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step4,
+            Step6 = if List.Contains(AvailableColumns, "Reg State 1") then 
+                Table.TransformColumns(Step5, {{"Reg State 1", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step5,
+            Step7 = if List.Contains(AvailableColumns, "Registration 2") then 
+                Table.TransformColumns(Step6, {{"Registration 2", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step6,
+            Step8 = if List.Contains(AvailableColumns, "Make2") then 
+                Table.TransformColumns(Step7, {{"Make2", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step7,
+            Step9 = if List.Contains(AvailableColumns, "Model2") then 
+                Table.TransformColumns(Step8, {{"Model2", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step8,
+            Step10 = if List.Contains(AvailableColumns, "Reg State 2") then 
+                Table.TransformColumns(Step9, {{"Reg State 2", each if _ <> null then Text.Upper(_) else null, type text}})
+                else Step9
+        in
+            Step10,
+    
+    // ✅ Cascading date/time logic using detected column names
+    WithIncidentDate = Table.AddColumn(WithNormalizedText, "Incident_Date", each
+        if List.Contains(AvailableColumns, IncidentDateCol) and Table.Column(WithNormalizedText, IncidentDateCol){_} <> null then Table.Column(WithNormalizedText, IncidentDateCol){_}
+        else if List.Contains(AvailableColumns, "Incident Date_Between") and [Incident Date_Between] <> null then [Incident Date_Between]
+        else if List.Contains(AvailableColumns, "Report Date") and [Report Date] <> null then [Report Date]
+        else null, type date),
+    
+    WithIncidentTime = Table.AddColumn(WithIncidentDate, "Incident_Time", each
+        if List.Contains(AvailableColumns, IncidentTimeCol) and Table.Column(WithIncidentDate, IncidentTimeCol){_} <> null then Table.Column(WithIncidentDate, IncidentTimeCol){_}
+        else if List.Contains(AvailableColumns, "Incident Time_Between") and [Incident Time_Between] <> null then [Incident Time_Between]
+        else if List.Contains(AvailableColumns, "Report Time") and [Report Time] <> null then Time.From([Report Time])
+        else null, type time),
+    
+    // ✅ TimeOfDay buckets with sort order
+    WithTimeOfDay = Table.AddColumn(WithIncidentTime, "TimeOfDay", each
+        let t = [Incident_Time] in
+        if t = null then "Unknown"
+        else if t >= #time(0,0,0) and t < #time(4,0,0) then "00:00–03:59 Early Morning"
+        else if t >= #time(4,0,0) and t < #time(8,0,0) then "04:00–07:59 Morning"
+        else if t >= #time(8,0,0) and t < #time(12,0,0) then "08:00–11:59 Morning Peak"
+        else if t >= #time(12,0,0) and t < #time(16,0,0) then "12:00–15:59 Afternoon"
+        else if t >= #time(16,0,0) and t < #time(20,0,0) then "16:00–19:59 Evening Peak"
+        else "20:00–23:59 Night", type text),
+        
+    WithTimeOfDaySortOrder = Table.AddColumn(WithTimeOfDay, "TimeOfDay_SortOrder", each
+        let t = [Incident_Time] in
+        if t = null then 7
+        else if t >= #time(0,0,0) and t < #time(4,0,0) then 1
+        else if t >= #time(4,0,0) and t < #time(8,0,0) then 2
+        else if t >= #time(8,0,0) and t < #time(12,0,0) then 3
+        else if t >= #time(12,0,0) and t < #time(16,0,0) then 4
+        else if t >= #time(16,0,0) and t < #time(20,0,0) then 5
+        else 6, Int64.Type),
+    
+    // ✅ Date sort key
+    WithDateSortKey = Table.AddColumn(WithTimeOfDaySortOrder, "Date_SortKey", each
+        if [Incident_Date] <> null then 
+            Date.Year([Incident_Date]) * 10000 + Date.Month([Incident_Date]) * 100 + Date.Day([Incident_Date])
+        else null, Int64.Type),
+    
+    // ✅ ENHANCED Block calculation with intersection detection using detected address column
+    WithBlock = Table.AddColumn(WithDateSortKey, "Block", each
+        let
+            addr = if Record.HasFields(_, FullAddressCol) then Record.Field(_, FullAddressCol) ? ? "" else "",
+            isIntersection = Text.Contains(addr, " & "),
+            cleanAddr = Text.Replace(addr, ", Hackensack, NJ, 07601", ""),
+            intersectionResult = if isIntersection then
+                let
+                    beforeAmpersand = Text.Trim(Text.BeforeDelimiter(cleanAddr, " & ")),
+                    afterAmpersand = Text.Trim(Text.AfterDelimiter(cleanAddr, " & "))
+                in
+                    if beforeAmpersand <> "" and afterAmpersand <> "" then
+                        beforeAmpersand & " & " & afterAmpersand
+                    else if beforeAmpersand <> "" and afterAmpersand = "" then
+                        "Incomplete Address - Check Location Data"
+                    else
+                        "Incomplete Address - Check Location Data"
+            else
+                let
+                    streetNum = try Number.FromText(Text.BeforeDelimiter(cleanAddr, " ")) otherwise null,
+                    streetName = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(cleanAddr, " "), ","))
+                in
+                    if streetNum <> null and streetName <> "" then 
+                        streetName & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+                    else if streetName <> "" then 
+                        streetName & ", Unknown Block"
+                    else
+                        "Check CAD Location Data"
+        in
+            intersectionResult, type text),
+    
+    // ✅ Create simplified Case_Number column for filtering
+    WithCaseNumber = Table.AddColumn(WithBlock, "Case_Number", each
+        if Record.HasFields(_, CaseNumberCol) then Record.Field(_, CaseNumberCol) else "Unknown", type text),
+    
+    // ✅ ALL_INCIDENTS with comma separator AND statute code removal
+    WithAllIncidents = Table.AddColumn(WithCaseNumber, "ALL_INCIDENTS", each
+        let
+            // Safely get incident types
+            type1 = if Record.HasFields(_, "Incident Type_1") then Record.Field(_, "Incident Type_1") else null,
+            type2 = if Record.HasFields(_, "Incident Type_2") then Record.Field(_, "Incident Type_2") else null,
+            type3 = if Record.HasFields(_, "Incident Type_3") then Record.Field(_, "Incident Type_3") else null,
+            
+            // Clean each incident type by removing " - 2C" and everything after
+            cleanType1 = if type1 <> null then 
+                if Text.Contains(type1, " - 2C") then
+                    Text.BeforeDelimiter(type1, " - 2C")
+                else type1
+            else null,
+            
+            cleanType2 = if type2 <> null then 
+                if Text.Contains(type2, " - 2C") then
+                    Text.BeforeDelimiter(type2, " - 2C")
+                else type2
+            else null,
+            
+            cleanType3 = if type3 <> null then 
+                if Text.Contains(type3, " - 2C") then
+                    Text.BeforeDelimiter(type3, " - 2C")
+                else type3
+            else null
+        in
+            Text.Combine(
+                List.RemoveNulls({
+                    cleanType1,
+                    cleanType2,
+                    cleanType3
+                }), ", "
+            ), type text),
+    
+    // ✅ Period calculation
+    WithPeriod = Table.AddColumn(WithAllIncidents, "Period", each
+        let
+            incidentDate = [Incident_Date],
+            today = Date.From(DateTime.LocalNow()),
+            daysDiff = if incidentDate <> null then Duration.Days(today - incidentDate) else 999
+        in
+            if daysDiff <= 7 then "7-Day"
+            else if daysDiff <= 28 then "28-Day"
+            else if incidentDate <> null and Date.Year(incidentDate) = Date.Year(today) then "YTD"
+            else "Historical", type text),
+    
+    // ✅ Filter BEFORE unpivot to preserve record count
+    FilteredRows = Table.SelectRows(WithPeriod, each 
+        [Case_Number] <> "25-057654" and [Period] <> "Historical"
+    ),
+    
+    // ✅ Create IncidentType from primary incident type
+    WithIncidentType = Table.AddColumn(FilteredRows, "IncidentType", each
+        let
+            type1 = if Record.HasFields(_, "Incident Type_1") then Record.Field(_, "Incident Type_1") else null,
+            cleanType = if type1 <> null then 
+                if Text.Contains(type1, " - 2C") then
+                    Text.BeforeDelimiter(type1, " - 2C")
+                else type1
+            else "Unknown"
+        in
+            cleanType, type text),
+    
+    // ✅ Crime categorization using primary incident type
+    WithCrimeCategory = Table.AddColumn(WithIncidentType, "Crime_Category", each
+        let
+            incident = Text.Upper([IncidentType] ? ? ""),
+            allIncidents = Text.Upper([ALL_INCIDENTS] ? ? "") in
+            if Text.Contains(incident, "MOTOR VEHICLE THEFT") or Text.Contains(allIncidents, "MOTOR VEHICLE THEFT") then "Motor Vehicle Theft"
+            else if Text.Contains(incident, "ROBBERY") or Text.Contains(allIncidents, "ROBBERY") then "Robbery"
+            else if (Text.Contains(incident, "BURGLARY") and Text.Contains(incident, "AUTO")) or (Text.Contains(allIncidents, "BURGLARY") and Text.Contains(allIncidents, "AUTO")) then "Burglary – Auto"
+            else if Text.Contains(incident, "SEXUAL") or Text.Contains(allIncidents, "SEXUAL") then "Sexual Offenses"
+            else if (Text.Contains(incident, "BURGLARY") and (Text.Contains(incident, "COMMERCIAL") or Text.Contains(incident, "RESIDENCE"))) or (Text.Contains(allIncidents, "BURGLARY") and (Text.Contains(allIncidents, "COMMERCIAL") or Text.Contains(allIncidents, "RESIDENCE"))) then "Burglary – Commercial/Residence"
+            else "Other", type text)
+in
+    WithCrimeCategory
+    
+    // ✅ NORMALIZED TEXT COLUMNS
+    WithNormalizedText = Table.TransformColumns(#"Changed Type", {
+        {"Squad", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Reviewed By", each if _ <> null then Text.Proper(_) else null, type text},
+        {"Registration 1", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Make1", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Model1", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Reg State 1", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Registration 2", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Make2", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Model2", each if _ <> null then Text.Upper(_) else null, type text},
+        {"Reg State 2", each if _ <> null then Text.Upper(_) else null, type text}
+    }),
+    
+    // ✅ Cascading date/time logic
+    WithIncidentDate = Table.AddColumn(WithNormalizedText, "Incident_Date", each
+        if [Incident Date] <> null then [Incident Date]
+        else if [Incident Date_Between] <> null then [Incident Date_Between]
+        else if [Report Date] <> null then [Report Date]
+        else null, type date),
+    
+    WithIncidentTime = Table.AddColumn(WithIncidentDate, "Incident_Time", each
+        if [Incident Time] <> null then [Incident Time]
+        else if [Incident Time_Between] <> null then [Incident Time_Between]
+        else if [Report Time] <> null then Time.From([Report Time])
+        else null, type time),
+    
+    // ✅ TimeOfDay buckets with sort order
+    WithTimeOfDay = Table.AddColumn(WithIncidentTime, "TimeOfDay", each
+        let t = [Incident_Time] in
+        if t = null then "Unknown"
+        else if t >= #time(0,0,0) and t < #time(4,0,0) then "00:00–03:59 Early Morning"
+        else if t >= #time(4,0,0) and t < #time(8,0,0) then "04:00–07:59 Morning"
+        else if t >= #time(8,0,0) and t < #time(12,0,0) then "08:00–11:59 Morning Peak"
+        else if t >= #time(12,0,0) and t < #time(16,0,0) then "12:00–15:59 Afternoon"
+        else if t >= #time(16,0,0) and t < #time(20,0,0) then "16:00–19:59 Evening Peak"
+        else "20:00–23:59 Night", type text),
+        
+    WithTimeOfDaySortOrder = Table.AddColumn(WithTimeOfDay, "TimeOfDay_SortOrder", each
+        let t = [Incident_Time] in
+        if t = null then 7
+        else if t >= #time(0,0,0) and t < #time(4,0,0) then 1
+        else if t >= #time(4,0,0) and t < #time(8,0,0) then 2
+        else if t >= #time(8,0,0) and t < #time(12,0,0) then 3
+        else if t >= #time(12,0,0) and t < #time(16,0,0) then 4
+        else if t >= #time(16,0,0) and t < #time(20,0,0) then 5
+        else 6, Int64.Type),
+    
+    // ✅ Date sort key
+    WithDateSortKey = Table.AddColumn(WithTimeOfDaySortOrder, "Date_SortKey", each
+        if [Incident_Date] <> null then 
+            Date.Year([Incident_Date]) * 10000 + Date.Month([Incident_Date]) * 100 + Date.Day([Incident_Date])
+        else null, Int64.Type),
+    
+    // ✅ ENHANCED Block calculation with intersection detection
+    WithBlock = Table.AddColumn(WithDateSortKey, "Block", each
+        let
+            addr = [FullAddress] ? ? "",
+            isIntersection = Text.Contains(addr, " & "),
+            cleanAddr = Text.Replace(addr, ", Hackensack, NJ, 07601", ""),
+            intersectionResult = if isIntersection then
+                let
+                    beforeAmpersand = Text.Trim(Text.BeforeDelimiter(cleanAddr, " & ")),
+                    afterAmpersand = Text.Trim(Text.AfterDelimiter(cleanAddr, " & "))
+                in
+                    if beforeAmpersand <> "" and afterAmpersand <> "" then
+                        beforeAmpersand & " & " & afterAmpersand
+                    else if beforeAmpersand <> "" and afterAmpersand = "" then
+                        "Incomplete Address - Check Location Data"
+                    else
+                        "Incomplete Address - Check Location Data"
+            else
+                let
+                    streetNum = try Number.FromText(Text.BeforeDelimiter(cleanAddr, " ")) otherwise null,
+                    streetName = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(cleanAddr, " "), ","))
+                in
+                    if streetNum <> null and streetName <> "" then 
+                        streetName & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+                    else if streetName <> "" then 
+                        streetName & ", Unknown Block"
+                    else
+                        "Check CAD Location Data"
+        in
+            intersectionResult, type text),
+    
+    // ✅ ALL_INCIDENTS with comma separator AND statute code removal
+    WithAllIncidents = Table.AddColumn(WithBlock, "ALL_INCIDENTS", each
+        let
+            // Clean each incident type by removing " - 2C" and everything after
+            cleanType1 = if [Incident Type_1] <> null then 
+                if Text.Contains([Incident Type_1], " - 2C") then
+                    Text.BeforeDelimiter([Incident Type_1], " - 2C")
+                else [Incident Type_1]
+            else null,
+            
+            cleanType2 = if [Incident Type_2] <> null then 
+                if Text.Contains([Incident Type_2], " - 2C") then
+                    Text.BeforeDelimiter([Incident Type_2], " - 2C")
+                else [Incident Type_2]
+            else null,
+            
+            cleanType3 = if [Incident Type_3] <> null then 
+                if Text.Contains([Incident Type_3], " - 2C") then
+                    Text.BeforeDelimiter([Incident Type_3], " - 2C")
+                else [Incident Type_3]
+            else null
+        in
+            Text.Combine(
+                List.RemoveNulls({
+                    cleanType1,
+                    cleanType2,
+                    cleanType3
+                }), ", "
+            ), type text),
+    
+    // ✅ FIXED VEHICLE COLUMNS with proper text concatenation
+    WithVehicle1 = Table.AddColumn(WithAllIncidents, "Vehicle_1", each
+        let
+            regState = [Reg State 1] ? ? "",
+            registration = [Registration 1] ? ? "",
+            make = [Make1] ? ? "",
+            model = [Model1] ? ? "",
+            
+            // Only create vehicle string if we have meaningful data
+            hasVehicleData = regState <> "" or registration <> "" or make <> "" or model <> ""
+        in
+            if hasVehicleData then
+                let
+                    // Build parts safely
+                    statePart = if regState <> "" then regState else "",
+                    regPart = if registration <> "" then registration else "",
+                    makePart = if make <> "" then make else "",
+                    modelPart = if model <> "" then model else "",
+                    
+                    // Combine state and registration with " - "
+                    stateReg = if statePart <> "" and regPart <> "" then 
+                        statePart & " - " & regPart
+                    else if regPart <> "" then regPart
+                    else if statePart <> "" then statePart
+                    else "",
+                    
+                    // Combine make and model with "/"
+                    makeModel = if makePart <> "" and modelPart <> "" then 
+                        makePart & "/" & modelPart
+                    else if makePart <> "" then makePart
+                    else if modelPart <> "" then modelPart
+                    else "",
+                    
+                    // Final combination with ", "
+                    result = if stateReg <> "" and makeModel <> "" then 
+                        stateReg & ", " & makeModel
+                    else if stateReg <> "" then stateReg
+                    else if makeModel <> "" then makeModel
+                    else ""
+                in
+                    if result = "" then null else result
+            else null, type text),
+            
+    WithVehicle2 = Table.AddColumn(WithVehicle1, "Vehicle_2", each
+        let
+            regState = [Reg State 2] ? ? "",
+            registration = [Registration 2] ? ? "",
+            make = [Make2] ? ? "",
+            model = [Model2] ? ? "",
+            
+            // Only create vehicle string if we have meaningful data
+            hasVehicleData = regState <> "" or registration <> "" or make <> "" or model <> ""
+        in
+            if hasVehicleData then
+                let
+                    // Build parts safely
+                    statePart = if regState <> "" then regState else "",
+                    regPart = if registration <> "" then registration else "",
+                    makePart = if make <> "" then make else "",
+                    modelPart = if model <> "" then model else "",
+                    
+                    // Combine state and registration with " - "
+                    stateReg = if statePart <> "" and regPart <> "" then 
+                        statePart & " - " & regPart
+                    else if regPart <> "" then regPart
+                    else if statePart <> "" then statePart
+                    else "",
+                    
+                    // Combine make and model with "/"
+                    makeModel = if makePart <> "" and modelPart <> "" then 
+                        makePart & "/" & modelPart
+                    else if makePart <> "" then makePart
+                    else if modelPart <> "" then modelPart
+                    else "",
+                    
+                    // Final combination with ", "
+                    result = if stateReg <> "" and makeModel <> "" then 
+                        stateReg & ", " & makeModel
+                    else if stateReg <> "" then stateReg
+                    else if makeModel <> "" then makeModel
+                    else ""
+                in
+                    if result = "" then null else result
+            else null, type text),
+            
+    // ✅ FIXED Vehicle_1_and_Vehicle_2: Only when BOTH vehicles exist
+    WithVehicle1and2 = Table.AddColumn(WithVehicle2, "Vehicle_1_and_Vehicle_2", each
+        let
+            vehicle1 = [Vehicle_1],
+            vehicle2 = [Vehicle_2]
+        in
+            // Only combine when BOTH vehicles have data
+            if vehicle1 <> null and vehicle2 <> null then 
+                vehicle1 & " | " & vehicle2
+            else null, type text),
+    
+    // ✅ Period calculation
+    WithPeriod = Table.AddColumn(WithVehicle1and2, "Period", each
+        let
+            incidentDate = [Incident_Date],
+            today = Date.From(DateTime.LocalNow()),
+            daysDiff = if incidentDate <> null then Duration.Days(today - incidentDate) else 999
+        in
+            if daysDiff <= 7 then "7-Day"
+            else if daysDiff <= 28 then "28-Day"
+            else if incidentDate <> null and Date.Year(incidentDate) = Date.Year(today) then "YTD"
+            else "Historical", type text),
+    
+    // ✅ Filter BEFORE unpivot to preserve record count
+    FilteredRows = Table.SelectRows(WithPeriod, each 
+        [Case Number] <> "25-057654" and [Period] <> "Historical"
+    ),
+    
+    // ✅ MODIFIED UNPIVOT - Keep one row per case for most analyses
+    // Only unpivot if you specifically need incident-level analysis
+    // For now, create IncidentType from primary incident type
+    WithIncidentType = Table.AddColumn(FilteredRows, "IncidentType", each
+        let
+            cleanType = if [Incident Type_1] <> null then 
+                if Text.Contains([Incident Type_1], " - 2C") then
+                    Text.BeforeDelimiter([Incident Type_1], " - 2C")
+                else [Incident Type_1]
+            else "Unknown"
+        in
+            cleanType, type text),
+    
+    // ✅ Crime categorization using primary incident type
+    WithCrimeCategory = Table.AddColumn(WithIncidentType, "Crime_Category", each
+        let
+            incident = Text.Upper([IncidentType] ? ? ""),
+            allIncidents = Text.Upper([ALL_INCIDENTS] ? ? "") in
+            if Text.Contains(incident, "MOTOR VEHICLE THEFT") or Text.Contains(allIncidents, "MOTOR VEHICLE THEFT") then "Motor Vehicle Theft"
+            else if Text.Contains(incident, "ROBBERY") or Text.Contains(allIncidents, "ROBBERY") then "Robbery"
+            else if (Text.Contains(incident, "BURGLARY") and Text.Contains(incident, "AUTO")) or (Text.Contains(allIncidents, "BURGLARY") and Text.Contains(allIncidents, "AUTO")) then "Burglary – Auto"
+            else if Text.Contains(incident, "SEXUAL") or Text.Contains(allIncidents, "SEXUAL") then "Sexual Offenses"
+            else if (Text.Contains(incident, "BURGLARY") and (Text.Contains(incident, "COMMERCIAL") or Text.Contains(incident, "RESIDENCE"))) or (Text.Contains(allIncidents, "BURGLARY") and (Text.Contains(allIncidents, "COMMERCIAL") or Text.Contains(allIncidents, "RESIDENCE"))) then "Burglary – Commercial/Residence"
+            else "Other", type text),
+    
+    // ✅ METHOD 3: Comprehensive narrative cleaning
+    ComprehensiveCleanedNarrative = Table.TransformColumns(WithCrimeCategory, {
+        {"Narrative", each 
+            let
+                text = _ ? ?

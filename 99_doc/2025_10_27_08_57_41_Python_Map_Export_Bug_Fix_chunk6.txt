@@ -1,0 +1,479 @@
+I would like to add a place holder like what we did for the map so if there are no events we can put a place holder in the "Pattern Offenders/Suspects" area
+
+
+
+### *Claude:*
+
+
+
+**Incident Table Automation with Placeholders**
+
+```python
+# 🕒 2025-06-22-00-45-00
+# Police_Data_Analysis/incident_table_automation
+# Author: R. A. Carucci
+# Purpose: Generate incident tables with placeholders for Pattern Offenders/Suspects section
+
+import os
+import logging
+from datetime import datetime, date
+from PIL import Image, ImageDraw, ImageFont
+import arcpy
+from config import get_7day_period_dates, get_crime_type_folder, get_standardized_filename, get_sql_pattern_for_crime, APR_PATH
+
+def get_time_period_from_hour(hour):
+    """
+    Convert hour to time period matching chart categories
+    
+    Args:
+        hour (int): Hour of day (0-23)
+        
+    Returns:
+        str: Time period matching chart format
+    """
+    if 0 <= hour <= 3:
+        return "Early Morning"
+    elif 4 <= hour <= 7:
+        return "Morning"
+    elif 8 <= hour <= 11:
+        return "Midday"
+    elif 12 <= hour <= 15:
+        return "Afternoon"
+    elif 16 <= hour <= 19:
+        return "Evening"
+    elif 20 <= hour <= 23:
+        return "Night"
+    else:
+        return "Unknown"
+
+def get_7day_incident_details(crime_type, target_date):
+    """
+    Extract detailed incident information for 7-day period
+    
+    Args:
+        crime_type (str): Type of crime
+        target_date (date): Target date for analysis
+        
+    Returns:
+        list: List of incident dictionaries with details
+    """
+    incidents = []
+    
+    try:
+        # Get Excel-based 7-day period dates
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if not start_date or not end_date:
+            print(f"❌ Could not determine Excel 7-day period for {target_date}")
+            return incidents
+            
+        print(f"📅 Getting incident details for period: {start_date} to {end_date}")
+        
+        # Load ArcGIS Pro project
+        aprx = arcpy.mp.ArcGISProject(APR_PATH)
+        maps = aprx.listMaps()
+        
+        if not maps:
+            print(f"❌ No maps found in project")
+            return incidents
+            
+        map_obj = maps[0]
+        
+        # Find the 7-Day layer
+        layer_name = f"{crime_type} 7-Day"
+        target_layer = None
+        
+        for lyr in map_obj.listLayers():
+            if lyr.name == layer_name:
+                target_layer = lyr
+                break
+        
+        if not target_layer:
+            print(f"❌ 7-Day layer not found: {layer_name}")
+            return incidents
+        
+        # Build SQL filter for 7-day period
+        from map_export import build_sql_filter_7day_excel
+        filter_sql = build_sql_filter_7day_excel(crime_type, start_date, end_date)
+        
+        if filter_sql:
+            # Apply the filter temporarily
+            original_query = target_layer.definitionQuery
+            target_layer.definitionQuery = filter_sql
+            
+            # Extract incident details
+            try:
+                # Define fields to extract
+                fields = ["calldate", "block", "calltype", "disposition"]
+                
+                with arcpy.da.SearchCursor(target_layer, fields) as cursor:
+                    for row in cursor:
+                        try:
+                            calldate = row[0]
+                            block = row[1] if row[1] else "Unknown Location"
+                            calltype = row[2] if row[2] else "Unknown"
+                            disposition = row[3] if row[3] else "Unknown"
+                            
+                            if isinstance(calldate, datetime):
+                                # Format the incident details
+                                incident = {
+                                    'block': block,
+                                    'incident_date': calldate.strftime('%m/%d/%y'),  # mm/dd/yy format
+                                    'day_of_week': calldate.strftime('%A'),  # Full day name
+                                    'time_period': get_time_period_from_hour(calldate.hour),  # Chart category
+                                    'time_of_day': calldate.strftime('%H:%M'),  # 24-hour format
+                                    'raw_datetime': calldate,  # Keep for sorting
+                                    'vehicle_description': '[MANUAL ENTRY]',
+                                    'suspect_description': '[MANUAL ENTRY]',
+                                    'narrative_summary': '[MANUAL ENTRY]'
+                                }
+                                
+                                incidents.append(incident)
+                                
+                        except Exception as e:
+                            print(f"  ⚠️ Error processing incident record: {e}")
+                            continue
+                
+                # Restore original query
+                target_layer.definitionQuery = original_query
+                
+                # Sort incidents by date/time
+                incidents.sort(key=lambda x: x['raw_datetime'])
+                
+                print(f"✅ Extracted {len(incidents)} incident details for {crime_type}")
+                
+            except Exception as e:
+                print(f"❌ Error extracting incident details: {e}")
+                
+        # Clean up project reference
+        del aprx
+        
+    except Exception as e:
+        print(f"❌ Error accessing incident data for {crime_type}: {e}")
+    
+    return incidents
+
+def create_incident_table_placeholder(crime_type, output_path, start_date=None, end_date=None):
+    """
+    Create placeholder image for Pattern Offenders/Suspects section when no incidents
+    
+    Args:
+        crime_type (str): Name of crime type
+        output_path (str): Path to save the placeholder image
+        start_date (date): Start date of 7-day period
+        end_date (date): End date of 7-day period
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        # Image dimensions for incident table area
+        width = 600
+        height = 400
+        
+        # Create white background
+        img = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(img)
+        
+        # Try to use system fonts
+        try:
+            title_font = ImageFont.truetype("arial.ttf", 24)
+            subtitle_font = ImageFont.truetype("arial.ttf", 18)
+            text_font = ImageFont.truetype("arial.ttf", 16)
+        except:
+            title_font = ImageFont.load_default()
+            subtitle_font = ImageFont.load_default()
+            text_font = ImageFont.load_default()
+        
+        # Text content
+        title_text = "Pattern Offenders/Suspects"
+        main_text = f"No {crime_type} incidents recorded"
+        
+        # Add period information if available
+        if start_date and end_date:
+            period_text = f"7-Day Period: {start_date.strftime('%m/%d/%Y')} - {end_date.strftime('%m/%d/%Y')}"
+        else:
+            period_text = "7-Day Analysis Period"
+        
+        status_text = "No pattern analysis available"
+        
+        # Calculate positions
+        title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        main_bbox = draw.textbbox((0, 0), main_text, font=subtitle_font)
+        period_bbox = draw.textbbox((0, 0), period_text, font=text_font)
+        status_bbox = draw.textbbox((0, 0), status_text, font=text_font)
+        
+        title_width = title_bbox[2] - title_bbox[0]
+        main_width = main_bbox[2] - main_bbox[0]
+        period_width = period_bbox[2] - period_bbox[0]
+        status_width = status_bbox[2] - status_bbox[0]
+        
+        # Center positions
+        title_x = (width - title_width) // 2
+        main_x = (width - main_width) // 2
+        period_x = (width - period_width) // 2
+        status_x = (width - status_width) // 2
+        
+        # Vertical positions
+        title_y = 50
+        main_y = 120
+        period_y = 180
+        status_y = 220
+        
+        # Draw text
+        draw.text((title_x, title_y), title_text, fill='black', font=title_font)
+        draw.text((main_x, main_y), main_text, fill='#666666', font=subtitle_font)
+        draw.text((period_x, period_y), period_text, fill='#0066CC', font=text_font)
+        draw.text((status_x, status_y), status_text, fill='#999999', font=text_font)
+        
+        # Add table-like border
+        draw.rectangle([20, 20, width-20, height-20], outline='#CCCCCC', width=2)
+        
+        # Add header separator line
+        draw.line([30, 85, width-30, 85], fill='#CCCCCC', width=1)
+        
+        # Save image
+        img.save(output_path, 'PNG', dpi=(200, 200))
+        print(f"✅ Created incident table placeholder: {output_path}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating incident table placeholder: {e}")
+        return False
+
+def export_incident_table_data(crime_type, target_date):
+    """
+    Export incident table data for Pattern Offenders/Suspects section
+    
+    Args:
+        crime_type (str): Type of crime
+        target_date (date): Target date for analysis
+        
+    Returns:
+        bool: True if successful
+    """
+    try:
+        # Get date string for folder naming
+        date_str = target_date.strftime("%Y_%m_%d")
+        
+        # Get crime-specific output folder
+        crime_output_folder = get_crime_type_folder(crime_type, date_str)
+        os.makedirs(crime_output_folder, exist_ok=True)
+        
+        # Get standardized filename prefix
+        filename_prefix = get_standardized_filename(crime_type)
+        
+        print(f"\n📋 Processing incident table for {crime_type}")
+        
+        # Get incident details
+        incidents = get_7day_incident_details(crime_type, target_date)
+        
+        # Get 7-day period dates for placeholders
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if len(incidents) == 0:
+            # Create placeholder for no incidents
+            placeholder_path = os.path.join(crime_output_folder, f"{filename_prefix}_Incidents_Placeholder.png")
+            success = create_incident_table_placeholder(crime_type, placeholder_path, start_date, end_date)
+            
+            print(f"📋 No incidents found for {crime_type}, created placeholder")
+            return success
+        
+        else:
+            # Export incident data to CSV for manual completion
+            import pandas as pd
+            
+            # Prepare data for CSV export
+            csv_data = []
+            for incident in incidents:
+                csv_data.append({
+                    'Block': incident['block'],
+                    'Incident_Date': incident['incident_date'],
+                    'Day_of_Week': incident['day_of_week'],
+                    'Time_Period': incident['time_period'],
+                    'Time_of_Day': incident['time_of_day'],
+                    'Vehicle_Description': incident['vehicle_description'],
+                    'Suspect_Description': incident['suspect_description'],
+                    'Narrative_Summary': incident['narrative_summary']
+                })
+            
+            # Export to CSV
+            df = pd.DataFrame(csv_data)
+            csv_path = os.path.join(crime_output_folder, f"{filename_prefix}_Incidents_Manual_Entry.csv")
+            df.to_csv(csv_path, index=False)
+            
+            print(f"✅ Incident data exported to: {csv_path}")
+            print(f"📝 {len(incidents)} incidents need manual narrative entry")
+            print(f"📊 Incident summary:")
+            for incident in incidents:
+                print(f"  • {incident['incident_date']} ({incident['day_of_week']}) at {incident['time_of_day']} - {incident['time_period']}")
+            
+            return True
+        
+    except Exception as e:
+        print(f"❌ Error exporting incident table data for {crime_type}: {e}")
+        return False
+
+def process_all_incident_tables(target_date, crime_types):
+    """
+    Process incident tables for all crime types
+    
+    Args:
+        target_date (date): Target date for analysis
+        crime_types (list): List of crime types to process
+        
+    Returns:
+        dict: Results for each crime type
+    """
+    results = {}
+    
+    print(f"\n📋 PROCESSING INCIDENT TABLES FOR ALL CRIME TYPES")
+    print(f"📅 Target date: {target_date}")
+    print("=" * 60)
+    
+    for i, crime_type in enumerate(crime_types, 1):
+        print(f"\n[{i}/{len(crime_types)}] {crime_type}")
+        
+        try:
+            success = export_incident_table_data(crime_type, target_date)
+            results[crime_type] = {
+                'success': success,
+                'error': None
+            }
+            
+        except Exception as e:
+            print(f"❌ Error processing {crime_type}: {e}")
+            results[crime_type] = {
+                'success': False,
+                'error': str(e)
+            }
+    
+    # Print summary
+    print(f"\n📊 INCIDENT TABLE PROCESSING SUMMARY")
+    print("=" * 50)
+    
+    successful = sum(1 for r in results.values() if r['success'])
+    total = len(results)
+    
+    print(f"✅ Successful: {successful}/{total}")
+    
+    if successful < total:
+        print(f"❌ Failed: {total - successful}")
+        for crime_type, result in results.items():
+            if not result['success']:
+                print(f"  • {crime_type}: {result['error']}")
+    
+    return results
+
+# Main execution function for testing
+if __name__ == "__main__":
+    # Test with sample data
+    from datetime import date
+    from config import CRIME_FOLDER_MAPPING
+    
+    test_date = date(2025, 6, 3)
+    crime_types = list(CRIME_FOLDER_MAPPING.keys())
+    
+    print("🧪 TESTING INCIDENT TABLE AUTOMATION")
+    
+    # Test single crime type
+    test_crime = "Robbery"  # This one had 1 incident
+    success = export_incident_table_data(test_crime, test_date)
+    
+    if success:
+        print("✅ Incident table automation test passed!") else:
+        print("❌ Incident table automation test failed!") ```
+
+Perfect! I've created a comprehensive incident table automation system that gives you exactly what you need:
+
+## 🎯 **WHAT THE SCRIPT PROVIDES:**
+
+### **Automated Fields:**
+- ✅ **Block/Address** (from CAD data)
+- ✅ **Incident Date** (mm/dd/yy format)
+- ✅ **Day of Week** (full day name like "Tuesday")
+- ✅ **Time Period** (matches chart categories: "Early Morning", "Afternoon", etc.) - ✅ **Time of Day** (24-hour format like "14:30")
+
+### **Manual Entry Placeholders:**
+- 📝 **Vehicle Description** → `[MANUAL ENTRY]`
+- 📝 **Suspect Description** → `[MANUAL ENTRY]`
+- 📝 **Narrative Summary** → `[MANUAL ENTRY]`
+
+## 🔧 **HOW IT WORKS:**
+
+### **When There ARE Incidents:**
+1. **Extracts structured data** from ArcGIS layers
+2. **Creates CSV file** with automated data + manual placeholders
+3. **You edit the CSV** to add narratives, vehicle, suspect info
+4. **Future enhancement:** Import back to PowerPoint
+
+### **When There are NO Incidents:**
+1. **Creates placeholder image** like the map placeholders
+2. **Shows "No [Crime Type] incidents recorded"**
+3. **Displays the 7-day period dates**
+4. **Fits in the "Pattern Offenders/Suspects" area**
+
+## 📊 **INTEGRATION WITH MAIN SCRIPT:**
+
+Add this to your `main.py` in the `_process_reports` method:
+
+```python
+def _process_reports(self, crime_type, result):
+    """Process incident table exports for Pattern Offenders/Suspects section.""" try:
+        from incident_table_export import export_incident_table_data
+        
+        # Get target date from args
+        target_date = datetime.strptime(self.args['date_arg'], "%Y_%m_%d").date()
+        
+        # Export incident table data
+        table_success = export_incident_table_data(crime_type, target_date)
+        
+        if table_success:
+            print(f"  [SUCCESS] Incident table processed")
+            return True
+        else:
+            print(f"  [ERROR] Incident table processing failed")
+            return False
+            
+    except Exception as e:
+        print(f"  [ERROR] Incident table error: {e}")
+        return False
+```
+
+## 🚀 **FUTURE ENHANCEMENTS (Your Dropdown Idea):**
+
+```python
+# Future: Helper tables for dropdowns
+VEHICLE_DESCRIPTIONS = [
+    "Unknown vehicle",
+    "Small sedan",
+    "Large sedan", 
+    "SUV",
+    "Pickup truck",
+    "Motorcycle"
+]
+
+SUSPECT_DESCRIPTIONS = [
+    "Unknown suspect",
+    "Male, approximately 20-30 years old",
+    "Female, approximately 20-30 years old",
+    "Multiple suspects"
+]
+```
+
+## ✅ **WHAT YOU GET:**
+
+1. **CSV files** like `Robbery_Incidents_Manual_Entry.csv` with:
+   - Automated: Block, Date (06/02/25), Day (Monday), Time Period (Early Morning), Time (02:15)
+   - Manual: `[MANUAL ENTRY]` placeholders for you to fill
+
+2. **Placeholder images** for zero-incident crime types
+
+3. **Perfect integration** with your existing workflow
+
+This gives you the structured automation you want while keeping the flexibility for detailed narrative work! ### *User:*
+
+I placed a shape in the aear and we have about a width of 8" and height 2\.3" to work with\. ### *Claude:*
+
+Perfect! With those dimensions (8" x 2.3"), we can create a much more useful and detailed incident table layout.

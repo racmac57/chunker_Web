@@ -1,0 +1,723 @@
+return
+
+    # === 7-day summary ===
+    if out.get("7day_summary") and "incident_date" in df.columns:
+        cutoff = pd.to_datetime("today").normalize() - pd.Timedelta(days=6)
+        d7 = df[pd.to_datetime(df["incident_date"], errors="coerce") >= cutoff]
+        s7 = d7.groupby("date").size().reset_index(name="Incidents")
+        safe_to_csv(s7, abs_path(out["7day_summary"]), logger)
+
+    # === 28-day summary ===
+    if out.get("28day_summary") and "incident_date" in df.columns:
+        cutoff = pd.to_datetime("today").normalize() - pd.Timedelta(days=27)
+        d28 = df[pd.to_datetime(df["incident_date"], errors="coerce") >= cutoff]
+        s28 = d28.groupby("date").size().reset_index(name="Incidents")
+        safe_to_csv(s28, abs_path(out["28day_summary"]), logger)
+
+    # === YTD by month ===
+    if out.get("ytd_summary") and "incident_date" in df.columns:
+        idt = pd.to_datetime(df["incident_date"], errors="coerce")
+        this_year = pd.Timestamp.today().year
+        ytd = df[idt.dt.year == this_year]
+        ytdm = ytd.groupby("month").size().reset_index(name="Incidents")
+        safe_to_csv(ytdm, abs_path(out["ytd_summary"]), logger)
+
+    # === Time of day ===
+    if out.get("time_of_day") and "hour" in df.columns:
+        tod = df.groupby("hour").size().reset_index(name="Incidents").sort_values("hour")
+        safe_to_csv(tod, abs_path(out["time_of_day"]), logger)
+
+    # === By block/grid/zone ===
+    if out.get("by_block"):
+        block_candidate = find_with_suffixes(
+            df.columns, ["fulladdress2", "fulladdress", "block", "grid", "pdzone", "zone"]
+        )
+        if block_candidate:
+            blk = df.groupby(block_candidate).size().reset_index(name="Incidents").sort_values("Incidents", ascending=False)
+            safe_to_csv(blk, abs_path(out["by_block"]), logger)
+        else:
+            logger.info("by_block: no suitable column found; skipped.") # === Response times ===
+    if out.get("response_times"):
+        rt_candidate = find_with_suffixes(df.columns, ["time_response", "response_time", "time_to_response"])
+        if rt_candidate:
+            tmp = df.copy()
+            try:
+                secs = pd.to_timedelta(tmp[rt_candidate]).dt.total_seconds()
+            except Exception:
+                secs = pd.to_numeric(tmp[rt_candidate], errors="coerce")
+            tmp["resp_seconds"] = secs
+            group_key = "hour" if "hour" in tmp.columns else None
+            g = tmp.groupby(group_key) if group_key else tmp.groupby(lambda _: 0)
+            agg = g["resp_seconds"].agg(
+                avg_resp_sec="mean",
+                p50_resp_sec="median",
+                p90_resp_sec=lambda x: x.dropna().quantile(0.9) if len(x.dropna()) else None,
+                samples="count",
+            ).reset_index()
+            if group_key:
+                agg = agg.rename(columns={group_key: "HourOfDay"})
+            safe_to_csv(agg, abs_path(out["response_times"]), logger)
+        else:
+            logger.info("response_times: no response time column found; skipped.") # === Officer assignments ===
+    if out.get("officer_assignments"):
+        officer_candidate = find_with_suffixes(df.columns, ["officer", "officer_of_record", "det_assigned", "squad"])
+        if officer_candidate:
+            oa = df.groupby(officer_candidate).size().reset_index(name="Incidents").sort_values("Incidents", ascending=False)
+            safe_to_csv(oa, abs_path(out["officer_assignments"]), logger)
+        else:
+            logger.info("officer_assignments: no suitable column found; skipped.") if __name__ == "__main__":
+    main()
+```
+
+* * *
+
+✅ Now the script will:
+
+*   Choose the **most complete incident\_date**. *   If tied, always resolve RMS > CAD > generic > leftovers. Do you want me to extend that same **policy order** (RMS > CAD > generic) to other fields too (e.g., `block`, `response_time`, `officer`)? ## Prompt:
+what's the benefit to extending? ## Response:
+Good question. The benefit comes down to **consistency** and **predictability** across your pipeline. Right now, your `incident_date` is the only field with a formal **policy-based resolution**. Other fields (`block`, `response_time`, `officer`) still use a "first match wins" approach. That means:
+
+### If you **don’t** extend policy
+
+*   Each field is chosen opportunistically (whatever column matches first). *   RMS might win in one run, CAD in another, depending on naming order. *   Results can drift if a new column shows up (e.g., `zone_cad` vs `zone_rms`). *   Harder to defend your outputs if leadership asks, “Which system does this data come from?”
+
+### If you **do** extend policy (RMS > CAD > generic)
+
+*   Every field gets resolved the same way, every time. *   RMS always wins if present, giving you the curated record. *   CAD is fallback, then generic headers. *   No surprises if both RMS and CAD versions exist. *   Easier documentation: _“For every field, RMS is the authoritative source unless missing, then CAD, then other.”_
+
+### Trade-offs
+
+*   Slightly more code and logging, but not much. *   If in practice CAD sometimes has fresher/more reliable values (e.g., time-on-scene might be logged better in CAD), RMS-first might hide that unless you override policy per field. * * *
+
+⚖️ **Recommendation:**  
+Extend the policy, but allow **exceptions by field** in a small config. Example:
+
+*   `incident_date`, `officer`, `case_number`: RMS > CAD > generic
+*   `response_time`: CAD > RMS > generic (because CAD usually logs faster)
+*   `block/address`: RMS > CAD (RMS often cleans addresses better)
+
+That way you get both **consistency** and **field-specific accuracy**. * * *
+
+Do you want me to draft an **extended policy block** you can drop into `build_pbi_extracts.py` that handles _all_ fields with field-specific priorities? ## Prompt:
+This should be added since the RMS Date and Time Data is preferred:
+# 1) Cascading date
+df["Incident_Date"] = (
+    pd.to_datetime(df["Incident Date"])
+      .fillna(pd.to_datetime(df["Incident Date_Between"]))
+      .fillna(pd.to_datetime(df["Report Date"]))
+      .dt.date
+)
+
+# 2) Cascading time
+df["Incident_Time"] = pd.to_datetime(df["Incident Time"]).dt.time
+mask = df["Incident_Time"].isna()
+df.loc[mask, "Incident_Time"] = pd.to_datetime(
+    df.loc[mask, "Incident Time_Between"]
+).dt.time
+
+## Response:
+Thought for 18s
+
+Good call. We’ll codify an **RMS-first cascading date/time** build, then fall back to the existing “best-by-completeness with policy (RMS > CAD > generic)” if RMS fields aren’t available or are empty. Below is a **drop-in update** for `build_pbi_extracts.py` that:
+
+*   Normalizes headers and is suffix-aware (`*_rms`, `*_cad`). *   **Builds a single timestamp** `incident_date` using RMS fields in this order:
+    1. `Incident Date`
+    2. `Incident Date_Between`
+    3. `Report Date`
+*   For time, prefers:
+    1. `Incident Time`
+    2. `Incident Time_Between`
+*   If the RMS cascade produces no usable timestamps, it falls back to the prior selector (best completeness; tie-breaker RMS > CAD > generic). *   Also writes auxiliary `date`, `hour`, and `month` like before. ### Drop-in patch (full file)
+
+Save over:  
+`C:\panic\CAD_RMS_Join\01_scripts\etl\build_pbi_extracts.py`
+
+```python
+import os, sys
+from pathlib import Path
+import pandas as pd
+
+# === Bootstrap imports ===
+THIS = Path(__file__).resolve()
+BASE = THIS.parents[2]
+UTILS = BASE / "01_scripts" / "utils"
+if str(UTILS) not in sys.path:
+    sys.path.insert(0, str(UTILS))
+from common import load_config, abs_path, setup_logger  # noqa
+
+def norm(name: str) -> str:
+    n = str(name).strip().lower().replace("&", "and")
+    for ch in (" ", "/", "\\", "-", ". ", "(", ")", "[", "]", ":"):
+        n = n.replace(ch, "_")
+    while "__" in n:
+        n = n.replace("__", "_")
+    return n.strip("_")
+
+def find_with_suffixes(df_cols_norm, base_names):
+    """Return first matching column (normalized) in priority: exact -> *_rms -> *_cad.""" for b in base_names:
+        if b in df_cols_norm:
+            return b
+        rms = f"{b}_rms"
+        if rms in df_cols_norm:
+            return rms
+        cad = f"{b}_cad"
+        if cad in df_cols_norm:
+            return cad
+    return None
+
+def _parse_date_series(df, colname):
+    if colname is None or colname not in df.columns:
+        return pd.Series([pd.NaT] * len(df))
+    return pd.to_datetime(df[colname], errors="coerce", utc=False)
+
+def _parse_time_series(df, colname):
+    if colname is None or colname not in df.columns:
+        return pd.Series([pd.NaT] * len(df))
+    # Try HH:MM[:SS] first; fallback to pandas to_datetime to coerce
+    try:
+        t = pd.to_datetime(df[colname], errors="coerce", utc=False).dt.time
+    except Exception:
+        t = pd.Series([pd.NaT] * len(df))
+    return t
+
+def _combine_date_time(dates: pd.Series, times: pd.Series) -> pd.Series:
+    # Combine date + time safely; if time is NaT, just return date (at midnight)
+    dt = pd.to_datetime(dates, errors="coerce", utc=False)
+    # Build datetime from date + time where time is present
+    mask = times.notna()
+    if mask.any():
+        # Build a base datetime at midnight
+        base = pd.to_datetime(dt.dt.date, errors="coerce", utc=False)
+        # Convert time to Timedelta and add
+        td = pd.to_timedelta(times.astype(str), errors="coerce")
+        dt = base
+        dt.loc[mask] = (base.loc[mask] + td.loc[mask])
+    return dt
+
+def build_incident_datetime_rms_first(df, logger):
+    """
+    RMS-preferred cascade:
+      Date:  incident_date_rms -> incident_date_between_rms -> report_date_rms
+      Time:  incident_time_rms -> incident_time_between_rms
+    Returns a datetime Series (or all NaT if not available).
+    """ # RMS-normalized names after merge+normalize
+    date_candidates = ["incident_date_rms", "incident_date_between_rms", "report_date_rms"]
+    time_candidates = ["incident_time_rms", "incident_time_between_rms"]
+
+    # Pick first available RMS date column with the most non-NaT parses
+    best_date_col, best_date, best_cnt = None, None, -1
+    for c in date_candidates:
+        s = _parse_date_series(df, c)
+        cnt = s.notna().sum()
+        if cnt > best_cnt:
+            best_date_col, best_date, best_cnt = c, s, cnt
+
+    if best_date is None or best_date.notna().sum() == 0:
+        logger.info("[PBI] RMS cascade produced no usable dates.") return pd.Series([pd.NaT] * len(df))
+
+    # Time is optional; pick first available with most parses
+    best_time = None
+    best_t_cnt = -1
+    for c in time_candidates:
+        s = _parse_time_series(df, c)
+        cnt = pd.Series(s).notna().sum()
+        if cnt > best_t_cnt:
+            best_time, best_t_cnt = s, cnt
+
+    if best_time is None or pd.Series(best_time).isna().all():
+        logger.info(f"[PBI] incident_date from '{best_date_col}' (no RMS time available).") return pd.to_datetime(best_date, errors="coerce", utc=False)
+
+    dt = _combine_date_time(best_date, best_time)
+    logger.info(f"[PBI] incident_date built from '{best_date_col}' + RMS time.") return dt
+
+def select_incident_date_policy(df, logger):
+    """
+    Fallback selector with policy if RMS cascade fails:
+    - Choose candidate with most valid timestamps. - Tie-breaker priority: incident_date_rms > incident_date_cad > incident_date > numbered dups.
+    """ # Collect candidates present
+    candidates = [c for c in df.columns if c == "incident_date" or c.startswith("incident_date_")]
+    for suffix in ("_rms", "_cad"):
+        nm = "incident_date" + suffix
+        if nm in df.columns and nm not in candidates:
+            candidates.append(nm)
+
+    if not candidates:
+        logger.info("No 'incident_date' candidates found.") return pd.Series([pd.NaT] * len(df))
+
+    results = []
+    for name in candidates:
+        try:
+            s = pd.to_datetime(df[name], errors="coerce", utc=False)
+            count = s.notna().sum()
+        except Exception:
+            s, count = pd.Series([pd.NaT] * len(df)), -1
+        results.append((name, count, s))
+
+    max_count = max(r[1] for r in results)
+    tied = [r for r in results if r[1] == max_count]
+    if len(tied) == 1:
+        return tied[0][2]
+
+    priority = {"incident_date_rms": 1, "incident_date_cad": 2, "incident_date": 3}
+    tied.sort(key=lambda r: priority.get(r[0], 99))
+    return tied[0][2]
+
+def main():
+    cfg = load_config()
+    logger = setup_logger("build_pbi_extracts")
+
+    merged_path = os.path.join(
+        abs_path(cfg["data"]["input_processed"]),
+        cfg["files"].get("merged_output", "CAD_RMS_Merged.csv")
+    )
+    if not os.path.exists(merged_path):
+        logger.error(f"Merged file not found: {merged_path}")
+        return
+
+    df = pd.read_csv(merged_path, dtype=str, low_memory=False)
+
+    # Normalize column names
+    orig_cols = list(df.columns)
+    norm_cols = [norm(c) for c in orig_cols]
+    rename_map = {orig_cols[i]: norm_cols[i] for i in range(len(orig_cols))}
+    df = df.rename(columns=rename_map)
+
+    # 1) Try RMS-first cascading build
+    dt = build_incident_datetime_rms_first(df, logger)
+
+    # 2) If RMS cascade is empty, fall back to policy-based selector
+    if dt.notna().sum() == 0:
+        logger.info("[PBI] Falling back to policy-based incident_date selection.") dt = select_incident_date_policy(df, logger)
+
+    # Standardize to single incident_date and helpers
+    df["incident_date"] = pd.to_datetime(dt, errors="coerce", utc=False)
+    df["date"] = df["incident_date"].dt.date
+    df["hour"] = df["incident_date"].dt.hour
+    df["month"] = df["incident_date"].dt.to_period("M").astype(str)
+
+    out = cfg.get("powerbi", {}).get("datasets", {})
+    if not out:
+        logger.info("No powerbi.datasets configured; nothing to build.") return
+
+    # === 7-day summary ===
+    if out.get("7day_summary"):
+        cutoff = pd.to_datetime("today").normalize() - pd.Timedelta(days=6)
+        d7 = df[df["incident_date"] >= cutoff]
+        s7 = d7.groupby("date").size().reset_index(name="Incidents")
+        path = abs_path(out["7day_summary"])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        s7.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"Wrote: {path} (rows={len(s7)})")
+
+    # === 28-day summary ===
+    if out.get("28day_summary"):
+        cutoff = pd.to_datetime("today").normalize() - pd.Timedelta(days=27)
+        d28 = df[df["incident_date"] >= cutoff]
+        s28 = d28.groupby("date").size().reset_index(name="Incidents")
+        path = abs_path(out["28day_summary"])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        s28.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"Wrote: {path} (rows={len(s28)})")
+
+    # === YTD by month ===
+    if out.get("ytd_summary"):
+        this_year = pd.Timestamp.today().year
+        ytd = df[df["incident_date"].dt.year == this_year]
+        ytdm = ytd.groupby("month").size().reset_index(name="Incidents")
+        path = abs_path(out["ytd_summary"])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        ytdm.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"Wrote: {path} (rows={len(ytdm)})")
+
+    # === Time of day ===
+    if out.get("time_of_day"):
+        tod = df.groupby("hour").size().reset_index(name="Incidents").sort_values("hour")
+        path = abs_path(out["time_of_day"])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tod.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"Wrote: {path} (rows={len(tod)})")
+
+    # === By block/grid/zone (suffix-aware; RMS preferred) ===
+    if out.get("by_block"):
+        # Prefer RMS > CAD > generic
+        block_candidate = None
+        for base in ["fulladdress2", "fulladdress", "block", "grid", "pdzone", "zone"]:
+            for candidate in (f"{base}_rms", f"{base}_cad", base):
+                if candidate in df.columns:
+                    block_candidate = candidate
+                    break
+            if block_candidate:
+                break
+        if block_candidate:
+            blk = df.groupby(block_candidate).size().reset_index(name="Incidents").sort_values("Incidents", ascending=False)
+            path = abs_path(out["by_block"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            blk.to_csv(path, index=False, encoding="utf-8")
+            logger.info(f"Wrote: {path} (rows={len(blk)})")
+        else:
+            logger.info("by_block: no suitable column found; skipped.") # === Response times (suffix-aware; CAD preferred by practice) ===
+    if out.get("response_times"):
+        rt_candidate = None
+        for base in ["time_response", "response_time", "time_to_response"]:
+            for candidate in (f"{base}_cad", f"{base}_rms", base):  # CAD first on purpose
+                if candidate in df.columns:
+                    rt_candidate = candidate
+                    break
+            if rt_candidate:
+                break
+
+        if rt_candidate:
+            tmp = df.copy()
+            try:
+                secs = pd.to_timedelta(tmp[rt_candidate]).dt.total_seconds()
+            except Exception:
+                secs = pd.to_numeric(tmp[rt_candidate], errors="coerce")
+            tmp["resp_seconds"] = secs
+            group_key = "hour" if "hour" in tmp.columns else None
+            g = tmp.groupby(group_key) if group_key else tmp.groupby(lambda _: 0)
+            agg = g["resp_seconds"].agg(
+                avg_resp_sec="mean",
+                p50_resp_sec="median",
+                p90_resp_sec=lambda x: x.dropna().quantile(0.9) if len(x.dropna()) else None,
+                samples="count",
+            ).reset_index()
+            if group_key:
+                agg = agg.rename(columns={group_key: "HourOfDay"})
+            path = abs_path(out["response_times"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            agg.to_csv(path, index=False, encoding="utf-8")
+            logger.info(f"Wrote: {path} (rows={len(agg)})")
+        else:
+            logger.info("response_times: no suitable column found; skipped.") # === Officer assignments (suffix-aware; RMS preferred) ===
+    if out.get("officer_assignments"):
+        officer_candidate = None
+        for base in ["officer", "officer_of_record", "det_assigned", "squad"]:
+            for candidate in (f"{base}_rms", f"{base}_cad", base):
+                if candidate in df.columns:
+                    officer_candidate = candidate
+                    break
+            if officer_candidate:
+                break
+
+        if officer_candidate:
+            oa = df.groupby(officer_candidate).size().reset_index(name="Incidents").sort_values("Incidents", ascending=False)
+            path = abs_path(out["officer_assignments"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            oa.to_csv(path, index=False, encoding="utf-8")
+            logger.info(f"Wrote: {path} (rows={len(oa)})")
+        else:
+            logger.info("officer_assignments: no suitable column found; skipped.") if __name__ == "__main__":
+    main()
+```
+
+### Why this matches your intent
+
+*   It explicitly **prefers RMS date/time** and combines them into one timestamp. *   If RMS fields are missing/empty, it **falls back** to best-available with a **clear policy**. *   Other PBI outputs now **prefer RMS** for address/officer, and **prefer CAD** for response time (common operational reality). If you want a different per-field priority, say the word and I’ll flip it. ## Prompt:
+! [Uploaded image](https://chatgpt.com/backend-api/estuary/content?id=file-RuLFt7qC9LpaNX26YuwbVi&ts=489324&p=fs&cid=1&sig=492bf5eda01e7b90330efd5906948ab0315b4c921e8afb56dd474ef330a416ae&v=0)
+
+fall back from the CAD will be the column Time of Call which is a date and time data type example: 
+Time of Call
+01/04/2025 10:59:09
+
+## Response:
+Got it. ✅
+
+Right now your policy only cascades **RMS dates and times**, but you also want a **CAD fallback** so no record is left blank. Here’s how I recommend updating your policy:
+
+* * *
+
+### **1\. Date Policy (Preferred → Fallback)**
+
+1. `Incident Date` (RMS)
+2. `Incident Date_Between` (RMS)
+3. `Report Date` (RMS)
+4. `Time of Call` (CAD) ← **new fallback**
+
+```python
+df["Incident_Date"] = (
+    pd.to_datetime(df["Incident Date"], errors="coerce")
+      .fillna(pd.to_datetime(df["Incident Date_Between"], errors="coerce"))
+      .fillna(pd.to_datetime(df["Report Date"], errors="coerce"))
+      .fillna(pd.to_datetime(df["Time of Call"], errors="coerce"))
+      .dt.date
+)
+```
+
+* * *
+
+### **2\. Time Policy (Preferred → Fallback)**
+
+1. `Incident Time` (RMS)
+2. `Incident Time_Between` (RMS)
+3. `Time of Call` (CAD) ← **new fallback**
+
+```python
+df["Incident_Time"] = pd.to_datetime(df["Incident Time"], errors="coerce").dt.time
+
+mask = df["Incident_Time"].isna()
+df.loc[mask, "Incident_Time"] = pd.to_datetime(
+    df.loc[mask, "Incident Time_Between"], errors="coerce"
+).dt.time
+
+mask = df["Incident_Time"].isna()
+df.loc[mask, "Incident_Time"] = pd.to_datetime(
+    df.loc[mask, "Time of Call"], errors="coerce"
+).dt.time
+```
+
+* * *
+
+✅ **Benefit:** Every record will now always have a usable `Incident_Date` and `Incident_Time`. RMS is always prioritized, but CAD fills any gaps so you avoid blanks and errors in Power BI or downstream processing. * * *
+
+Do you want me to **merge this directly into your `build_pbi_extracts.py`** so you can just drop it in, or keep it as a **separate helper function** for both merge and extracts? ## Prompt:
+I have other fall back logic I want to add should I tell you them all now? ## Response:
+Yes — give me all of them now. That way I can design a **single unified cascading policy** that:
+
+*   Handles **date, time, and any other critical fields** in one place
+*   Orders the fallbacks cleanly (RMS → CAD → whatever else you specify)
+*   Avoids duplicating the same logic in different scripts
+*   Stays flexible if new exports change column names
+
+Once I have the full list, I’ll build you a **drop-in ready block** (or helper function) that enforces the cascade everywhere (`merge_cad_rms.py`, `build_pbi_extracts.py`, etc.). 👉 Go ahead and list out all the fallback rules you want — columns and their order of priority. ## Prompt:
+Looking at the conversation transcript, the AI was asking about adding starter ETL stubs to the bootstrap script. Let me check what was left incomplete and provide you with a comprehensive list of what should be added. Read file: C:\Git\police-analytics-tools\output\SCRPA_MASTER_KNOWLEDGE_BASE\2025_08_24_18_18_51_2025_08_24_17_37_05_full_conversation_chunker_chatgpt_chatlog_new_version_scrpa_cad_rms_join_transcript.txt
+Let me continue reading to see what was left incomplete:
+
+Read file: C:\Git\police-analytics-tools\output\SCRPA_MASTER_KNOWLEDGE_BASE\2025_08_24_18_18_51_2025_08_24_17_37_05_full_conversation_chunker_chatgpt_chatlog_new_version_scrpa_cad_rms_join_transcript.txt
+Based on my review of the conversation transcript, I can see that the AI was asking about adding starter ETL stubs to the bootstrap script, and the conversation was left incomplete. Here's what you should add to complete the setup:
+
+## �� **COMPLETE LIST OF WHAT TO ADD TO THE BOOTSTRAP SCRIPT:**
+
+### **1. ETL STUB FILES (Already Partially Defined):**
+
+#### **A. 01_scripts/etl/load_cad.py**
+- **Purpose:** Load and clean CAD data from CSV files
+- **Features:** Date parsing, uppercase enforcement, null threshold handling
+- **Input:** 02_data/raw/CAD_*.csv
+- **Output:** 02_data/interim/cad_clean.csv
+
+#### **B. 01_scripts/etl/load_rms.py**
+- **Purpose:** Load and clean RMS data from Excel files
+- **Features:** Excel reading, date parsing, data cleaning
+- **Input:** 02_data/raw/RMS_*.xlsx
+- **Output:** 02_data/interim/rms_clean.csv
+
+#### **C. 01_scripts/etl/merge_cad_rms.py**
+- **Purpose:** Merge cleaned CAD and RMS datasets
+- **Features:** Outer join, duplicate removal, final export
+- **Input:** Cleaned interim files
+- **Output:** 02_data/processed/CAD_RMS_Merged.csv + 04_output/exports/CAD_RMS_Final.csv
+
+### **2. UTILITY MODULES:**
+
+#### **A. 01_scripts/utils/common.py**
+- **Purpose:** Shared helper functions
+- **Features:** Config loader, path utilities, file finder, logging setup
+- **Functions:**
+  - load_config() - Load YAML configuration
+  - abs_path() - Resolve relative paths
+  - ensure_dir() - Create directories
+  - latest_file() - Find most recent files by pattern
+  - setup_logger() - Configure logging
+
+#### **B. __init__.py Files**
+- **Purpose:** Make packages importable
+- **Locations:** 01_scripts/utils/__init__.py, 01_scripts/etl/__init__.py
+
+### **3. ENHANCED CONFIGURATION:**
+
+#### **A. Enhanced config.yaml with:**
+- **Project settings:** Name, base directory, logging
+- **Data paths:** Raw, interim, processed directories
+- **File patterns:** CAD/RMS file naming conventions
+- **Merge logic:** Key fields, join strategy
+- **Cleaning rules:** Date formats, uppercase fields, null thresholds
+- **Power BI integration:** Dataset paths, refresh settings
+- **Output specifications:** File formats, naming conventions
+
+### **4. ADDITIONAL ENHANCEMENTS TO CONSIDER:**
+
+#### **A. Data Quality & Validation:**
+- **Data validator module** for completeness, date ranges, spatial validation
+- **Quality reports** with pass/fail status
+- **Data profiling** for understanding data structure
+
+#### **B. Advanced ETL Features:**
+- **Rolling 13-month filtering** for time-based analysis
+- **Time-of-day binning** for temporal analysis
+- **Spatial data validation** for GIS integration
+- **Address standardization** for geocoding
+
+#### **C. Monitoring & Reporting:**
+- **Pipeline orchestration** script
+- **Progress tracking** and logging
+- **Error handling** and recovery
+- **Performance metrics** collection
+
+#### **D. Testing & Quality Assurance:**
+- **Unit tests** for each ETL component
+- **Integration tests** for complete pipeline
+- **Data quality tests** for validation rules
+- **Performance benchmarks**
+
+### **5. COMPLETE BOOTSTRAP SCRIPT STRUCTURE:**
+
+python
+# The complete script should create:
+├── 01_scripts/
+│   ├── etl/
+│   │   ├── __init__.py
+│   │   ├── load_cad.py          # CAD data loader
+│   │   ├── load_rms.py          # RMS data loader
+│   │   └── merge_cad_rms.py     # Data merger
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   └── common.py            # Shared utilities
+│   └── workflows/
+│       └── main_pipeline.py     # Main orchestrator
+├── 06_config/
+│   └── config.yaml              # Enhanced configuration
+├── 10_tests/
+│   ├── test_load_cad.py
+│   ├── test_load_rms.py
+│   └── test_merge.py
+└── requirements.txt              # Dependencies
+
+### **6. DEPENDENCIES TO INCLUDE:**
+
+txt
+pandas>=1.5.0
+numpy>=1.21.0
+openpyxl>=3.0.0
+pyyaml>=6.0
+python-dateutil>=2.8.0
+pytest>=7.0.0
+dash>=2.0.0
+plotly>=5.0.0
+
+### **7. USAGE INSTRUCTIONS:**
+
+bash
+# 1. Place raw files
+02_data/raw/CAD_Export_2025.csv
+02_data/raw/RMS_Export_2025.xlsx
+
+# 2. Run ETL pipeline
+python 01_scripts/etl/load_cad.py
+python 01_scripts/etl/load_rms.py
+python 01_scripts/etl/merge_cad_rms.py
+
+# 3. Check outputs
+02_data/interim/cad_clean.csv
+02_data/interim/rms_clean.csv
+02_data/processed/CAD_RMS_Merged.csv
+04_output/exports/CAD_RMS_Final.csv
+
+**This complete setup will give you a production-ready ETL pipeline that follows SCRPA best practices and integrates seamlessly with your Power BI and GIS workflows! ** 🚀
+
+## Response:
+Perfect — you nailed the review. What was left hanging before was that we never fully **wired the ETL stubs into the bootstrap**. Here’s the **actionable plan to complete it**, based on your transcript review:
+
+* * *
+
+✅ What to Add into the Bootstrap Script
+---------------------------------------
+
+### 1\. **ETL Stubs**
+
+Already defined in part, but must be explicitly created in `01_scripts/etl/`:
+
+*   **`load_cad.py`** → reads raw CAD Excel/CSV, cleans headers, enforces types, writes to interim. *   **`load_rms.py`** → same for RMS Excel. *   **`merge_cad_rms.py`** → canonicalize, outer join, de-duplication, write processed + final export. *   (Optional downstream) **`build_pbi_extracts.py`** → time-of-day, 7/28/YTD extracts, block analysis. * * *
+
+### 2\. **Utils Package**
+
+*   `01_scripts/utils/common.py` with:
+    *   `load_config()`
+    *   `abs_path()`
+    *   `ensure_dir()`
+    *   `latest_file()`
+    *   `setup_logger()`
+
+And `__init__.py` in both `etl/` and `utils/` so they import cleanly. * * *
+
+### 3\. **Enhanced Config**
+
+Your `config.yaml` should cover:
+
+*   Paths (`raw`, `interim`, `processed`, `exports`, `powerbi`)
+*   File patterns (`SCRPA_CAD_Export.xlsx`, RMS timestamped files)
+*   Merge logic (case + incident date keys, RMS preferred cascade)
+*   Cleaning rules (uppercase, null thresholds, date formats)
+
+* * *
+
+### 4\. **Validation Hooks**
+
+Stubbed for later but worth dropping in:
+
+*   `validate_schema()`
+*   `validate_dates()`
+*   `profile_data()`
+
+So you can plug in quality checks without refactoring the ETL scripts. * * *
+
+### 5\. **Bootstrap Layout**
+
+Your repo should end up like this:
+
+```
+├── 01_scripts/
+│   ├── etl/
+│   │   ├── __init__.py
+│   │   ├── load_cad.py
+│   │   ├── load_rms.py
+│   │   ├── merge_cad_rms.py
+│   │   └── build_pbi_extracts.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   └── common.py
+│   └── workflows/
+│       └── main_pipeline.py
+├── 02_data/
+│   ├── raw/
+│   ├── interim/
+│   ├── processed/
+├── 04_output/
+│   └── exports/
+├── 05_powerbi/
+├── 06_config/
+│   └── config.yaml
+└── requirements.txt
+```
+
+* * *
+
+### 6\. **Requirements**
+
+Lock in:
+
+```txt
+pandas>=2.3.0
+numpy>=2.0.0
+openpyxl>=3.1.0
+pyyaml>=6.0
+python-dateutil>=2.9.0
+watchdog>=6.0.0
+pytest>=7.0.0
+```
+
+* * *
+
+### 7\. **Bootstrap Script Behavior**
+
+When you run the orchestrator (`main_pipeline.py` or `run_all.py`):
+
+1. Run CAD loader
+2. Run RMS loader
+3. Run merge
+4. Run Power BI extract builder
+5. Drop logs + exports
+
+* * *
+
+⚡ **Next Step Recommendation**:  
+I can generate the **drop-in ready bootstrap script** (`main_pipeline.py`) that calls each ETL stub in order, using your config + logging standards. That way you’ll have a fully runnable skeleton with placeholders for validation + cascade logic.

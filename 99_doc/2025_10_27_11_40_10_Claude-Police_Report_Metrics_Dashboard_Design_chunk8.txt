@@ -1,0 +1,100 @@
+I can see the issue. The error shows:
+
+**"We couldn't find an Excel table named 'INFOCOP_OFFICER_CHARGE_TYPE'"**
+
+This is because the `INFOCOP_INTEGRATED_SUMMONS` query is trying to reference a table that doesn't exist yet in **this** Power BI file. ## **🔧 QUICK FIX:**
+
+**Change the reference in the `INFOCOP_INTEGRATED_SUMMONS` query:**
+
+1. **Right-click** `INFOCOP_INTEGRATED_SUMMONS` → **Edit Query**
+2. **Advanced Editor**
+3. **Find this line:**
+   ```powerquery
+   ChargeData = Excel.CurrentWorkbook(){[Name="INFOCOP_OFFICER_CHARGE_TYPE"]}[Content],
+   ```
+
+4. **Change it to:**
+   ```powerquery
+   ChargeData = INFOCOP_OFFICER_CHARGE_TYPE,
+   ```
+
+5. **Find this line:**
+   ```powerquery
+   AssignmentData = Excel.CurrentWorkbook(){[Name="SUMMONS_ASSIGNED_SHIFT"]}[Content],
+   ```
+
+6. **Change it to:**
+   ```powerquery
+   AssignmentData = SUMMONS_ASSIGNED_SHIFT,
+   ```
+
+## **📋 CORRECTED FULL QUERY:**
+
+**Fixed INFOCOP Integrated Summons Query**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Fixed_INFOCOP_Integrated_Summons
+// Author: R. A. Carucci
+// Purpose: Fixed version that references Power BI queries instead of Excel tables
+
+let
+    // Reference the actual Power BI queries (not Excel tables)
+    ChargeData = INFOCOP_OFFICER_CHARGE_TYPE,
+    AssignmentData = SUMMONS_ASSIGNED_SHIFT,
+    
+    // Simple join with assignment data using officer names
+    JoinedWithAssignments = Table.NestedJoin(ChargeData, {"Officer Name"}, 
+                                           AssignmentData, {"PATROL_MEMBER"}, 
+                                           "AssignmentInfo", JoinKind.LeftOuter),
+    
+    // Expand assignment information
+    ExpandedAssignments = Table.ExpandTableColumn(JoinedWithAssignments, "AssignmentInfo", 
+        {"PATROL_MEMBER", "ASSIGNMENT", "RANK", "BADGE#", "Platoon", "Squad", "Unit Group"}, 
+        {"Matched_Officer_Name", "Assignment", "Rank", "Badge_Number", "Platoon", "Squad", "Unit_Group"}),
+    
+    // Add data quality indicators
+    AddedQuality = Table.AddColumn(ExpandedAssignments, "Match_Status", each 
+        if [Matched_Officer_Name] = null then "Unmatched Officer"
+        else "Matched", type text),
+    
+    // Add citation count for analysis
+    AddedCount = Table.AddColumn(AddedQuality, "Citation_Count", each 1, Int64.Type)
+in
+    AddedCount
+````
+
+## **🎯 SOLUTION STEPS:**
+
+**Option 1: Quick Fix (Edit Existing Query)**
+1. Advanced Editor in `INFOCOP_INTEGRATED_SUMMONS`
+2. Replace the two lines as shown above
+3. Click "Done"
+
+**Option 2: Replace Entire Query**
+1. Delete the current `INFOCOP_INTEGRATED_SUMMONS` query
+2. Create new blank query
+3. Paste the **fixed code** from the new artifact above
+4. Rename to `INFOCOP_INTEGRATED_SUMMONS`
+
+## **💡 THE ISSUE EXPLAINED:**
+
+The original query used:
+```powerquery
+Excel.CurrentWorkbook(){[Name="INFOCOP_OFFICER_CHARGE_TYPE"]}[Content]
+```
+
+This looks for an **Excel table** named "INFOCOP_OFFICER_CHARGE_TYPE" in the current workbook. But in Power BI, we reference other **queries** directly:
+```powerquery
+INFOCOP_OFFICER_CHARGE_TYPE
+```
+
+## **✅ AFTER THE FIX:**
+
+The `INFOCOP_INTEGRATED_SUMMONS` query should:
+1. Load successfully 
+2. Show officer names with their division assignments
+3. Have columns like: Officer Name, Date, Summons Type, Platoon, Assignment, etc. **Try the fix and let me know if it works! ** Once this loads successfully, we can start building your first dashboard page. ## Prompt:
+6/14/2025, 5:37:19 PM
+
+!

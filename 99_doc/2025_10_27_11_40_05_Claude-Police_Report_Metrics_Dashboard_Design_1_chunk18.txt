@@ -1,0 +1,81 @@
+** I can see the query is working - it found and processed the files (you can see "SuccessfulFiles" in the Applied Steps), but it's hitting the condition check at the end. Looking at the formula bar: `if Table.RowCount(SuccessfulFiles) > 0 then` - this means it found files but something in the processing failed. ## **🔍 LET'S DEBUG STEP BY STEP:**
+
+**1. Check the SuccessfulFiles step:**
+- Click on **"SuccessfulFiles"** in the Applied Steps
+- This will show you which files were processed successfully
+- If it shows 0 rows, then all files failed processing
+
+**2. Check the TransformFiles step:**
+- Click on **"TransformFiles"** in Applied Steps  
+- Look at the "Data" column - do you see "null" values or actual table data? ## **🔧 QUICK DEBUG VERSION:**
+
+Let me create a **simple debug query** to see exactly what's in your Excel files:
+
+**Debug InfoCop Files - See What's Inside**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Debug_InfoCop_Files
+// Author: R. A. Carucci
+// Purpose: Simple debug query to see exactly what's in your Excel files
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to just one file for testing
+    FilteredFiles = Table.SelectRows(Source, each Text.EndsWith([Name], ".xlsx")),
+    FirstFile = Table.FirstN(FilteredFiles, 1),
+    
+    // Look inside the first Excel file
+    AddFileContents = Table.AddColumn(FirstFile, "ExcelContents", each
+        let
+            ExcelFile = Excel.Workbook([Content], null, true)
+        in
+            ExcelFile
+    ),
+    
+    // Expand to see all sheets
+    ExpandedSheets = Table.ExpandTableColumn(AddFileContents, "ExcelContents", 
+        {"Name", "Data", "Kind"}, {"SheetName", "SheetData", "SheetKind"}),
+    
+    // Show sheet info
+    SheetInfo = Table.AddColumn(ExpandedSheets, "RowCount", each 
+        if [SheetData] <> null then Table.RowCount([SheetData]) else 0),
+    
+    // Show first few rows of each sheet
+    AddPreview = Table.AddColumn(SheetInfo, "Preview", each
+        if [SheetData] <> null and Table.RowCount([SheetData]) > 0 then
+            Table.FirstN([SheetData], 3)
+        else
+            null
+    ),
+    
+    // Select relevant columns
+    FinalView = Table.SelectColumns(AddPreview, {"Name", "SheetName", "SheetKind", "RowCount", "Preview"})
+in
+    FinalView
+````
+
+## **🎯 DEBUGGING STEPS:**
+
+**1. Create the debug query above**
+- This will show you exactly what sheets exist in your Excel files
+- And what the first few rows look like in each sheet
+
+**2. Look at the results:**
+- How many sheets are in each file? - What are the sheet names? - Which sheets have data (RowCount > 0)? - What does the Preview column show for the first few rows? **3. Based on what we find, I can adjust the main query**
+
+## **⚡ QUICK TEST - TRY THIS:**
+
+**Option A: Run the debug query first**
+- Create a new blank query
+- Paste the debug code
+- See what it shows
+
+**Option B: Check your current query steps**
+- Click "SuccessfulFiles" step - how many rows? - Click "TransformFiles" step - are there "null" values in the Data column? **The files are there and the query is running, we just need to see what's inside the Excel files to adjust the processing logic! **
+
+What do you see when you click on the "SuccessfulFiles" step? ## Prompt:
+6/14/2025, 7:17:10 PM
+
+!

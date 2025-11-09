@@ -1,0 +1,608 @@
+● Update Todos
+  ⎿  ☐ Reorder filtering logic (period-first, then filter)
+     ☐ Implement timezone normalization and boundary standardization
+     ☐ Harden merge logic with canonical keys and safe dedupe
+     ☐ Replace hard-coded baseline with config-driven expectations
+     ☐ Add Power BI type/null hygiene checks
+     ☐ Create regression test harness
+     ☐ Generate unified diff patch
+
+● Update Todos
+  ⎿  ☐ Reorder filtering logic (period-first, then filter)
+     ☐ Implement timezone normalization and boundary standardization
+     ☐ Harden merge logic with canonical keys and safe dedupe
+     ☐ Replace hard-coded baseline with config-driven expectations
+     ☐ Add Power BI type/null hygiene checks
+     ☐ Create regression test harness
+     ☐ Generate unified diff patch
+
+● A) Unified Diff Patch
+
+  --- a/01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  +++ b/01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  @@ -3,6 +3,7 @@
+   import pandas as pd
+   import numpy as np
+   import re
+  +import pytz
+   from datetime import datetime, timedelta
+   from pathlib import Path
+   import logging
+  @@ -16,6 +17,7 @@ import os
+   from contextlib import contextmanager
+   import gc
+   import difflib
+  +import json
+
+   # Helper functions for header normalization and column coalescing
+   def to_snake(name: str) -> str:
+  @@ -163,6 +165,7 @@ class ComprehensiveSCRPAFixV8_5:
+           self.cycle_calendar = None
+           self.current_cycle = None
+           self.current_date = None
+  +        self.expected_counts = self._load_expected_counts()
+           self.setup_logging()
+           self.load_reference_data()
+
+  @@ -170,6 +173,29 @@ class ComprehensiveSCRPAFixV8_5:
+           self.cycle_calendar = self.load_cycle_calendar()
+           self.current_cycle, self.current_date =
+  self.get_current_cycle_info(self.cycle_calendar)
+
+  +    def _load_expected_counts(self) -> dict:
+  +        """Load expected counts from configuration file"""
+  +        config_paths = [
+  +            self.project_path / 'expected_counts.json',
+  +            self.project_path / '05_config' / 'expected_counts.json',
+  +            self.project_path / 'config' / 'expected_counts.json'
+  +        ]
+  +
+  +        for config_path in config_paths:
+  +            try:
+  +                if config_path.exists():
+  +                    with open(config_path, 'r') as f:
+  +                        expected_counts = json.load(f)
+  +                    self.logger.info(f"[COUNT-FIX BASELINE] Loaded expected
+  counts from {config_path}")
+  +                    return expected_counts
+  +            except Exception as e:
+  +                self.logger.warning(f"[COUNT-FIX BASELINE] Error loading
+  {config_path}: {e}")
+  +
+  +        self.logger.info(f"[COUNT-FIX BASELINE] No baseline configured — skipping
+   alert")
+  +        return {}
+  +
+  +    def normalize_to_local_ts(self, dt, tz="America/New_York"):
+  +        """Normalize datetime to local timezone for consistent boundary
+  handling"""
+  +        if pd.isna(dt):
+  +            return dt
+  +
+  +        try:
+  +            # Convert to pandas Timestamp if not already
+  +            if isinstance(dt, str):
+  +                dt = pd.to_datetime(dt, errors='coerce')
+  +
+  +            if pd.isna(dt):
+  +                return dt
+  +
+  +            # If already timezone-aware, convert to target timezone
+  +            if dt.tz is not None:
+  +                local_tz = pytz.timezone(tz)
+  +                dt = dt.tz_convert(local_tz)
+  +            else:
+  +                # If timezone-naive, assume UTC and convert to local
+  +                local_tz = pytz.timezone(tz)
+  +                dt = dt.tz_localize('UTC').tz_convert(local_tz)
+  +
+  +            # Strip timezone info for Power BI compatibility (keep as local time)
+  +            return dt.tz_localize(None)
+  +
+  +        except Exception as e:
+  +            self.logger.warning(f"Timezone normalization failed for {dt}: {e}")
+  +            return dt
+  +
+       def setup_logging(self):
+           log_dir = self.project_path / '03_output' / 'logs'
+           log_dir.mkdir(parents=True, exist_ok=True)
+  @@ -700,23 +726,26 @@ class ComprehensiveSCRPAFixV8_5:
+           # Define current cycle periods (from cycle calendar)
+           # C08W32: Report Due 08/12/25 (August 5-11, 2025) - from cycle calendar
+           seven_day_start = pd.to_datetime('2025-08-05').date()
+  -        seven_day_end = pd.to_datetime('2025-08-11').date()
+  +        seven_day_end = pd.to_datetime('2025-08-12').date()  # End exclusive: <
+  2025-08-12 00:00
+           twenty_eight_day_start = pd.to_datetime('2025-07-15').date()
+  -        twenty_eight_day_end = pd.to_datetime('2025-08-11').date()
+  +        twenty_eight_day_end = pd.to_datetime('2025-08-12').date()  # End
+  exclusive: < 2025-08-12 00:00
+
+           # YTD is current year
+           current_year = 2025
+
+  -        # Period assignment based on cycle calendar
+  -        if seven_day_start <= date_val <= seven_day_end:
+  +        # Period assignment with start inclusive (>=), end exclusive (<)
+  +        if seven_day_start <= date_val < seven_day_end:
+               return "7-Day"
+  -        elif twenty_eight_day_start <= date_val <= twenty_eight_day_end:
+  +        elif twenty_eight_day_start <= date_val < twenty_eight_day_end:
+               return "28-Day"
+           elif date_val.year == current_year:
+               return "YTD"
+           else:
+               return "Historical"
+  +
+  +    def build_canonical_merge_key(self, df, case_col='case_number',
+  date_col='incident_date'):
+  +        """Build canonical merge key from case number and date bucket"""
+  +        def create_key(row):
+  +            case_num = str(row.get(case_col, '')).strip().upper()
+  +            date_val = row.get(date_col)
+  +
+  +            if pd.notna(date_val):
+  +                # Bucket by date for cases that might have multiple entries per
+  day
+  +                try:
+  +                    date_bucket = pd.to_datetime(date_val).strftime('%Y%m%d')
+  +                    return f"{case_num}_{date_bucket}"
+  +                except:
+  +                    pass
+  +
+  +            return case_num
+  +
+  +        df['_canonical_key'] = df.apply(create_key, axis=1)
+  +        return df
+  +
+  +    def safe_dedupe(self, df, keys=['_canonical_key'], keep='first'):
+  +        """Safe deduplication with logging"""
+  +        initial_count = len(df)
+  +
+  +        # Identify duplicates before removal
+  +        duplicate_mask = df.duplicated(subset=keys, keep=False)
+  +        duplicate_count = duplicate_mask.sum()
+  +
+  +        if duplicate_count > 0:
+  +            self.logger.info(f"[COUNT-FIX MERGE] Found {duplicate_count}
+  duplicate records")
+  +
+  +            # Log sample duplicates
+  +            duplicate_samples = df[duplicate_mask][keys +
+  ['case_number']].head(5)
+  +            for _, row in duplicate_samples.iterrows():
+  +                self.logger.info(f"  Duplicate key: {row[keys[0]]} (case:
+  {row.get('case_number', 'N/A')})")
+  +
+  +        # Remove duplicates
+  +        df_deduped = df.drop_duplicates(subset=keys, keep=keep)
+  +        final_count = len(df_deduped)
+  +        removed_count = initial_count - final_count
+  +
+  +        self.logger.info(f"[COUNT-FIX MERGE] Dedupe: {initial_count} →
+  {final_count} ({removed_count} removed, keep='{keep}')")
+  +
+  +        return df_deduped
+
+       def get_season(self, date_val):
+           """Season calculation matching M Code exactly.""" @@ -1117,28 +1146,16 @@ class ComprehensiveSCRPAFixV8_5:
+           rms_df = rms_df.rename(columns=existing_mapping)
+           self.logger.info(f"Applied column mapping: {existing_mapping}")
+
+  -        # Apply additional transformations as defined
+  +        # Apply header normalization
+           rms_df = normalize_headers(rms_df)
+  -
+  -        # Enhanced date/time parsing with proper timezone handling
+  +
+  +        # [COUNT-FIX ORDER] Parse dates but DO NOT apply early filter yet
+           if 'incident_date' in rms_df.columns:
+  -            rms_df['incident_date'] = pd.to_datetime(rms_df['incident_date'],
+  errors='coerce')
+  +            raw_count = len(rms_df)
+  +            rms_df['incident_date'] = rms_df['incident_date'].apply(lambda x:
+  self.normalize_to_local_ts(pd.to_datetime(x, errors='coerce')))
+  +            parsed_count = rms_df['incident_date'].notna().sum()
+  +            self.logger.info(f"[COUNT-FIX ORDER] Date parsing: {raw_count} total,
+   {parsed_count} valid dates - NO EARLY FILTER applied")
+           else:
+               # If incident_date column is missing, create empty column
+               rms_df['incident_date'] = pd.NaT
+
+  -        # 🚀 PERFORMANCE OPTIMIZATION: Early Date Filtering (99% speed
+  improvement)
+  -        # Filter to recent incidents (last 60 days) before complex operations to
+  reduce data volume
+  -        pre_filter_count = len(rms_df)
+  -        sixty_days_ago = pd.Timestamp.now() - pd.Timedelta(days=60)
+  -
+  -        # Apply early date filter for performance optimization
+  -        try:
+  -            # Only keep records from the last 60 days for processing efficiency
+  -            recent_incidents_mask = (
+  -                pd.to_datetime(rms_df['incident_date'], errors='coerce') >=
+  sixty_days_ago
+  -            ) | pd.to_datetime(rms_df['incident_date'], errors='coerce').isna()
+  # Keep null dates for now
+  -
+  -            rms_df = rms_df[recent_incidents_mask].copy()
+  -            post_filter_count = len(rms_df)
+  -
+  -            reduction_pct = ((pre_filter_count - post_filter_count) /
+  pre_filter_count * 100) if pre_filter_count > 0 else 0
+  -
+  -            self.logger.info(f"🚀 EARLY DATE FILTER: {pre_filter_count:,} →
+  {post_filter_count:,} records "
+  -                           f"({reduction_pct:.1f}% reduction,
+  {post_filter_count:,} recent incidents)")
+  -
+  -            if reduction_pct > 50:
+  -                self.logger.info(f"⚡ Performance boost: {reduction_pct:.1f}%
+  data volume reduction")
+  -
+  -        except Exception as e:
+  -            self.logger.warning(f"Early date filtering failed, continuing with
+  full dataset: {e}")
+  -            # Continue with full dataset if filtering fails
+  -
+           # KEEP AS DATETIME OBJECTS - Don't convert to strings
+           # This allows proper period classification for 7-Day, 28-Day, YTD
+  analysis
+           # rms_df['incident_date'] =
+  rms_df['incident_date'].dt.strftime('%m/%d/%y')  # REMOVED
+  @@ -1146,8 +1163,15 @@ class ComprehensiveSCRPAFixV8_5:
+           # Period calculation with actual dates
+           try:
+               rms_df['period'] = rms_df['incident_date'].apply(self.get_period)
+  +
+  +            # [COUNT-FIX WINDOW] Log resolved windows with timezone
+  +            self.logger.info(f"[COUNT-FIX WINDOW] Resolved windows
+  (America/New_York, end-exclusive):")
+  +            self.logger.info(f"  - 7-Day: 2025-08-05 00:00 <= date < 2025-08-12
+  00:00")
+  +            self.logger.info(f"  - 28-Day: 2025-07-15 00:00 <= date < 2025-08-12
+  00:00")
+  +            self.logger.info(f"  - YTD: year == 2025 (local tz)")
+
+               # Debug period assignment with example dates
+  +            pre_tag_count = len(rms_df)
+               if len(rms_df) > 0:
+                   sample_dates = rms_df[rms_df['incident_date'].notna()].head(3)
+                   if len(sample_dates) > 0:
+  @@ -1155,6 +1179,13 @@ class ComprehensiveSCRPAFixV8_5:
+                       for _, row in sample_dates.iterrows():
+                           self.logger.info(f"  Date: {row['incident_date']} →
+  Period: {row['period']}")
+
+  +            # Period-based counts (BEFORE any filtering)
+  +            period_counts = rms_df['period'].value_counts()
+  +            self.logger.info(f"[COUNT-FIX ORDER] Period assignment complete:
+  {pre_tag_count} records tagged")
+  +            for period, count in period_counts.items():
+  +                self.logger.info(f"  - {period}: {count} records")
+  +
+  +            # NOW apply any filtering based on periods (instead of early 60-day
+  filter)
+               # Check for 7-day period dates (C08W32: August 5-11, 2025) - from
+  cycle calendar
+               seven_day_dates = rms_df[
+                   (rms_df['incident_date'] >= pd.to_datetime('2025-08-05')) &
+  @@ -1258,6 +1289,9 @@ class ComprehensiveSCRPAFixV8_5:
+           if 'how_reported' in cad_df.columns:
+               cad_df['how_reported'] =
+  cad_df['how_reported'].apply(self.clean_how_reported_911)
+
+  +        # [COUNT-FIX ORDER] Apply timezone normalization to CAD dates
+  +        initial_cad_count = len(cad_df)
+  +
+           # 🚀 PERFORMANCE OPTIMIZATION: Early Date Filtering for CAD Data
+           # Apply early filtering if we have time/date columns to reduce processing
+   load
+  -        pre_filter_count = len(cad_df)
+  -
+           if 'time_of_call' in cad_df.columns:
+  -            try:
+  -                sixty_days_ago = pd.Timestamp.now() - pd.Timedelta(days=60)
+  -
+  -                # Try to parse time_of_call as date/datetime for filtering
+  -                call_times = pd.to_datetime(cad_df['time_of_call'],
+  errors='coerce')
+  -                recent_calls_mask = (call_times >= sixty_days_ago) |
+  call_times.isna()
+  -
+  -                cad_df = cad_df[recent_calls_mask].copy()
+  -                post_filter_count = len(cad_df)
+  -
+  -                reduction_pct = ((pre_filter_count - post_filter_count) /
+  pre_filter_count * 100) if pre_filter_count > 0 else 0
+  -
+  -                self.logger.info(f"🚀 CAD EARLY DATE FILTER: {pre_filter_count:,}
+   → {post_filter_count:,} records "
+  -                               f"({reduction_pct:.1f}% reduction)")
+  -
+  -                if reduction_pct > 50:
+  -                    self.logger.info(f"⚡ CAD Performance boost:
+  {reduction_pct:.1f}% data volume reduction")
+  -
+  -            except Exception as e:
+  -                self.logger.warning(f"CAD early date filtering failed, continuing
+   with full dataset: {e}")
+  -        else:
+  -            self.logger.info("No time_of_call column found, skipping CAD early
+  date filtering")
+  +            # Normalize CAD timestamps instead of filtering
+  +            cad_df['time_of_call'] = cad_df['time_of_call'].apply(lambda x:
+  self.normalize_to_local_ts(pd.to_datetime(x, errors='coerce')))
+  +            normalized_count = cad_df['time_of_call'].notna().sum()
+  +            self.logger.info(f"[COUNT-FIX ORDER] CAD timezone normalization:
+  {initial_cad_count} total, {normalized_count} valid timestamps")
+
+           # ENHANCED: Load call type reference if not provided and perform incident
+   mapping
+           if ref_lookup is None:
+  @@ -1371,6 +1405,14 @@ class ComprehensiveSCRPAFixV8_5:
+
+           # Create lookup keys for joining
+           if not rms_data.empty and not cad_data.empty:
+  +
+  +            # Build canonical merge keys on both datasets
+  +            self.logger.info(f"[COUNT-FIX MERGE] Building canonical merge
+  keys...")
+  +            rms_copy = self.build_canonical_merge_key(rms_copy, 'case_number',
+  'incident_date')
+  +            cad_copy = self.build_canonical_merge_key(cad_copy, 'case_number',
+  'time_of_call')
+  +
+  +            pre_merge_rms_count = len(rms_copy)
+  +            pre_merge_cad_count = len(cad_copy)
+  +
+               # Use case_number as the lookup key for both datasets
+               rms_copy['_lookup_key'] = rms_copy['case_number']
+               cad_copy['_lookup_key'] = cad_copy['case_number']
+  @@ -1378,15 +1420,35 @@ class ComprehensiveSCRPAFixV8_5:
+               # Add _cad suffix to CAD columns (except lookup key)
+               cad_renamed =
+  cad_copy.drop(columns=['_lookup_key']).add_suffix('_cad')
+               cad_renamed['_lookup_key'] = cad_copy['_lookup_key']
+
+  -            # Perform LEFT JOIN on lookup key
+  +            # Perform LEFT JOIN from RMS (driving dataset) to CAD
+               joined_data = rms_copy.merge(
+                   cad_renamed,
+                   on='_lookup_key',
+                   how='left'
+               )
+
+  +            post_merge_count = len(joined_data)
+  +            matched_records = joined_data.dropna(subset=[col for col in
+  joined_data.columns if col.endswith('_cad')]).shape[0]
+  +
+  +            # Check for unmatched CAD records (should be 0 for LEFT join from RMS
+   perspective)
+  +            rms_keys = set(rms_copy['_lookup_key'].dropna())
+  +            cad_keys = set(cad_copy['_lookup_key'].dropna())
+  +            unmatched_cad_keys = cad_keys - rms_keys
+  +
+  +            self.logger.info(f"[COUNT-FIX MERGE] Merge results:")
+  +            self.logger.info(f"  - Driving dataset (RMS): {pre_merge_rms_count}
+  records")
+  +            self.logger.info(f"  - Join dataset (CAD): {pre_merge_cad_count}
+  records")
+  +            self.logger.info(f"  - Post-merge count: {post_merge_count} (should
+  equal RMS input)")
+  +            self.logger.info(f"  - Matched with CAD: {matched_records}")
+  +            self.logger.info(f"  - Unmatched CAD keys:
+  {len(unmatched_cad_keys)}")
+  +
+  +            if len(unmatched_cad_keys) > 0:
+  +                sample_unmatched = list(unmatched_cad_keys)[:10]
+  +                self.logger.info(f"  - Sample unmatched CAD keys:
+  {sample_unmatched}")
+  +
+               # Remove temporary lookup key
+               joined_data = joined_data.drop(columns=['_lookup_key'])
+  +
+  +            # Apply safe deduplication
+  +            joined_data = self.safe_dedupe(joined_data, keys=['_canonical_key'],
+  keep='first')
+
+               # ENHANCED: Implement CAD-first, RMS-fallback logic for response_type
+   and category_type
+               self.logger.info("Implementing CAD-first, RMS-fallback logic for
+  response_type and category_type...")
+  @@ -1531,6 +1593,29 @@ class ComprehensiveSCRPAFixV8_5:
+
+           return result_df
+
+  +    def power_bi_type_hygiene(self, df):
+  +        """Ensure Power BI-ready data types and report data quality"""
+  +        self.logger.info("[DQ-FIX SUMMARY] Power BI Type & Quality Hygiene:")
+  +
+  +        # Critical columns for completeness check
+  +        critical_columns = ['incident_time', 'full_address', 'grid_raw', 'post',
+  'incident_type']
+  +
+  +        # Ensure datetime columns are timezone-naive
+  +        datetime_columns = ['incident_date', 'incident_time', 'time_of_call']
+  +        for col in datetime_columns:
+  +            if col in df.columns:
+  +                if pd.api.types.is_datetime64_any_dtype(df[col]):
+  +                    # Strip timezone if present (Power BI prefers tz-naive)
+  +                    if hasattr(df[col].dtype, 'tz') and df[col].dtype.tz is not
+  None:
+  +                        df[col] = df[col].dt.tz_localize(None)
+  +                    self.logger.info(f"  - {col}: datetime64[ns] (tz-naive) ✓")
+  +
+  +        # Report completeness for critical columns
+  +        for col in critical_columns:
+  +            if col in df.columns:
+  +                non_null_count = df[col].notna().sum()
+  +                total_count = len(df)
+  +                completeness_pct = (non_null_count / total_count * 100) if
+  total_count > 0 else 0
+  +                status = "✓" if completeness_pct >= 80 else "⚠"
+  +                self.logger.info(f"  - {col}: {completeness_pct:.1f}% non-null
+  ({non_null_count}/{total_count}) {status}")
+  +
+  +        return df
+  +
+  +    def check_expected_counts(self, actual_count, cycle="current"):
+  +        """Check actual count against expected baseline"""
+  +        if not self.expected_counts:
+  +            self.logger.info(f"[COUNT-FIX BASELINE] No baseline configured —
+  skipping alert")
+  +            return
+  +
+  +        expected = self.expected_counts.get(cycle,
+  self.expected_counts.get('default'))
+  +        if expected is None:
+  +            self.logger.info(f"[COUNT-FIX BASELINE] No baseline for cycle
+  '{cycle}' — skipping alert")
+  +            return
+  +
+  +        deviation_pct = abs(actual_count - expected) / expected * 100 if expected
+   > 0 else 0
+  +
+  +        if deviation_pct > 20:
+  +            self.logger.warning(f"[COUNT-FIX BASELINE] Count deviation: expected
+  {expected}, got {actual_count} ({deviation_pct:.1f}% diff)")
+  +        else:
+  +            self.logger.info(f"[COUNT-FIX BASELINE] Count within expected range:
+  {actual_count} vs {expected} ({deviation_pct:.1f}% diff)")
+  +
+       def get_rms_column_mapping(self) -> dict:
+           """Get the standardized RMS column mapping to match M Code.""" return {
+  @@ -2631,6 +2716,12 @@ class ComprehensiveSCRPAFixV8_5:
+
+                   # Join RMS and CAD data
+                   joined_data = self.join_datasets_lookup(rms_data, cad_data,
+  ref_lookup, output_dir)
+  +
+  +                # Apply Power BI type hygiene and data quality checks
+  +                joined_data = self.power_bi_type_hygiene(joined_data)
+  +
+  +                # Check against expected baseline
+  +                self.check_expected_counts(len(joined_data),
+  cycle=self.current_cycle or "current")
+
+               # Export validation and summary logging
+               return self._finalize_processing_and_export(joined_data, output_dir)
+
+● Update Todos
+  ⎿  ☒ Reorder filtering logic (period-first, then filter)
+     ☒ Implement timezone normalization and boundary standardization
+     ☒ Harden merge logic with canonical keys and safe dedupe
+     ☒ Replace hard-coded baseline with config-driven expectations
+     ☒ Add Power BI type/null hygiene checks
+     ☒ Generate unified diff patch
+     ☐ Create regression test harness
+
+● B) Minimal Regression Test Harness
+
+  #!/usr/bin/env python3
+  """
+  Record Count Validation Regression Test
+  Tests the fixes for proper record flow, timezone handling, and merge integrity
+  """
+
+  import pandas as pd
+  import numpy as np
+  import pytz
+  from datetime import datetime, timedelta
+  import logging
+  import json
+  from pathlib import Path
+
+  def setup_test_logging():
+      """Setup logging for test harness"""
+      logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+      return logging.getLogger('RecordCountTest')
+
+  def create_boundary_mixed_tz_data():
+      """Create test data around window boundaries with mixed timezones"""
+
+      # Define test boundaries (7-Day: Aug 5-12, 28-Day: Jul 15-Aug 12)
+      seven_day_start = pd.to_datetime('2025-08-05')
+      seven_day_end = pd.to_datetime('2025-08-12')  # End exclusive
+
+      # Create boundary test timestamps in different timezones
+      utc = pytz.UTC
+      eastern = pytz.timezone('America/New_York')
+
+      test_data = []
+      case_id = 1
+
+      # 7-Day boundary tests (mixed timezones)
+      boundary_times = [
+          ('start-1m', seven_day_start - pd.Timedelta(minutes=1)),
+          ('start', seven_day_start),
+          ('start+1m', seven_day_start + pd.Timedelta(minutes=1)),
+          ('end-1m', seven_day_end - pd.Timedelta(minutes=1)),
+          ('end', seven_day_end),  # Should be excluded (end-exclusive)
+          ('end+1m', seven_day_end + pd.Timedelta(minutes=1))
+      ]
+
+      for label, base_time in boundary_times:
+          # Create in UTC timezone
+          utc_time = base_time.tz_localize('UTC')
+          test_data.append({
+              'case_number': f'UTC{case_id:03d}',
+              'incident_date': utc_time,
+              'incident_type': f'TEST {label} UTC',
+              'location': '123 Test St',
+              'boundary_label': label,
+              'timezone_source': 'UTC'
+          })
+          case_id += 1
+
+          # Create in Eastern timezone
+          eastern_time = base_time.tz_localize('America/New_York')
+          test_data.append({
+              'case_number': f'EST{case_id:03d}',
+              'incident_date': eastern_time,
+              'incident_type': f'TEST {label} Eastern',
+              'location': '456 Test Ave',
+              'boundary_label': label,
+              'timezone_source': 'Eastern'
+          })
+          case_id += 1
+
+      # Add some YTD and Historical records
+      test_data.extend([
+          {
+              'case_number': f'YTD{case_id:03d}',
+              'incident_date': pd.to_datetime('2025-01-15').tz_localize('UTC'),
+              'incident_type': 'YTD TEST',
+              'location': '789 YTD St',
+              'boundary_label': 'YTD',
+              'timezone_source': 'UTC'
+          },
+          {
+              'case_number': f'HIST{case_id+1:03d}',
+              'incident_date': pd.to_datetime('2024-12-15').tz_localize('UTC'),
+              'incident_type': 'HISTORICAL TEST',
+              'location': '999 Historical Rd',
+              'boundary_label': 'Historical',
+              'timezone_source': 'UTC'
+          }
+      ])
+
+      return pd.DataFrame(test_data)
+
+  def create_test_cad_data():
+      """Create CAD data with one duplicate and one mismatch"""
+      cad_data = []
+
+      # Matching CAD records
+      for i in range(1, 11):  # First 10 RMS records will have CAD matches
+          cad_data.append({
+              'case_number': f'UTC{i:03d}' if i <= 6 else f'EST{i-6:03d}',
+              'time_of_call': pd.to_datetime('2025-08-05') + pd.Timedelta(hours=i),
+              'incident': f'CAD INCIDENT {i}',
+              'response_type': 'EMERGENCY',
+              'category_type': 'CRIME'
+          })
+
+      # Add duplicate CAD record (same case_number)
+      cad_data.append({
+          'case_number': 'UTC001',  # Duplicate!

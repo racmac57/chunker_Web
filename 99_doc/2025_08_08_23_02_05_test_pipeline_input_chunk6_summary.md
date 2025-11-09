@@ -1,0 +1,756 @@
+# Chunk 6 Summary
+
+https://aka.ms/PSWindows
+
+PS C:\Users\carucci_r> cd C:\Users\carucci_r\Documents\chunker
+PS C:\Users\carucci_r\Documents\chunker> .\test_chunker.ps1
+
+Test file created: test_full_conversation.txt (239 bytes)
+
+Monitoring logs... (Press Ctrl+C to stop)
+2025-06-27 23:18:09,413 [INFO] File stable after 1.0s: test_full_conversation.txt
+2025-06-27 23:18:09,413 [WARNING] File too short (75 chars), skipping: test_full_conversation.txt
+2025-06-27 23:18:09,414 [ERROR] Failed to process: test_full_conversation.txt
+2025-06-27 23:18:10,283 [INFO] Found 1 .txt files in watch folder
+2025-06-27 23:18:11,953 [INFO] Found 1 new files to process
+2025-06-27 23:18:11,954 [INFO] Processing file: test_full_conversation.txt
+2025-06-27 23:18:12,955 [INFO] File stable after 1.0s: test_full_conversation.txt
+2025-06-27 23:18:12,956 [WARNING] File too short (75 chars), skipping: test_full_conversation.txt
+2025-06-27 23:18:12,956 [ERROR] Failed to process: test_full_conversation.txt
+2025-06-27 23:18:14,416 [INFO] Found 1 new files to process
+2025-06-27 23:18:14,417 [INFO] Processing file: test_full_conversation.txt
+2025-06-27 23:18:15,285 [INFO] Found 1 .txt files in watch folder
+2025-06-27 23:18:15,418 [INFO] File stable after 1.0s: test_full_conversation.txt
+2025-06-27 23:18:15,419 [WARNING] File too short (75 chars), skipping: test_full_conversation.txt
+2025-06-27 23:18:15,419 [ERROR] Failed to process: test_full_conversation.txt
+2025-06-27 23:18:15,419 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:18:15,419 [INFO] files_processed: 0
+2025-06-27 23:18:15,419 [INFO] chunks_created: 0
+2025-06-27 23:18:15,419 [INFO] zero_byte_prevented: 0
+2025-06-27 23:18:15,419 [INFO] errors: 360
+2025-06-27 23:18:20,286 [INFO] Found 1 .txt files in watch folder
+2025-06-27 23:18:20,420 [INFO] Found 1 new files to process
+2025-06-27 23:18:20,420 [INFO] Processing file: test_full_conversation.txt
+2025-06-27 23:18:21,422 [INFO] File stable after 1.0s: test_full_conversation.txt
+2025-06-27 23:18:21,517 [INFO] Created 1 chunks from 4 sentences
+2025-06-27 23:18:21,519 [INFO] Created chunk: 2025_06_27_23_18_21_test_full_conversation_chunk1.txt (232 chars)
+2025-06-27 23:18:21,561 [INFO] Copied 1/1 files to cloud
+2025-06-27 23:18:21,562 [INFO] Cloud sync successful: C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Ai_Chats\Cleaned\2025_06_27_23_18_21_test_full_conversation
+2025-06-27 23:18:21,564 [INFO] Moved file to processed: processed\test_full_conversation_1.txt
+2025-06-27 23:18:21,564 [INFO] File processing complete: test_full_conversation.txt \u2192 1 chunks
+2025-06-27 23:18:21,564 [INFO] Successfully processed: test_full_conversation.txt
+2025-06-27 23:18:34,294 [INFO] Enhanced watcher started - monitoring: C:/Users/carucci_r/Documents/chunker
+2025-06-27 23:18:34,294 [INFO] Target pattern: *_full_conversation.txt
+2025-06-27 23:19:16,577 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:19:16,577 [INFO] files_processed: 1
+2025-06-27 23:19:16,577 [INFO] chunks_created: 1
+2025-06-27 23:19:16,577 [INFO] zero_byte_prevented: 0
+2025-06-27 23:19:16,577 [INFO] errors: 360
+2025-06-27 23:19:29,306 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:19:29,306 [INFO] files_processed: 0
+2025-06-27 23:19:29,306 [INFO] chunks_created: 0
+2025-06-27 23:19:29,306 [INFO] zero_byte_prevented: 0
+2025-06-27 23:19:29,306 [INFO] errors: 0
+2025-06-27 23:20:16,587 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:20:16,588 [INFO] files_processed: 1
+2025-06-27 23:20:16,588 [INFO] chunks_created: 1
+2025-06-27 23:20:16,588 [INFO] zero_byte_prevented: 0
+2025-06-27 23:20:16,588 [INFO] errors: 360
+2025-06-27 23:20:29,320 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:20:29,320 [INFO] files_processed: 0
+2025-06-27 23:20:29,320 [INFO] chunks_created: 0
+2025-06-27 23:20:29,320 [INFO] zero_byte_prevented: 0
+2025-06-27 23:20:29,320 [INFO] errors: 0
+2025-06-27 23:21:16,601 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:21:16,602 [INFO] files_processed: 1
+2025-06-27 23:21:16,602 [INFO] chunks_created: 1
+2025-06-27 23:21:16,602 [INFO] zero_byte_prevented: 0
+2025-06-27 23:21:16,602 [INFO] errors: 360
+2025-06-27 23:21:29,333 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:21:29,333 [INFO] files_processed: 0
+2025-06-27 23:21:29,333 [INFO] chunks_created: 0
+2025-06-27 23:21:29,333 [INFO] zero_byte_prevented: 0
+2025-06-27 23:21:29,333 [INFO] errors: 0
+2025-06-27 23:22:16,614 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:22:16,614 [INFO] files_processed: 1
+2025-06-27 23:22:16,614 [INFO] chunks_created: 1
+2025-06-27 23:22:16,614 [INFO] zero_byte_prevented: 0
+2025-06-27 23:22:16,614 [INFO] errors: 360
+2025-06-27 23:22:29,345 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:22:29,345 [INFO] files_processed: 0
+2025-06-27 23:22:29,345 [INFO] chunks_created: 0
+2025-06-27 23:22:29,346 [INFO] zero_byte_prevented: 0
+2025-06-27 23:22:29,346 [INFO] errors: 0
+2025-06-27 23:23:16,624 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:23:16,624 [INFO] files_processed: 1
+2025-06-27 23:23:16,624 [INFO] chunks_created: 1
+2025-06-27 23:23:16,624 [INFO] zero_byte_prevented: 0
+2025-06-27 23:23:16,624 [INFO] errors: 360
+2025-06-27 23:23:29,358 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:23:29,358 [INFO] files_processed: 0
+2025-06-27 23:23:29,359 [INFO] chunks_created: 0
+2025-06-27 23:23:29,359 [INFO] zero_byte_prevented: 0
+2025-06-27 23:23:29,359 [INFO] errors: 0
+2025-06-27 23:24:16,638 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:24:16,638 [INFO] files_processed: 1
+2025-06-27 23:24:16,638 [INFO] chunks_created: 1
+2025-06-27 23:24:16,638 [INFO] zero_byte_prevented: 0
+2025-06-27 23:24:16,638 [INFO] errors: 360
+2025-06-27 23:24:29,372 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:24:29,373 [INFO] files_processed: 0
+2025-06-27 23:24:29,373 [INFO] chunks_created: 0
+2025-06-27 23:24:29,373 [INFO] zero_byte_prevented: 0
+2025-06-27 23:24:29,373 [INFO] errors: 0
+2025-06-27 23:25:16,649 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:25:16,650 [INFO] files_processed: 1
+2025-06-27 23:25:16,650 [INFO] chunks_created: 1
+2025-06-27 23:25:16,650 [INFO] zero_byte_prevented: 0
+2025-06-27 23:25:16,650 [INFO] errors: 360
+2025-06-27 23:25:29,386 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:25:29,386 [INFO] files_processed: 0
+2025-06-27 23:25:29,386 [INFO] chunks_created: 0
+2025-06-27 23:25:29,386 [INFO] zero_byte_prevented: 0
+2025-06-27 23:25:29,387 [INFO] errors: 0
+2025-06-27 23:26:16,662 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:26:16,662 [INFO] files_processed: 1
+2025-06-27 23:26:16,662 [INFO] chunks_created: 1
+2025-06-27 23:26:16,662 [INFO] zero_byte_prevented: 0
+2025-06-27 23:26:16,663 [INFO] errors: 360
+2025-06-27 23:26:29,399 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:26:29,400 [INFO] files_processed: 0
+2025-06-27 23:26:29,400 [INFO] chunks_created: 0
+2025-06-27 23:26:29,400 [INFO] zero_byte_prevented: 0
+2025-06-27 23:26:29,400 [INFO] errors: 0
+2025-06-27 23:27:16,675 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:27:16,676 [INFO] files_processed: 1
+2025-06-27 23:27:16,676 [INFO] chunks_created: 1
+2025-06-27 23:27:16,676 [INFO] zero_byte_prevented: 0
+2025-06-27 23:27:16,676 [INFO] errors: 360
+2025-06-27 23:27:29,411 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:27:29,411 [INFO] files_processed: 0
+2025-06-27 23:27:29,411 [INFO] chunks_created: 0
+2025-06-27 23:27:29,411 [INFO] zero_byte_prevented: 0
+2025-06-27 23:27:29,411 [INFO] errors: 0
+2025-06-27 23:28:16,686 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:28:16,686 [INFO] files_processed: 1
+2025-06-27 23:28:16,686 [INFO] chunks_created: 1
+2025-06-27 23:28:16,687 [INFO] zero_byte_prevented: 0
+2025-06-27 23:28:16,687 [INFO] errors: 360
+2025-06-27 23:28:29,420 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:28:29,420 [INFO] files_processed: 0
+2025-06-27 23:28:29,420 [INFO] chunks_created: 0
+2025-06-27 23:28:29,421 [INFO] zero_byte_prevented: 0
+2025-06-27 23:28:29,421 [INFO] errors: 0
+2025-06-27 23:29:16,698 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:29:16,698 [INFO] files_processed: 1
+2025-06-27 23:29:16,698 [INFO] chunks_created: 1
+2025-06-27 23:29:16,698 [INFO] zero_byte_prevented: 0
+2025-06-27 23:29:16,698 [INFO] errors: 360
+2025-06-27 23:29:29,434 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:29:29,434 [INFO] files_processed: 0
+2025-06-27 23:29:29,434 [INFO] chunks_created: 0
+2025-06-27 23:29:29,434 [INFO] zero_byte_prevented: 0
+2025-06-27 23:29:29,434 [INFO] errors: 0
+2025-06-27 23:30:16,710 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:30:16,710 [INFO] files_processed: 1
+2025-06-27 23:30:16,710 [INFO] chunks_created: 1
+2025-06-27 23:30:16,710 [INFO] zero_byte_prevented: 0
+2025-06-27 23:30:16,710 [INFO] errors: 360
+2025-06-27 23:30:29,447 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:30:29,448 [INFO] files_processed: 0
+2025-06-27 23:30:29,448 [INFO] chunks_created: 0
+2025-06-27 23:30:29,449 [INFO] zero_byte_prevented: 0
+2025-06-27 23:30:29,449 [INFO] errors: 0
+2025-06-27 23:31:16,723 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:31:16,724 [INFO] files_processed: 1
+2025-06-27 23:31:16,724 [INFO] chunks_created: 1
+2025-06-27 23:31:16,724 [INFO] zero_byte_prevented: 0
+2025-06-27 23:31:16,724 [INFO] errors: 360
+2025-06-27 23:31:29,460 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:31:29,462 [INFO] files_processed: 0
+2025-06-27 23:31:29,462 [INFO] chunks_created: 0
+2025-06-27 23:31:29,462 [INFO] zero_byte_prevented: 0
+2025-06-27 23:31:29,462 [INFO] errors: 0
+2025-06-27 23:32:16,741 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:32:16,741 [INFO] files_processed: 1
+2025-06-27 23:32:16,741 [INFO] chunks_created: 1
+2025-06-27 23:32:16,741 [INFO] zero_byte_prevented: 0
+2025-06-27 23:32:16,741 [INFO] errors: 360
+2025-06-27 23:32:29,474 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:32:29,475 [INFO] files_processed: 0
+2025-06-27 23:32:29,475 [INFO] chunks_created: 0
+2025-06-27 23:32:29,475 [INFO] zero_byte_prevented: 0
+2025-06-27 23:32:29,475 [INFO] errors: 0
+2025-06-27 23:33:16,754 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:33:16,754 [INFO] files_processed: 1
+2025-06-27 23:33:16,754 [INFO] chunks_created: 1
+2025-06-27 23:33:16,754 [INFO] zero_byte_prevented: 0
+2025-06-27 23:33:16,755 [INFO] errors: 360
+2025-06-27 23:33:29,486 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:33:29,486 [INFO] files_processed: 0
+2025-06-27 23:33:29,487 [INFO] chunks_created: 0
+2025-06-27 23:33:29,487 [INFO] zero_byte_prevented: 0
+2025-06-27 23:33:29,487 [INFO] errors: 0
+2025-06-27 23:34:16,767 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:34:16,767 [INFO] files_processed: 1
+2025-06-27 23:34:16,768 [INFO] chunks_created: 1
+2025-06-27 23:34:16,768 [INFO] zero_byte_prevented: 0
+2025-06-27 23:34:16,768 [INFO] errors: 360
+2025-06-27 23:34:29,499 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:34:29,499 [INFO] files_processed: 0
+2025-06-27 23:34:29,500 [INFO] chunks_created: 0
+2025-06-27 23:34:29,500 [INFO] zero_byte_prevented: 0
+2025-06-27 23:34:29,500 [INFO] errors: 0
+2025-06-27 23:35:16,781 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:35:16,781 [INFO] files_processed: 1
+2025-06-27 23:35:16,781 [INFO] chunks_created: 1
+2025-06-27 23:35:16,781 [INFO] zero_byte_prevented: 0
+2025-06-27 23:35:16,781 [INFO] errors: 360
+2025-06-27 23:35:29,511 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:35:29,512 [INFO] files_processed: 0
+2025-06-27 23:35:29,512 [INFO] chunks_created: 0
+2025-06-27 23:35:29,512 [INFO] zero_byte_prevented: 0
+2025-06-27 23:35:29,512 [INFO] errors: 0
+2025-06-27 23:36:16,792 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:36:16,792 [INFO] files_processed: 1
+2025-06-27 23:36:16,792 [INFO] chunks_created: 1
+2025-06-27 23:36:16,792 [INFO] zero_byte_prevented: 0
+2025-06-27 23:36:16,792 [INFO] errors: 360
+2025-06-27 23:36:29,524 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:36:29,524 [INFO] files_processed: 0
+2025-06-27 23:36:29,524 [INFO] chunks_created: 0
+2025-06-27 23:36:29,524 [INFO] zero_byte_prevented: 0
+2025-06-27 23:36:29,524 [INFO] errors: 0
+2025-06-27 23:37:16,808 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:37:16,808 [INFO] files_processed: 1
+2025-06-27 23:37:16,808 [INFO] chunks_created: 1
+2025-06-27 23:37:16,808 [INFO] zero_byte_prevented: 0
+2025-06-27 23:37:16,808 [INFO] errors: 360
+2025-06-27 23:37:29,538 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:37:29,539 [INFO] files_processed: 0
+2025-06-27 23:37:29,539 [INFO] chunks_created: 0
+2025-06-27 23:37:29,539 [INFO] zero_byte_prevented: 0
+2025-06-27 23:37:29,539 [INFO] errors: 0
+2025-06-27 23:38:16,823 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:38:16,823 [INFO] files_processed: 1
+2025-06-27 23:38:16,823 [INFO] chunks_created: 1
+2025-06-27 23:38:16,823 [INFO] zero_byte_prevented: 0
+2025-06-27 23:38:16,823 [INFO] errors: 360
+2025-06-27 23:38:29,549 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:38:29,550 [INFO] files_processed: 0
+2025-06-27 23:38:29,550 [INFO] chunks_created: 0
+2025-06-27 23:38:29,550 [INFO] zero_byte_prevented: 0
+2025-06-27 23:38:29,550 [INFO] errors: 0
+2025-06-27 23:39:16,838 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:39:16,838 [INFO] files_processed: 1
+2025-06-27 23:39:16,838 [INFO] chunks_created: 1
+2025-06-27 23:39:16,838 [INFO] zero_byte_prevented: 0
+2025-06-27 23:39:16,838 [INFO] errors: 360
+2025-06-27 23:39:29,562 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:39:29,562 [INFO] files_processed: 0
+2025-06-27 23:39:29,562 [INFO] chunks_created: 0
+2025-06-27 23:39:29,562 [INFO] zero_byte_prevented: 0
+2025-06-27 23:39:29,562 [INFO] errors: 0
+2025-06-27 23:40:16,850 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:40:16,850 [INFO] files_processed: 1
+2025-06-27 23:40:16,851 [INFO] chunks_created: 1
+2025-06-27 23:40:16,851 [INFO] zero_byte_prevented: 0
+2025-06-27 23:40:16,851 [INFO] errors: 360
+2025-06-27 23:40:29,575 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:40:29,575 [INFO] files_processed: 0
+2025-06-27 23:40:29,575 [INFO] chunks_created: 0
+2025-06-27 23:40:29,575 [INFO] zero_byte_prevented: 0
+2025-06-27 23:40:29,576 [INFO] errors: 0
+2025-06-27 23:41:16,862 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:41:16,862 [INFO] files_processed: 1
+2025-06-27 23:41:16,863 [INFO] chunks_created: 1
+2025-06-27 23:41:16,863 [INFO] zero_byte_prevented: 0
+2025-06-27 23:41:16,863 [INFO] errors: 360
+2025-06-27 23:41:29,587 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:41:29,588 [INFO] files_processed: 0
+2025-06-27 23:41:29,588 [INFO] chunks_created: 0
+2025-06-27 23:41:29,588 [INFO] zero_byte_prevented: 0
+2025-06-27 23:41:29,588 [INFO] errors: 0
+2025-06-27 23:42:16,874 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:42:16,874 [INFO] files_processed: 1
+2025-06-27 23:42:16,874 [INFO] chunks_created: 1
+2025-06-27 23:42:16,874 [INFO] zero_byte_prevented: 0
+2025-06-27 23:42:16,874 [INFO] errors: 360
+2025-06-27 23:42:29,601 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:42:29,601 [INFO] files_processed: 0
+2025-06-27 23:42:29,601 [INFO] chunks_created: 0
+2025-06-27 23:42:29,601 [INFO] zero_byte_prevented: 0
+2025-06-27 23:42:29,601 [INFO] errors: 0
+2025-06-27 23:43:16,887 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:43:16,887 [INFO] files_processed: 1
+2025-06-27 23:43:16,887 [INFO] chunks_created: 1
+2025-06-27 23:43:16,887 [INFO] zero_byte_prevented: 0
+2025-06-27 23:43:16,887 [INFO] errors: 360
+2025-06-27 23:43:29,615 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:43:29,615 [INFO] files_processed: 0
+2025-06-27 23:43:29,615 [INFO] chunks_created: 0
+2025-06-27 23:43:29,615 [INFO] zero_byte_prevented: 0
+2025-06-27 23:43:29,616 [INFO] errors: 0
+2025-06-27 23:44:16,900 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:44:16,901 [INFO] files_processed: 1
+2025-06-27 23:44:16,901 [INFO] chunks_created: 1
+2025-06-27 23:44:16,901 [INFO] zero_byte_prevented: 0
+2025-06-27 23:44:16,901 [INFO] errors: 360
+2025-06-27 23:44:29,629 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:44:29,629 [INFO] files_processed: 0
+2025-06-27 23:44:29,629 [INFO] chunks_created: 0
+2025-06-27 23:44:29,629 [INFO] zero_byte_prevented: 0
+2025-06-27 23:44:29,630 [INFO] errors: 0
+2025-06-27 23:45:16,914 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:45:16,914 [INFO] files_processed: 1
+2025-06-27 23:45:16,914 [INFO] chunks_created: 1
+2025-06-27 23:45:16,915 [INFO] zero_byte_prevented: 0
+2025-06-27 23:45:16,915 [INFO] errors: 360
+2025-06-27 23:45:29,641 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:45:29,642 [INFO] files_processed: 0
+2025-06-27 23:45:29,642 [INFO] chunks_created: 0
+2025-06-27 23:45:29,642 [INFO] zero_byte_prevented: 0
+2025-06-27 23:45:29,642 [INFO] errors: 0
+2025-06-27 23:46:16,930 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:46:16,930 [INFO] files_processed: 1
+2025-06-27 23:46:16,930 [INFO] chunks_created: 1
+2025-06-27 23:46:16,930 [INFO] zero_byte_prevented: 0
+2025-06-27 23:46:16,930 [INFO] errors: 360
+2025-06-27 23:46:29,655 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:46:29,655 [INFO] files_processed: 0
+2025-06-27 23:46:29,655 [INFO] chunks_created: 0
+2025-06-27 23:46:29,655 [INFO] zero_byte_prevented: 0
+2025-06-27 23:46:29,655 [INFO] errors: 0
+2025-06-27 23:47:16,943 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:47:16,943 [INFO] files_processed: 1
+2025-06-27 23:47:16,943 [INFO] chunks_created: 1
+2025-06-27 23:47:16,944 [INFO] zero_byte_prevented: 0
+2025-06-27 23:47:16,944 [INFO] errors: 360
+2025-06-27 23:47:29,667 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:47:29,667 [INFO] files_processed: 0
+2025-06-27 23:47:29,667 [INFO] chunks_created: 0
+2025-06-27 23:47:29,667 [INFO] zero_byte_prevented: 0
+2025-06-27 23:47:29,667 [INFO] errors: 0
+2025-06-27 23:48:16,956 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:48:16,956 [INFO] files_processed: 1
+2025-06-27 23:48:16,958 [INFO] chunks_created: 1
+2025-06-27 23:48:16,958 [INFO] zero_byte_prevented: 0
+2025-06-27 23:48:16,958 [INFO] errors: 360
+2025-06-27 23:48:29,680 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:48:29,681 [INFO] files_processed: 0
+2025-06-27 23:48:29,681 [INFO] chunks_created: 0
+2025-06-27 23:48:29,681 [INFO] zero_byte_prevented: 0
+2025-06-27 23:48:29,681 [INFO] errors: 0
+2025-06-27 23:49:16,972 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:49:16,972 [INFO] files_processed: 1
+2025-06-27 23:49:16,972 [INFO] chunks_created: 1
+2025-06-27 23:49:16,972 [INFO] zero_byte_prevented: 0
+2025-06-27 23:49:16,972 [INFO] errors: 360
+2025-06-27 23:49:29,692 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:49:29,692 [INFO] files_processed: 0
+2025-06-27 23:49:29,692 [INFO] chunks_created: 0
+2025-06-27 23:49:29,692 [INFO] zero_byte_prevented: 0
+2025-06-27 23:49:29,692 [INFO] errors: 0
+2025-06-27 23:50:16,987 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:50:16,987 [INFO] files_processed: 1
+2025-06-27 23:50:16,987 [INFO] chunks_created: 1
+2025-06-27 23:50:16,988 [INFO] zero_byte_prevented: 0
+2025-06-27 23:50:16,988 [INFO] errors: 360
+2025-06-27 23:50:29,704 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:50:29,704 [INFO] files_processed: 0
+2025-06-27 23:50:29,705 [INFO] chunks_created: 0
+2025-06-27 23:50:29,705 [INFO] zero_byte_prevented: 0
+2025-06-27 23:50:29,705 [INFO] errors: 0
+2025-06-27 23:51:17,000 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:51:17,000 [INFO] files_processed: 1
+2025-06-27 23:51:17,001 [INFO] chunks_created: 1
+2025-06-27 23:51:17,001 [INFO] zero_byte_prevented: 0
+2025-06-27 23:51:17,001 [INFO] errors: 360
+2025-06-27 23:51:29,717 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:51:29,717 [INFO] files_processed: 0
+2025-06-27 23:51:29,717 [INFO] chunks_created: 0
+2025-06-27 23:51:29,717 [INFO] zero_byte_prevented: 0
+2025-06-27 23:51:29,717 [INFO] errors: 0
+2025-06-27 23:52:17,013 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:52:17,013 [INFO] files_processed: 1
+2025-06-27 23:52:17,013 [INFO] chunks_created: 1
+2025-06-27 23:52:17,013 [INFO] zero_byte_prevented: 0
+2025-06-27 23:52:17,013 [INFO] errors: 360
+2025-06-27 23:52:29,729 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:52:29,729 [INFO] files_processed: 0
+2025-06-27 23:52:29,730 [INFO] chunks_created: 0
+2025-06-27 23:52:29,730 [INFO] zero_byte_prevented: 0
+2025-06-27 23:52:29,730 [INFO] errors: 0
+2025-06-27 23:53:17,028 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:53:17,028 [INFO] files_processed: 1
+2025-06-27 23:53:17,028 [INFO] chunks_created: 1
+2025-06-27 23:53:17,028 [INFO] zero_byte_prevented: 0
+2025-06-27 23:53:17,028 [INFO] errors: 360
+2025-06-27 23:53:29,744 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:53:29,744 [INFO] files_processed: 0
+2025-06-27 23:53:29,744 [INFO] chunks_created: 0
+2025-06-27 23:53:29,744 [INFO] zero_byte_prevented: 0
+2025-06-27 23:53:29,744 [INFO] errors: 0
+2025-06-27 23:54:17,041 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:54:17,042 [INFO] files_processed: 1
+2025-06-27 23:54:17,042 [INFO] chunks_created: 1
+2025-06-27 23:54:17,042 [INFO] zero_byte_prevented: 0
+2025-06-27 23:54:17,042 [INFO] errors: 360
+2025-06-27 23:54:29,759 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:54:29,760 [INFO] files_processed: 0
+2025-06-27 23:54:29,760 [INFO] chunks_created: 0
+2025-06-27 23:54:29,760 [INFO] zero_byte_prevented: 0
+2025-06-27 23:54:29,761 [INFO] errors: 0
+2025-06-27 23:55:17,057 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:55:17,057 [INFO] files_processed: 1
+2025-06-27 23:55:17,057 [INFO] chunks_created: 1
+2025-06-27 23:55:17,057 [INFO] zero_byte_prevented: 0
+2025-06-27 23:55:17,057 [INFO] errors: 360
+2025-06-27 23:55:29,776 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:55:29,776 [INFO] files_processed: 0
+2025-06-27 23:55:29,776 [INFO] chunks_created: 0
+2025-06-27 23:55:29,776 [INFO] zero_byte_prevented: 0
+2025-06-27 23:55:29,776 [INFO] errors: 0
+2025-06-27 23:56:17,069 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:56:17,069 [INFO] files_processed: 1
+2025-06-27 23:56:17,070 [INFO] chunks_created: 1
+2025-06-27 23:56:17,070 [INFO] zero_byte_prevented: 0
+2025-06-27 23:56:17,070 [INFO] errors: 360
+2025-06-27 23:56:29,792 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:56:29,792 [INFO] files_processed: 0
+2025-06-27 23:56:29,793 [INFO] chunks_created: 0
+2025-06-27 23:56:29,793 [INFO] zero_byte_prevented: 0
+2025-06-27 23:56:29,793 [INFO] errors: 0
+2025-06-27 23:57:17,082 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:57:17,082 [INFO] files_processed: 1
+2025-06-27 23:57:17,082 [INFO] chunks_created: 1
+2025-06-27 23:57:17,082 [INFO] zero_byte_prevented: 0
+2025-06-27 23:57:17,082 [INFO] errors: 360
+2025-06-27 23:57:29,809 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:57:29,810 [INFO] files_processed: 0
+2025-06-27 23:57:29,810 [INFO] chunks_created: 0
+2025-06-27 23:57:29,810 [INFO] zero_byte_prevented: 0
+2025-06-27 23:57:29,810 [INFO] errors: 0
+2025-06-27 23:58:17,094 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:58:17,094 [INFO] files_processed: 1
+2025-06-27 23:58:17,094 [INFO] chunks_created: 1
+2025-06-27 23:58:17,094 [INFO] zero_byte_prevented: 0
+2025-06-27 23:58:17,094 [INFO] errors: 360
+2025-06-27 23:58:29,823 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:58:29,823 [INFO] files_processed: 0
+2025-06-27 23:58:29,824 [INFO] chunks_created: 0
+2025-06-27 23:58:29,824 [INFO] zero_byte_prevented: 0
+2025-06-27 23:58:29,824 [INFO] errors: 0
+2025-06-27 23:59:17,107 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:59:17,107 [INFO] files_processed: 1
+2025-06-27 23:59:17,107 [INFO] chunks_created: 1
+2025-06-27 23:59:17,108 [INFO] zero_byte_prevented: 0
+2025-06-27 23:59:17,108 [INFO] errors: 360
+2025-06-27 23:59:29,836 [INFO] === SESSION STATISTICS ===
+2025-06-27 23:59:29,836 [INFO] files_processed: 0
+2025-06-27 23:59:29,836 [INFO] chunks_created: 0
+2025-06-27 23:59:29,836 [INFO] zero_byte_prevented: 0
+2025-06-27 23:59:29,836 [INFO] errors: 0
+2025-06-28 00:00:17,122 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:00:17,122 [INFO] files_processed: 1
+2025-06-28 00:00:17,123 [INFO] chunks_created: 1
+2025-06-28 00:00:17,123 [INFO] zero_byte_prevented: 0
+2025-06-28 00:00:17,123 [INFO] errors: 360
+2025-06-28 00:00:29,847 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:00:29,847 [INFO] files_processed: 0
+2025-06-28 00:00:29,849 [INFO] chunks_created: 0
+2025-06-28 00:00:29,849 [INFO] zero_byte_prevented: 0
+2025-06-28 00:00:29,849 [INFO] errors: 0
+2025-06-28 00:01:17,135 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:01:17,135 [INFO] files_processed: 1
+2025-06-28 00:01:17,135 [INFO] chunks_created: 1
+2025-06-28 00:01:17,136 [INFO] zero_byte_prevented: 0
+2025-06-28 00:01:17,136 [INFO] errors: 360
+2025-06-28 00:01:29,861 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:01:29,861 [INFO] files_processed: 0
+2025-06-28 00:01:29,861 [INFO] chunks_created: 0
+2025-06-28 00:01:29,861 [INFO] zero_byte_prevented: 0
+2025-06-28 00:01:29,861 [INFO] errors: 0
+2025-06-28 00:02:17,148 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:02:17,149 [INFO] files_processed: 1
+2025-06-28 00:02:17,149 [INFO] chunks_created: 1
+2025-06-28 00:02:17,149 [INFO] zero_byte_prevented: 0
+2025-06-28 00:02:17,149 [INFO] errors: 360
+2025-06-28 00:02:29,874 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:02:29,874 [INFO] files_processed: 0
+2025-06-28 00:02:29,874 [INFO] chunks_created: 0
+2025-06-28 00:02:29,874 [INFO] zero_byte_prevented: 0
+2025-06-28 00:02:29,875 [INFO] errors: 0
+2025-06-28 00:03:17,161 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:03:17,161 [INFO] files_processed: 1
+2025-06-28 00:03:17,162 [INFO] chunks_created: 1
+2025-06-28 00:03:17,162 [INFO] zero_byte_prevented: 0
+2025-06-28 00:03:17,162 [INFO] errors: 360
+2025-06-28 00:03:29,887 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:03:29,887 [INFO] files_processed: 0
+2025-06-28 00:03:29,887 [INFO] chunks_created: 0
+2025-06-28 00:03:29,887 [INFO] zero_byte_prevented: 0
+2025-06-28 00:03:29,887 [INFO] errors: 0
+2025-06-28 00:04:17,174 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:04:17,174 [INFO] files_processed: 1
+2025-06-28 00:04:17,174 [INFO] chunks_created: 1
+2025-06-28 00:04:17,174 [INFO] zero_byte_prevented: 0
+2025-06-28 00:04:17,174 [INFO] errors: 360
+2025-06-28 00:04:29,900 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:04:29,900 [INFO] files_processed: 0
+2025-06-28 00:04:29,900 [INFO] chunks_created: 0
+2025-06-28 00:04:29,900 [INFO] zero_byte_prevented: 0
+2025-06-28 00:04:29,900 [INFO] errors: 0
+2025-06-28 00:05:17,186 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:05:17,186 [INFO] files_processed: 1
+2025-06-28 00:05:17,187 [INFO] chunks_created: 1
+2025-06-28 00:05:17,187 [INFO] zero_byte_prevented: 0
+2025-06-28 00:05:17,187 [INFO] errors: 360
+2025-06-28 00:05:29,914 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:05:29,914 [INFO] files_processed: 0
+2025-06-28 00:05:29,914 [INFO] chunks_created: 0
+2025-06-28 00:05:29,915 [INFO] zero_byte_prevented: 0
+2025-06-28 00:05:29,915 [INFO] errors: 0
+2025-06-28 00:06:17,200 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:06:17,200 [INFO] files_processed: 1
+2025-06-28 00:06:17,200 [INFO] chunks_created: 1
+2025-06-28 00:06:17,200 [INFO] zero_byte_prevented: 0
+2025-06-28 00:06:17,200 [INFO] errors: 360
+2025-06-28 00:06:29,925 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:06:29,925 [INFO] files_processed: 0
+2025-06-28 00:06:29,925 [INFO] chunks_created: 0
+2025-06-28 00:06:29,925 [INFO] zero_byte_prevented: 0
+2025-06-28 00:06:29,925 [INFO] errors: 0
+2025-06-28 00:07:17,173 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:07:17,173 [INFO] files_processed: 1
+2025-06-28 00:07:17,173 [INFO] chunks_created: 1
+2025-06-28 00:07:17,173 [INFO] zero_byte_prevented: 0
+2025-06-28 00:07:17,173 [INFO] errors: 360
+2025-06-28 00:07:29,891 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:07:29,891 [INFO] files_processed: 0
+2025-06-28 00:07:29,891 [INFO] chunks_created: 0
+2025-06-28 00:07:29,892 [INFO] zero_byte_prevented: 0
+2025-06-28 00:07:29,892 [INFO] errors: 0
+2025-06-28 00:08:17,140 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:08:17,140 [INFO] files_processed: 1
+2025-06-28 00:08:17,140 [INFO] chunks_created: 1
+2025-06-28 00:08:17,141 [INFO] zero_byte_prevented: 0
+2025-06-28 00:08:17,141 [INFO] errors: 360
+2025-06-28 00:08:29,857 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:08:29,857 [INFO] files_processed: 0
+2025-06-28 00:08:29,857 [INFO] chunks_created: 0
+2025-06-28 00:08:29,857 [INFO] zero_byte_prevented: 0
+2025-06-28 00:08:29,857 [INFO] errors: 0
+2025-06-28 00:09:17,106 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:09:17,106 [INFO] files_processed: 1
+2025-06-28 00:09:17,106 [INFO] chunks_created: 1
+2025-06-28 00:09:17,107 [INFO] zero_byte_prevented: 0
+2025-06-28 00:09:17,107 [INFO] errors: 360
+2025-06-28 00:09:29,825 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:09:29,825 [INFO] files_processed: 0
+2025-06-28 00:09:29,825 [INFO] chunks_created: 0
+2025-06-28 00:09:29,825 [INFO] zero_byte_prevented: 0
+2025-06-28 00:09:29,825 [INFO] errors: 0
+2025-06-28 00:10:17,071 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:10:17,071 [INFO] files_processed: 1
+2025-06-28 00:10:17,071 [INFO] chunks_created: 1
+2025-06-28 00:10:17,071 [INFO] zero_byte_prevented: 0
+2025-06-28 00:10:17,072 [INFO] errors: 360
+2025-06-28 00:10:29,792 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:10:29,792 [INFO] files_processed: 0
+2025-06-28 00:10:29,792 [INFO] chunks_created: 0
+2025-06-28 00:10:29,792 [INFO] zero_byte_prevented: 0
+2025-06-28 00:10:29,792 [INFO] errors: 0
+2025-06-28 00:11:17,038 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:11:17,039 [INFO] files_processed: 1
+2025-06-28 00:11:17,039 [INFO] chunks_created: 1
+2025-06-28 00:11:17,039 [INFO] zero_byte_prevented: 0
+2025-06-28 00:11:17,039 [INFO] errors: 360
+2025-06-28 00:11:29,759 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:11:29,759 [INFO] files_processed: 0
+2025-06-28 00:11:29,760 [INFO] chunks_created: 0
+2025-06-28 00:11:29,760 [INFO] zero_byte_prevented: 0
+2025-06-28 00:11:29,760 [INFO] errors: 0
+2025-06-28 00:12:17,044 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:12:17,044 [INFO] files_processed: 1
+2025-06-28 00:12:17,044 [INFO] chunks_created: 1
+2025-06-28 00:12:17,044 [INFO] zero_byte_prevented: 0
+2025-06-28 00:12:17,045 [INFO] errors: 360
+2025-06-28 00:12:29,769 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:12:29,769 [INFO] files_processed: 0
+2025-06-28 00:12:29,769 [INFO] chunks_created: 0
+2025-06-28 00:12:29,771 [INFO] zero_byte_prevented: 0
+2025-06-28 00:12:29,771 [INFO] errors: 0
+2025-06-28 00:13:17,062 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:13:17,062 [INFO] files_processed: 1
+2025-06-28 00:13:17,062 [INFO] chunks_created: 1
+2025-06-28 00:13:17,062 [INFO] zero_byte_prevented: 0
+2025-06-28 00:13:17,062 [INFO] errors: 360
+2025-06-28 00:13:29,783 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:13:29,783 [INFO] files_processed: 0
+2025-06-28 00:13:29,783 [INFO] chunks_created: 0
+2025-06-28 00:13:29,783 [INFO] zero_byte_prevented: 0
+2025-06-28 00:13:29,783 [INFO] errors: 0
+2025-06-28 00:14:17,074 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:14:17,074 [INFO] files_processed: 1
+2025-06-28 00:14:17,075 [INFO] chunks_created: 1
+2025-06-28 00:14:17,075 [INFO] zero_byte_prevented: 0
+2025-06-28 00:14:17,075 [INFO] errors: 360
+2025-06-28 00:14:29,797 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:14:29,797 [INFO] files_processed: 0
+2025-06-28 00:14:29,797 [INFO] chunks_created: 0
+2025-06-28 00:14:29,797 [INFO] zero_byte_prevented: 0
+2025-06-28 00:14:29,797 [INFO] errors: 0
+2025-06-28 00:15:17,088 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:15:17,088 [INFO] files_processed: 1
+2025-06-28 00:15:17,088 [INFO] chunks_created: 1
+2025-06-28 00:15:17,088 [INFO] zero_byte_prevented: 0
+2025-06-28 00:15:17,088 [INFO] errors: 360
+2025-06-28 00:15:29,809 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:15:29,809 [INFO] files_processed: 0
+2025-06-28 00:15:29,809 [INFO] chunks_created: 0
+2025-06-28 00:15:29,809 [INFO] zero_byte_prevented: 0
+2025-06-28 00:15:29,809 [INFO] errors: 0
+2025-06-28 00:16:17,100 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:16:17,100 [INFO] files_processed: 1
+2025-06-28 00:16:17,100 [INFO] chunks_created: 1
+2025-06-28 00:16:17,100 [INFO] zero_byte_prevented: 0
+2025-06-28 00:16:17,101 [INFO] errors: 360
+2025-06-28 00:16:29,821 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:16:29,822 [INFO] files_processed: 0
+2025-06-28 00:16:29,822 [INFO] chunks_created: 0
+2025-06-28 00:16:29,822 [INFO] zero_byte_prevented: 0
+2025-06-28 00:16:29,822 [INFO] errors: 0
+2025-06-28 00:17:17,113 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:17:17,114 [INFO] files_processed: 1
+2025-06-28 00:17:17,114 [INFO] chunks_created: 1
+2025-06-28 00:17:17,114 [INFO] zero_byte_prevented: 0
+2025-06-28 00:17:17,114 [INFO] errors: 360
+2025-06-28 00:17:29,836 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:17:29,836 [INFO] files_processed: 0
+2025-06-28 00:17:29,837 [INFO] chunks_created: 0
+2025-06-28 00:17:29,837 [INFO] zero_byte_prevented: 0
+2025-06-28 00:17:29,837 [INFO] errors: 0
+2025-06-28 00:18:17,124 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:18:17,124 [INFO] files_processed: 1
+2025-06-28 00:18:17,125 [INFO] chunks_created: 1
+2025-06-28 00:18:17,125 [INFO] zero_byte_prevented: 0
+2025-06-28 00:18:17,125 [INFO] errors: 360
+2025-06-28 00:18:29,848 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:18:29,849 [INFO] files_processed: 0
+2025-06-28 00:18:29,849 [INFO] chunks_created: 0
+2025-06-28 00:18:29,849 [INFO] zero_byte_prevented: 0
+2025-06-28 00:18:29,849 [INFO] errors: 0
+2025-06-28 00:19:17,136 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:19:17,137 [INFO] files_processed: 1
+2025-06-28 00:19:17,137 [INFO] chunks_created: 1
+2025-06-28 00:19:17,137 [INFO] zero_byte_prevented: 0
+2025-06-28 00:19:17,137 [INFO] errors: 360
+2025-06-28 00:19:29,859 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:19:29,860 [INFO] files_processed: 0
+2025-06-28 00:19:29,860 [INFO] chunks_created: 0
+2025-06-28 00:19:29,860 [INFO] zero_byte_prevented: 0
+2025-06-28 00:19:29,860 [INFO] errors: 0
+2025-06-28 00:20:17,149 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:20:17,150 [INFO] files_processed: 1
+2025-06-28 00:20:17,150 [INFO] chunks_created: 1
+2025-06-28 00:20:17,150 [INFO] zero_byte_prevented: 0
+2025-06-28 00:20:17,151 [INFO] errors: 360
+2025-06-28 00:20:29,872 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:20:29,873 [INFO] files_processed: 0
+2025-06-28 00:20:29,873 [INFO] chunks_created: 0
+2025-06-28 00:20:29,873 [INFO] zero_byte_prevented: 0
+2025-06-28 00:20:29,873 [INFO] errors: 0
+2025-06-28 00:21:17,163 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:21:17,163 [INFO] files_processed: 1
+2025-06-28 00:21:17,163 [INFO] chunks_created: 1
+2025-06-28 00:21:17,163 [INFO] zero_byte_prevented: 0
+2025-06-28 00:21:17,163 [INFO] errors: 360
+2025-06-28 00:21:29,886 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:21:29,886 [INFO] files_processed: 0
+2025-06-28 00:21:29,886 [INFO] chunks_created: 0
+2025-06-28 00:21:29,886 [INFO] zero_byte_prevented: 0
+2025-06-28 00:21:29,886 [INFO] errors: 0
+2025-06-28 00:22:17,176 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:22:17,176 [INFO] files_processed: 1
+2025-06-28 00:22:17,176 [INFO] chunks_created: 1
+2025-06-28 00:22:17,176 [INFO] zero_byte_prevented: 0
+2025-06-28 00:22:17,176 [INFO] errors: 360
+2025-06-28 00:22:29,898 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:22:29,898 [INFO] files_processed: 0
+2025-06-28 00:22:29,899 [INFO] chunks_created: 0
+2025-06-28 00:22:29,899 [INFO] zero_byte_prevented: 0
+2025-06-28 00:22:29,899 [INFO] errors: 0
+2025-06-28 00:23:17,188 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:23:17,188 [INFO] files_processed: 1
+2025-06-28 00:23:17,188 [INFO] chunks_created: 1
+2025-06-28 00:23:17,189 [INFO] zero_byte_prevented: 0
+2025-06-28 00:23:17,189 [INFO] errors: 360
+2025-06-28 00:23:29,911 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:23:29,912 [INFO] files_processed: 0
+2025-06-28 00:23:29,912 [INFO] chunks_created: 0
+2025-06-28 00:23:29,912 [INFO] zero_byte_prevented: 0
+2025-06-28 00:23:29,912 [INFO] errors: 0
+2025-06-28 00:24:17,203 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:24:17,204 [INFO] files_processed: 1
+2025-06-28 00:24:17,204 [INFO] chunks_created: 1
+2025-06-28 00:24:17,204 [INFO] zero_byte_prevented: 0
+2025-06-28 00:24:17,204 [INFO] errors: 360
+2025-06-28 00:24:29,924 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:24:29,924 [INFO] files_processed: 0
+2025-06-28 00:24:29,924 [INFO] chunks_created: 0
+2025-06-28 00:24:29,924 [INFO] zero_byte_prevented: 0
+2025-06-28 00:24:29,924 [INFO] errors: 0
+2025-06-28 00:25:17,215 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:25:17,215 [INFO] files_processed: 1
+2025-06-28 00:25:17,215 [INFO] chunks_created: 1
+2025-06-28 00:25:17,215 [INFO] zero_byte_prevented: 0
+2025-06-28 00:25:17,216 [INFO] errors: 360
+2025-06-28 00:25:29,937 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:25:29,938 [INFO] files_processed: 0
+2025-06-28 00:25:29,938 [INFO] chunks_created: 0
+2025-06-28 00:25:29,938 [INFO] zero_byte_prevented: 0
+2025-06-28 00:25:29,938 [INFO] errors: 0
+2025-06-28 00:26:17,229 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:26:17,229 [INFO] files_processed: 1
+2025-06-28 00:26:17,229 [INFO] chunks_created: 1
+2025-06-28 00:26:17,229 [INFO] zero_byte_prevented: 0
+2025-06-28 00:26:17,230 [INFO] errors: 360
+2025-06-28 00:26:29,951 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:26:29,951 [INFO] files_processed: 0
+2025-06-28 00:26:29,951 [INFO] chunks_created: 0
+2025-06-28 00:26:29,951 [INFO] zero_byte_prevented: 0
+2025-06-28 00:26:29,952 [INFO] errors: 0
+2025-06-28 00:27:17,242 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:27:17,242 [INFO] files_processed: 1
+2025-06-28 00:27:17,243 [INFO] chunks_created: 1
+2025-06-28 00:27:17,244 [INFO] zero_byte_prevented: 0
+2025-06-28 00:27:17,244 [INFO] errors: 360
+2025-06-28 00:27:29,964 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:27:29,964 [INFO] files_processed: 0
+2025-06-28 00:27:29,964 [INFO] chunks_created: 0
+2025-06-28 00:27:29,964 [INFO] zero_byte_prevented: 0
+2025-06-28 00:27:29,964 [INFO] errors: 0
+2025-06-28 00:28:17,253 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:28:17,254 [INFO] files_processed: 1
+2025-06-28 00:28:17,254 [INFO] chunks_created: 1
+2025-06-28 00:28:17,254 [INFO] zero_byte_prevented: 0
+2025-06-28 00:28:17,254 [INFO] errors: 360
+2025-06-28 00:28:29,974 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:28:29,974 [INFO] files_processed: 0
+2025-06-28 00:28:29,974 [INFO] chunks_created: 0
+2025-06-28 00:28:29,974 [INFO] zero_byte_prevented: 0
+2025-06-28 00:28:29,975 [INFO] errors: 0
+2025-06-28 00:29:17,268 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:29:17,268 [INFO] files_processed: 1
+2025-06-28 00:29:17,268 [INFO] chunks_created: 1
+2025-06-28 00:29:17,269 [INFO] zero_byte_prevented: 0
+2025-06-28 00:29:17,269 [INFO] errors: 360
+2025-06-28 00:29:29,986 [INFO] === SESSION STATISTICS ===
+2025-06-28 00:29:29,987 [INFO] files_processed: 0
+2025-06-28 00:29:29,987 [INFO] chunks_created: 0
+2025-06-28 00:29:29,987 [INFO] zero_byte_prevented: 0
+2025-06-28 00:29:29,988 [INFO] errors: 0
+
+Windows PowerShell
+Copyright (C) Microsoft Corporation.

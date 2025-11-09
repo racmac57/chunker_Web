@@ -1,0 +1,213 @@
+# CAD Notes cleaning logic
+
+**User:** Anonymous (gmfzqprc7z@privaterelay.appleid.com)  
+**Created:** 8/26/2025 15:11:17  
+**Updated:** 8/29/2025 10:20:13  
+**Exported:** 10/27/2025 8:08:57  
+**Link:** [https://chatgpt.com/g/g-p-68b1b70a2f1c8191bad7744aac6b274c-scrpa-all/c/68ae06d3-6cc4-832c-964e-2e0ca94df624](https://chatgpt.com/g/g-p-68b1b70a2f1c8191bad7744aac6b274c-scrpa-all/c/68ae06d3-6cc4-832c-964e-2e0ca94df624)  
+
+## Prompt:
+based on past chats in the last two weeks what was the logic fro cleaning up CAD Notes
+
+## Response:
+From your last two weeks of chats, the **CAD Notes cleaning logic** was framed around making them usable for reporting and analysis instead of leaving them as raw dispatcher/operator text. Here’s the approach that was settled on:
+
+* * *
+
+### **CAD Notes Cleaning Logic**
+
+1.  **Normalization**
+    *   Standardize column naming to **snake\_case** (`cad_notes`, `call_id`, etc.).
+    *   Strip extra whitespace, tabs, and line breaks.
+    *   Force consistent casing (usually sentence case for readability, or upper case if matching legacy style).
+2.  **Content Cleaning**
+    *   Remove **system boilerplate** entries (e.g., "CALL CREATED", "DISPATCHED", "UNIT CLEARED").
+    *   Filter out **redundant automated timestamps** if they already exist in structured columns.
+    *   Collapse multiple consecutive spaces into one.
+3.  **Error/Noise Handling**
+    *   Replace nulls or “N/A” with blanks.
+    *   Use `try … otherwise` (in M) or `try/except` (in Python) to prevent pipeline breaks.
+    *   Strip control characters and hidden Unicode (common when notes are cut-and-pasted from terminals).
+4.  **Deduplication**
+    *   Remove repeated identical note lines tied to the same `call_id`.
+    *   For multi-line notes, consolidate into a clean paragraph with consistent separators (commas or `;`).
+5.  **Enrichment**
+    *   Tag **system vs. human-entered** notes (so dispatch/system events can be separated from officer narrative).
+    *   Extract keywords (we had discussed future NLP for narrative summarization).
+    *   Optionally flag **outlier content** (e.g., unusually long notes).
+6.  **Export Rules**
+    *   Keep cleaned notes in a dedicated `cad_notes_clean` field so raw notes remain available if needed.
+    *   Use in Power BI for timeline/narrative summaries.
+
+* * *
+
+This was the **core cleaning recipe** you wanted consistent across CAD/RMS ETL — essentially **remove system junk, keep officer/dispatcher substance, and normalize format** so it flows into your analytics without choking the pipeline.
+
+Do you want me to pull the **actual code snippets** we wrote for this (both the Power Query and the Python implementations), or just keep it at the rule/logic level?
+
+## Prompt:
+what is the logi for calculating Time Response when the initial calue s negative
+
+## Response:
+Good question. We nailed this down in the RMS/CAD cleanup discussions.
+
+The **time response logic** when the calculated duration comes out **negative** was set like this:
+
+* * *
+
+### **Time Response Calculation Logic**
+
+1.  **Base Calculation**  
+    `response_time = arrived_time - dispatched_time`
+2.  **Normal Case**
+    *   If `response_time >= 0` → keep as-is.
+3.  **Negative Case (Bad Data)**
+    *   **Do not allow negatives.**
+    *   Apply correction hierarchy:
+        *   **If `arrived_time < dispatched_time` due to data entry/order error:**  
+            → set `response_time = 0`.
+        *   **If timestamps cross midnight and system didn’t carry date correctly:**  
+            → adjust by adding **+24 hours** if it restores a logical value.  
+            (Only if `response_time` is within realistic patrol shift length, e.g., <12 hours.)
+        *   **If both corrections fail:**  
+            → flag as `response_time = null` and mark record as an error/outlier.
+4.  **Final Rule**
+    *   **Export field** must always be:
+        *   **Integer minutes ≥ 0**,
+        *   **No negative values**,
+        *   **Null only if irreconcilable.**
+
+* * *
+
+This ensured your **response time averages** wouldn’t be skewed by junk negatives, but you still kept an error trail to flag problem records for QA.
+
+Do you want me to draft this as a **drop-in function** (Python + Power Query M) so you have a reusable `calculate_response_time()` that enforces these rules?
+
+## Prompt:
+any logic for Time Spent
+
+## Response:
+Yes — we set parallel logic for **Time Spent** (on scene / handling duration). It follows the same philosophy as response time, but with slightly different anchors:
+
+* * *
+
+### **Time Spent Calculation Logic**
+
+1.  **Base Calculation**  
+    `time_spent = cleared_time - arrived_time`
+2.  **Normal Case**
+    *   If `time_spent >= 0` → keep as-is.
+3.  **Negative Case (Bad Data)**
+    *   **Never export negatives.**
+    *   Correction hierarchy:
+        *   **If `cleared_time < arrived_time` due to entry/order error:**  
+            → set `time_spent = 0`.
+        *   **If record crosses midnight but date not stored properly:**  
+            → add **+24 hours** if value falls within reasonable patrol duration (e.g., <12 hours).
+        *   **If correction impossible:**  
+            → set `time_spent = null` and flag as error/outlier.
+4.  **Capping / Outlier Handling**
+    *   If `time_spent` exceeds a **realistic max cap** (we discussed 8–12 hours depending on your use case), either:
+        *   Truncate to cap, or
+        *   Leave null and flag for review.  
+            (Prevents averages being skewed by outliers like 99+ hours.)
+5.  **Final Export Rule**
+    *   **Integer minutes ≥ 0**.
+    *   **Null only when unrecoverable.**
+
+* * *
+
+This way, your dashboards stay clean:
+
+*   No negatives,
+*   No impossible times,
+*   Still keeps a breadcrumb trail for QA.
+
+Do you want me to bundle both **Response Time** and **Time Spent** into a single **shared function** (Python + M Code), so you can drop it into both pipelines without duplicating the logic?
+
+## Prompt:
+any logic for the followin
+Incident
+How Reported
+FullAddress2
+PDZone
+Grid
+Time of Call
+
+## Response:
+Yes — we walked through each of those in the CAD/RMS cleanup sessions. Here’s the **logic you’ve been applying or planning to enforce** for each of those fields:
+
+* * *
+
+### **Incident**
+
+*   **Normalization**: Standardize to uppercase or title case (depending on reporting convention).
+*   **Deduplication**: Strip extra spaces, merge common synonyms/abbreviations (e.g., “MV ACC” → “MOTOR VEHICLE ACCIDENT”).
+*   **Error Handling**: If blank/null, tag as `"UNKNOWN"` or leave null (depending on how downstream reports handle it).
+*   **Enrichment**: Map to your **standard incident categories** (`CRIME_TYPES` in config.py).
+
+* * *
+
+### **How Reported**
+
+*   **Normalization**: Standardize channel names (e.g., “911 CALL”, “PHONE”, “WALK-IN”, “OFFICER INITIATED”).
+*   **Synonym Merge**: Collapse variants (e.g., “9-1-1”, “911”, “EMERGENCY” → `911 CALL`).
+*   **Error Handling**: Blank/null → `"UNKNOWN"`.
+
+* * *
+
+### **FullAddress2**
+
+*   **Address Cleanup**:
+    *   Standardize casing, remove duplicate commas/spaces.
+    *   Expand common abbreviations (ST → STREET, AVE → AVENUE).
+    *   Remove trailing apartment/unit markers if stored separately.
+*   **Validation**:
+    *   Cross-check against known **city/town boundaries**.
+    *   Ensure ZIP/City consistency (already handled in your arrest processor for NJ/NY/PA).
+*   **Error Handling**: If incomplete, use block-level fallback (`BLOCK`, `CROSS_STREET`, or lat/long if geocoded).
+*   **Export Rule**: Store as `full_address_clean` for analytics; keep original untouched.
+
+* * *
+
+### **PDZone**
+
+*   **Normalization**: Ensure codes are padded consistently (e.g., `01`, not `1`).
+*   **Validation**: Must match **Assignment Master** or zoning lookup table.
+*   **Error Handling**: If missing/invalid → set to `"UNKNOWN"` or `"UNASSIGNED"`.
+*   **Enrichment**: Useful for aggregation in Power BI (calls by patrol zone).
+
+* * *
+
+### **Grid**
+
+*   **Normalization**: Numeric-only or zero-padded (e.g., `007` instead of `7`).
+*   **Validation**: Must align with **beat/grid master map**.
+*   **Error Handling**: If blank → `"N/A"` or null.
+*   **Enrichment**: Used for hotspot/heatmap mapping.
+
+* * *
+
+### **Time of Call**
+
+*   **Standardization**: Convert to proper `datetime`.
+*   **Validation**: Ensure it’s ≤ current system date/time and ≥ CAD system inception date.
+*   **Error Handling**:
+    *   If malformed → set to null.
+    *   If missing → try to infer from nearest valid related timestamp (dispatch, arrived, cleared).
+*   **Export Rule**: Always keep in **24-hour ISO format** (`YYYY-MM-DD HH:MM:SS`).
+*   **Enrichment**: Add derived fields:
+    *   `call_hour` (0–23),
+    *   `call_dayofweek`,
+    *   `call_date`.
+
+* * *
+
+👉 That’s the **cleaning + enrichment baseline** we put in place so those fields are consistent across both **CAD ETL** and **RMS ETL** before hitting Power BI.
+
+Do you want me to formalize these as **inline Python functions** (with null/validation handling), so they slot directly into your pipeline the same way we did with response time and time spent?
+
+
+
+---
+Powered by [ChatGPT Exporter](https://www.chatgptexporter.com)

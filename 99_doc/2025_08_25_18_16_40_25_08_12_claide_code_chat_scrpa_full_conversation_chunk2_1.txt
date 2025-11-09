@@ -1,0 +1,631 @@
+*artifact", path:
+         "01_scripts", glob: "*.py", output_mode: "content")
+  ⎿  Found 32 lines (ctrl+r to expand)
+
+● Now let me check the master processor for issues:
+
+  Update Todos
+  ⎿  ☒ Explore Python scripts in 01_scripts directory
+     ☒ Search for date/time processing patterns
+     ☒ Identify cascading date/time logic issues
+     ☒ Find error patterns in date/time handling
+     ☐ Review specific SCRPA and master scripts
+     ☐ Document findings and create fix recommendations
+
+● Read(01_scripts\master_scrpa_processor.py)
+  ⎿  Read 100 lines (ctrl+r to expand)
+
+● Now let me create a comprehensive summary of the findings:
+
+  Update Todos
+  ⎿  ☒ Explore Python scripts in 01_scripts directory
+     ☒ Search for date/time processing patterns
+     ☒ Identify cascading date/time logic issues
+     ☒ Find error patterns in date/time handling
+     ☒ Review specific SCRPA and master scripts
+     ☐ Document findings and create fix recommendations
+
+● Python Scripts Date/Time Issues Review Summary
+
+  📁 Scripts Analyzed
+
+  Total Python files found: 190+ scripts across main and archive directories
+
+  Key scripts examined:
+  - RMS_DateTime_Cascade_Processor.py - Dedicated cascade logic processor
+  - Comprehensive_SCRPA_Fix_v8.5_Standardized.py - Main production processor
+  - Complete_RMS_DateTime_Processor.py - RMS-specific date/time processor
+  - master_scrpa_processor.py - Master integration script
+  - Multiple test scripts for cascade validation
+
+  🔍 Date/Time Processing Patterns Identified
+
+  1. Cascading Date Logic Implementation
+
+  Pattern: incident_date → incident_date_between → report_date
+  - Found in: 15+ scripts with variations
+  - Implementation: Uses pd.to_datetime() with errors='coerce' and fillna()
+  cascading
+  - Status: ✅ Well-implemented in newer scripts
+
+  2. Cascading Time Logic Implementation
+
+  Pattern: incident_time → incident_time_between → report_time
+  - Found in: Same scripts as date cascade
+  - Implementation: Similar pattern but extracts .time() component
+  - Status: ✅ Generally well-implemented
+
+  3. Excel 1899 Format Handling
+
+  Issue: Excel exports times as 1899-01-01 + time offset
+  - Found in: Comprehensive_SCRPA_Fix_v8.5_Standardized.py:2318-2329
+  - Fix Applied: Enhanced parsing with fallback artifact handling
+  - Status: ✅ Fixed in production scripts
+
+  ⚠️ Issues Identified
+
+  1. Inconsistent Column Name References
+
+  Files affected:
+  - Comprehensive_SCRPA_Fix_v8.5_Standardized.py:2236-2248
+  - Multiple archive versions
+
+  Issue: Scripts expect different column naming conventions:
+  - Some use incident_date, others use Incident Date
+  - Some use incident_time_between, others use Incident Time_Between
+
+  Impact: Cascade logic fails if column names don't match expectations
+
+  2. Multiple Format Handling Issues
+
+  Files affected:
+  - Comprehensive_SCRPA_Fix_v8.5_Standardized.py:2262-2278
+  - RMS_DateTime_Cascade_Processor.py:107-140
+
+  Issue: Scripts try multiple date formats but don't always handle edge cases:
+  formats = ['%m/%d/%y', '%Y-%m-%d', '%m/%d/%Y', '%Y/%m/%d']
+
+  Missing formats: %m-%d-%Y, %d/%m/%Y, ISO formats with timezone
+
+  3. Time Field Normalization Problems
+
+  Files affected:
+  - Archive versions in Comprehensive_SCRPA_Fix_v8. *
+  - time_response and time_spent calculation functions
+
+  Issue: CAD time calculations for response/spent time can fail with:
+  - Invalid time formats
+  - Null/NaT propagation
+  - Mixed datetime/time object handling
+
+  4. Date/Time Validation Gaps
+
+  Files affected: Most processing scripts
+
+  Missing validations:
+  - Future date detection beyond simple cutoffs
+  - Time zone awareness
+  - Daylight saving time transitions
+  - Date range sanity checks (1900 < year < 2030)
+
+  5. Cycle Date Calculation Issues
+
+  Files affected:
+  - Comprehensive_SCRPA_Fix_v8.5_Standardized.py:1275-1305
+  - Period assignment functions
+
+  Issue: Hard-coded cycle periods may become outdated:
+  seven_day_start = pd.to_datetime('2025-08-05').date()
+  seven_day_end = pd.to_datetime('2025-08-11').date()
+
+  🛠️ Recommended Fixes
+
+  1. Standardize Column Name Handling
+
+  def normalize_column_names(df):
+      """Normalize column names for consistent cascade processing.""" column_map = {
+          'Incident Date': 'incident_date',
+          'Incident Date_Between': 'incident_date_between',
+          'Report Date': 'report_date',
+          'Incident Time': 'incident_time',
+          'Incident Time_Between': 'incident_time_between',
+          'Report Time': 'report_time'
+      }
+      return df.rename(columns=column_map)
+
+  2. Enhanced Date Format Detection
+
+  def robust_date_parser(date_series):
+      """Enhanced date parsing with comprehensive format support.""" formats = [
+          '%m/%d/%y', '%m/%d/%Y', '%Y-%m-%d', '%Y/%m/%d',
+          '%d/%m/%Y', '%m-%d-%Y', '%Y-%m-%d %H:%M:%S',
+          '%m/%d/%y %H:%M:%S', '%Y-%m-%dT%H:%M:%S'
+      ]
+
+      for fmt in formats:
+          try:
+              parsed = pd.to_datetime(date_series, format=fmt, errors='coerce')
+              if parsed.notna().sum() > len(date_series) * 0.8:  # 80% success rate
+                  return parsed
+          except:
+              continue
+
+      return pd.to_datetime(date_series, errors='coerce')  # Fallback
+
+  3. Improved Time Field Processing
+
+  def safe_time_calculation(start_time, end_time):
+      """Safe time difference calculation with error handling.""" try:
+          if pd.isna(start_time) or pd.isna(end_time):
+              return None
+
+          start_dt = pd.to_datetime(start_time, errors='coerce')
+          end_dt = pd.to_datetime(end_time, errors='coerce')
+
+          if pd.isna(start_dt) or pd.isna(end_dt):
+              return None
+
+          diff = end_dt - start_dt
+          return max(0, diff.total_seconds() / 60)  # Minutes, non-negative
+
+      except Exception as e:
+          logging.warning(f"Time calculation error: {e}")
+          return None
+
+  4. Dynamic Cycle Detection
+
+  def get_current_cycle_periods():
+      """Dynamic cycle period detection from cycle calendar.""" # Read from cycle calendar file instead of hard-coding
+      cycle_file = "10_Reference_Files/7Day_28Day_Cycle_20250414.xlsx"
+      # Implementation would read current periods from calendar
+      pass
+
+  ✅ Scripts Status Assessment
+
+  Production Ready:
+  - RMS_DateTime_Cascade_Processor.py ✅
+  - Complete_RMS_DateTime_Processor.py ✅
+  - Comprehensive_SCRPA_Fix_v8.5_Standardized.py ⚠️ (needs column name fixes)
+
+  Needs Review:
+  - master_scrpa_processor.py (imports may fail)
+  - Archive versions (legacy, inconsistent implementations)
+
+  Test Scripts:
+  - test_rms_datetime_cascade.py ✅ (good validation examples)
+  - test_robust_rms_datetime_cascade.py ✅ (comprehensive test cases)
+
+  Update Todos
+  ⎿  ☒ Explore Python scripts in 01_scripts directory
+     ☒ Search for date/time processing patterns
+     ☒ Identify cascading date/time logic issues
+     ☒ Find error patterns in date/time handling
+     ☒ Review specific SCRPA and master scripts
+     ☒ Document findings and create fix recommendations
+
+● 🎯 Next Steps
+
+  1. Immediate: Apply column name standardization fixes to production scripts
+  2. Short-term: Implement enhanced date format detection
+  3. Medium-term: Add dynamic cycle period detection
+  4. Long-term: Consolidate date/time processing into unified module
+
+  The SCRPA system shows sophisticated date/time handling with good cascade logic
+  implementation, but needs consistency fixes and enhanced error handling to prevent
+   production issues. > # Claude Code Task: Standardize Column Names in Production Script
+
+  ## Objective
+  Fix column name inconsistencies in Comprehensive_SCRPA_Fix_v8.5_Standardized.py to
+   match actual data source columns. ## Target File
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+
+  ## Primary Fixes Needed
+  1. **Column Name Standardization**: Match actual RMS/CAD export column names
+  2. **Import Dependencies**: Fix any import issues identified
+  3. **Error Handling**: Enhance robustness for missing columns
+
+  ## Search for Current Column References
+  grep -n "Incident Date\|Incident Time\|Incident_Date\|Incident_Time"
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  grep -n "Case Number\|Case_Number"
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  grep -n "Incident Type\|Incident_Type"
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  grep -n "columns. *=" 01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+
+  ## Check Import Issues
+  head -20 01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  grep -n "import\|from. *import"
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+
+  ## Find Column Processing Functions
+  grep -A 10 -B 5 "def.*process.*column\|def.*standardize. *column"
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+  grep -A 5 -B 5 "\.columns\s*="
+  01_scripts/Comprehensive_SCRPA_Fix_v8.5_Standardized.py
+
+  ## Expected Output
+  - Current column name patterns used in script
+  - Import statements and dependencies
+  - Column processing/standardization functions
+  - Areas needing column name fixes
+
+● I'll help you standardize column names in the production script and fix any
+  related issues. Let me start by examining the current column references and import
+   dependencies. Update Todos
+  ⎿  ☐ Examine current column references in production script
+     ☐ Check import dependencies and issues
+     ☐ Identify column processing functions
+     ☐ Fix column name inconsistencies
+     ☐ Enhance error handling for missing columns
+     ☐ Test and validate fixes
+
+  Update Todos
+  ⎿  ☐ Examine current column references in production script
+     ☐ Check import dependencies and issues
+     ☐ Identify column processing functions
+     ☐ Fix column name inconsistencies
+     ☐ Enhance error handling for missing columns
+     ☐ Test and validate fixes
+
+● Search(pattern: "Incident Date|Incident Time|Incident_Date|Incident_Time", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 4 lines (ctrl+r to expand)
+
+● Search(pattern: "Case Number|Case_Number", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 4 lines (ctrl+r to expand)
+
+● Search(pattern: "Incident Type|Incident_Type", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 5 lines (ctrl+r to expand)
+
+● Search(pattern: "columns. *=", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content", head_limit: 10)
+  ⎿  Found 10 lines (ctrl+r to expand)
+
+● Now let me check the import statements and dependencies:
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 50 lines (ctrl+r to expand)
+
+● Search(pattern: "import|from. *import", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content", head_limit: 15)
+  ⎿  Found 15 lines (ctrl+r to expand)
+
+● Now let me examine the column processing functions:
+
+  Update Todos
+  ⎿  ☒ Examine current column references in production script
+     ☐ Check import dependencies and issues
+     ☐ Identify column processing functions
+     ☐ Fix column name inconsistencies
+     ☐ Enhance error handling for missing columns
+     ☐ Test and validate fixes
+
+● Search(pattern: "def.*process.*column|def.*standardize. *column", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 0 lines
+
+● Search(pattern: "\.columns\s*=", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 47 lines (ctrl+r to expand)
+
+● Let me examine the actual column mappings used in the script:
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 100 lines (ctrl+r to expand)
+
+● Now let me check how the cascading logic is implemented to see where column name
+  issues might occur:
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 60 lines (ctrl+r to expand)
+
+● Now let me examine where the column mapping is applied and create the standardized
+   fix:
+
+  Update Todos
+  ⎿  ☒ Examine current column references in production script
+     ☒ Check import dependencies and issues
+     ☒ Identify column processing functions
+     ☐ Fix column name inconsistencies
+     ☐ Enhance error handling for missing columns
+     ☐ Test and validate fixes
+
+● Based on my analysis, I can see the main issues and will now implement the fixes. The script has good column mappings but needs enhanced error handling and some
+  consistency improvements. Let me create the fixes:
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 30 lines (ctrl+r to expand)
+
+● Now I'll add enhanced column standardization functions right after the existing
+  helper functions:
+
+  Update(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Updated 01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py with 84
+     additions
+        45                out = out.fillna(df[c])
+        46        return out
+        47
+        48 +  def validate_required_columns(df: pd.DataFrame, required_columns:
+     list,
+           +  data_type: str = "data") -> dict:
+        49 +      """
+        50 +      Validate that required columns exist in DataFrame and log missing
+           + columns. 51 +
+        52 +      Args:
+        53 +          df: DataFrame to validate
+        54 +          required_columns: List of required column names
+        55 +          data_type: Type of data being validated (for logging)
+        56 +
+        57 +      Returns:
+        58 +          dict: Validation results with missing columns and mapping
+           + suggestions
+        59 +      """
+        60 +      import logging
+        61 +      logger = logging.getLogger(__name__)
+        62 +
+        63 +      available_columns = list(df.columns)
+        64 +      missing_columns = [col for col in required_columns if col not in
+           + available_columns]
+        65 +
+        66 +      validation_result = {
+        67 +          'valid': len(missing_columns) == 0,
+        68 +          'missing_columns': missing_columns,
+        69 +          'available_columns': available_columns,
+        70 +          'suggestions': {}
+        71 +      }
+        72 +
+        73 +      if missing_columns:
+        74 +          logger.warning(f"Missing required {data_type} columns:
+           + {missing_columns}")
+        75 +          logger.info(f"Available {data_type} columns:
+           + {available_columns}")
+        76 +
+        77 +          # Generate suggestions for missing columns using fuzzy
+     matching
+        78 +          for missing_col in missing_columns:
+        79 +              suggestions = []
+        80 +              for available_col in available_columns:
+        81 +                  # Simple similarity check
+        82 +                  if missing_col.lower() in available_col.lower() or
+           + available_col.lower() in missing_col.lower():
+        83 +                      suggestions.append(available_col)
+        84 +
+        85 +              if suggestions:
+        86 +                  validation_result['suggestions'][missing_col] =
+           + suggestions
+        87 +                  logger.info(f"Possible matches for '{missing_col}':
+           + {suggestions}")
+        88 +
+        89 +      return validation_result
+        90 +
+        91 +  def standardize_column_names_with_fallback(df: pd.DataFrame,
+           + column_mapping: dict, data_type: str = "data") -> pd.DataFrame:
+        92 +      """
+        93 +      Standardize column names with intelligent fallback for missing
+           + columns. 94 +
+        95 +      Args:
+        96 +          df: DataFrame to standardize
+        97 +          column_mapping: Dict mapping original names to standardized
+           + names
+        98 +          data_type: Type of data being processed (for logging)
+        99 +
+       100 +      Returns:
+       101 +          pd.DataFrame: DataFrame with standardized column names
+       102 +      """
+       103 +      import logging
+       104 +      logger = logging.getLogger(__name__)
+       105 +
+       106 +      df = df.copy()
+       107 +
+       108 +      # Validate column mapping
+       109 +      validation = validate_required_columns(df,
+           + list(column_mapping.keys()), data_type)
+       110 +
+       111 +      # Apply existing mappings
+       112 +      existing_mapping = {k: v for k, v in column_mapping.items() if k
+     in
+           +  df.columns}
+       113 +      if existing_mapping:
+       114 +          df = df.rename(columns=existing_mapping)
+       115 +          logger.info(f"Applied {data_type} column mapping:
+           + {len(existing_mapping)} columns renamed")
+       116 +
+       117 +      # Handle missing columns with fallbacks
+       118 +      if validation['missing_columns']:
+       119 +          for missing_col in validation['missing_columns']:
+       120 +              if missing_col in validation['suggestions']:
+       121 +                  # Use the first suggestion as fallback
+       122 +                  fallback_col =
+           + validation['suggestions'][missing_col][0]
+       123 +                  target_name = column_mapping[missing_col]
+       124 +                  df = df.rename(columns={fallback_col: target_name})
+       125 +                  logger.info(f"Applied fallback mapping:
+           + '{fallback_col}' -> '{target_name}' (expected '{missing_col}')")
+       126 +
+       127 +      # Convert ALL remaining columns to lowercase_with_underscores for
+           + consistency
+       128 +      df.columns = [to_snake(col) for col in df.columns]
+       129 +
+       130 +      return df
+       131 +
+       132    class ComprehensiveSCRPAFixV8_5:
+       133        """
+       134        ✅ **NEW in v8.5**: Cycle calendar integration for temporal
+             analysis and export naming
+
+● Now I need to enhance the cascade logic to use the new standardized column
+  handling. Let me find the RMS processing section and update it:
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 40 lines (ctrl+r to expand)
+
+● Let me find where the RMS processing starts:
+
+● Search(pattern: "def process_rms_data|def.*rms. *process", path:
+        "01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py", output_mode:
+        "content")
+  ⎿  Found 1 line (ctrl+r to expand)
+
+● Read(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Read 80 lines (ctrl+r to expand)
+
+● Now I'll update the RMS processing section to use the new standardized column
+  handling:
+
+  Update(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Updated 01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py with 7 addition
+      and 11 removals
+       2293                    self.logger.error(f"Error loading RMS file: {e}")
+       2294                    return pd.DataFrame()
+       2295
+       2296 -              # NORMALIZE HEADERS: Apply lowercase snake_case
+     normalization immediately after loading
+            - normalization immediately after loading
+       2296 +              # ENHANCED COLUMN STANDARDIZATION: Use new standardized
+     approach with fallback handling
+            + approach with fallback handling
+       2297                with self.monitor_performance("RMS Header Normalization &
+              Column Mapping"):
+       2298 -                  rms_df = normalize_headers(rms_df)
+       2299 -                  self.logger.info(f"Normalized RMS headers to
+     lowercase snake_case: {list(rms_df.columns)}")
+            -  snake_case: {list(rms_df.columns)}")
+       2300 -
+       2301 -                  # Apply column mapping only for columns that exist
+       2298 +                  self.logger.info(f"Original RMS columns:
+     {list(rms_df.columns)}")
+            + {list(rms_df.columns)}")
+       2299 +
+       2300 +                  # Apply standardized column mapping with intelligent
+     fallback
+            + fallback
+       2301                    column_mapping = self.get_rms_column_mapping()
+       2302 -                  existing_mapping = {k: v for k, v in
+     column_mapping.items() if k in rms_df.columns}
+            - column_mapping.items() if k in rms_df.columns}
+       2303 -                  rms_df = rms_df.rename(columns=existing_mapping)
+       2304 -          self.logger.info(f"Applied column mapping:
+     {existing_mapping}")
+            - {existing_mapping}")
+       2302 +                  rms_df =
+     standardize_column_names_with_fallback(rms_df, column_mapping, "RMS")
+            + standardize_column_names_with_fallback(rms_df, column_mapping, "RMS")
+       2303 +
+       2304 +                  self.logger.info(f"Standardized RMS columns:
+     {list(rms_df.columns)}")
+            + {list(rms_df.columns)}")
+       2305
+       2306 -          # Convert ALL remaining columns to lowercase_with_underscores
+            - (redundant but safe)
+       2307 -          rms_df.columns =
+            - [self.convert_to_lowercase_with_underscores(col) for col in
+            - rms_df.columns]
+       2308 -
+       2306            # Clean text columns
+       2307            text_columns =
+              rms_df.select_dtypes(include=['object']).columns
+       2308            for col in text_columns:
+
+● Now let me enhance the cascade logic section to use more robust column validation:
+
+  Update(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Updated 01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py with 17
+     additions and 11 removals
+       2308            for col in text_columns:
+       2309                rms_df[col] =
+              rms_df[col].apply(self.clean_text_comprehensive)
+       2310
+       2311 -          # DEBUG: Check available date columns before cascading
+       2312 -          date_columns = [col for col in rms_df.columns if 'date' in
+            - col.lower()]
+       2313 -          self.logger.info(f"Available date columns: {date_columns}")
+       2314 -
+       2315 -          # Check for date columns that cascade_date function expects
+       2311 +          # ENHANCED CASCADE VALIDATION: Check for required columns
+     with fallback suggestions
+            +  fallback suggestions
+       2312            expected_date_cols = ['incident_date',
+              'incident_date_between', 'report_date']
+       2313 -          missing_date_cols = [col for col in expected_date_cols if col
+     not in rms_df.columns]
+            - not in rms_df.columns]
+       2314 -          if missing_date_cols:
+       2315 -              self.logger.warning(f"Missing expected date columns:
+            - {missing_date_cols}")
+       2313 +          expected_time_cols = ['incident_time',
+     'incident_time_between', 'report_time']
+            + 'incident_time_between', 'report_time']
+       2314
+       2315 -          # Sample raw date values before cascading
+       2316 -          for col in expected_date_cols:
+       2315 +          # Validate date columns for cascading
+       2316 +          date_validation = validate_required_columns(rms_df,
+     expected_date_cols, "RMS Date Cascade")
+            + expected_date_cols, "RMS Date Cascade")
+       2317 +          if not date_validation['valid']:
+       2318 +              self.logger.warning(f"Some date columns missing for
+            + cascade: {date_validation['missing_columns']}")
+       2319 +              # Continue processing with available columns
+       2320 +
+       2321 +          # Validate time columns for cascading
+       2322 +          time_validation = validate_required_columns(rms_df,
+            + expected_time_cols, "RMS Time Cascade")
+       2323 +          if not time_validation['valid']:
+       2324 +              self.logger.warning(f"Some time columns missing for
+            + cascade: {time_validation['missing_columns']}")
+       2325 +
+       2326 +          # Sample available date/time values before cascading
+       2327 +          all_cascade_cols = expected_date_cols + expected_time_cols
+       2328 +          for col in all_cascade_cols:
+       2329                if col in rms_df.columns:
+       2330                    populated = rms_df[col].notna().sum()
+       2331                    self.logger.info(f"{col} populated:
+              {populated}/{len(rms_df)}")
+     ...
+       2327                        sample = rms_df[col].dropna().head(3).tolist()
+       2328                        self.logger.info(f"Sample {col} values:
+     {sample}")
+       2329
+       2330 -          # CRITICAL: Apply cascade AFTER column normalization using
+     normalized names
+            - normalized names
+       2330 +          # ENHANCED CASCADE: Apply cascading with robust error
+     handling
+       2331
+       2332            # 1) FIXED: Enhanced date cascading with Excel format
+     handling
+       2333            self.logger.info("Cascading RMS date columns...")
+
+● Now let me enhance the date cascading logic to be more robust:
+
+  Update(01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py)
+  ⎿  Updated 01_scripts\Comprehensive_SCRPA_Fix_v8.5_Standardized.py with 63
+     additions and 26 removals
+       2335
+       2336            # ENHANCED CASCADE: Apply cascading with robust error
+     handling
+       2337
+       2338 -          # 1) FIXED: Enhanced date cascading with Excel format
+     handling
+       2338 +          # 1) ENHANCED: Robust date cascading with comprehensive
+     format handling
+            +  handling
+       2339            self.logger.info("Cascading RMS date columns...")
+       2340
+       2341 -          # Date columns to cascade (using normalized names)
+       2342 -          date_cols = ['incident_date', 'incident_date_between',
+     'report_date']
+            - 'report_date']
+       2341 +          def robust_date_parser(date_series, column_name):
+       2342 +              """Enhanced date parsing with comprehensive format
+     support.""" + support."""

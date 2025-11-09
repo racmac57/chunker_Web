@@ -1,0 +1,693 @@
+max_attempts = 2
+    
+    for attempt in range(max_attempts):
+        try:
+            import arcpy
+            
+            # Check available license types
+            license_types = [("ArcInfo", "Advanced"), ("ArcEditor", "Standard"), ("ArcView", "Basic")]
+            
+            for license_code, license_name in license_types:
+                try:
+                    status = arcpy.CheckProduct(license_code)
+                    if status in ["Available", "AlreadyInitialized"]:
+                        print(f"[SUCCESS] {license_name} license initialized")
+                        logging.info(f"ArcGIS Pro {license_name} license initialized successfully")
+                        
+                        # Try to check out extensions if available
+                        try_checkout_extensions()
+                        return True
+                        
+                except Exception as e:
+                    logging.warning(f"Failed to check {license_name} license: {e}")
+                    continue
+            
+            print("[ERROR] No ArcGIS Pro license available")
+            logging.error("No ArcGIS Pro license could be initialized")
+            return False
+            
+        except RuntimeError as e:
+            error_msg = str(e)
+            if "Product License has not been initialized" in error_msg:
+                print(f"[ERROR] ArcGIS Pro license not initialized (Attempt {attempt + 1}/{max_attempts})")
+                
+                if attempt == 0:
+                    # Try automatic refresh on first attempt
+                    if attempt_license_refresh():
+                        print("[INFO] Retrying license initialization...")
+                        time.sleep(5)
+                        continue
+                
+                # Manual instructions for final attempt
+                print("[SOLUTION] Manual license refresh required:")
+                print("1. Close all ArcGIS Pro instances")
+                print("2. Open ArcGIS Pro manually with your Named User account")
+                print("3. Sign in completely and wait for Pro to fully load")
+                print("4. Close ArcGIS Pro")
+                print("5. Run this script again")
+                logging.error("ArcGIS Pro license initialization failed - manual refresh required")
+                
+            else:
+                print(f"[ERROR] ArcGIS licensing error: {error_msg}")
+                logging.error(f"ArcGIS licensing error: {error_msg}")
+            return False
+            
+        except ImportError as e:
+            print(f"[ERROR] Failed to import arcpy: {e}")
+            print("[SOLUTION] Ensure you're running in the ArcGIS Pro Python environment")
+            logging.error(f"arcpy import failed: {e}")
+            return False
+    
+    return False
+
+def try_checkout_extensions():
+    """Try to check out available extensions.""" try:
+        import arcpy
+        
+        extensions = ["Spatial", "Network", "3D"]
+        for ext in extensions:
+            try:
+                if arcpy.CheckExtension(ext) == "Available":
+                    arcpy.CheckOutExtension(ext)
+                    logging.info(f"{ext} Analyst extension checked out successfully")
+            except Exception as e:
+                logging.warning(f"Could not check out {ext} extension: {e}")
+                
+    except Exception as e:
+        logging.warning(f"Extension checkout failed: {e}")
+
+# Initialize license before other imports
+print("[STARTING] Hackensack PD Crime Analysis Automation v4.0 - Excel Integration")
+print(f"[TIMESTAMP] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+if not initialize_arcgis_license():
+    print("\n[TROUBLESHOOTING GUIDE]")
+    print("Common solutions for licensing issues:")
+    print("- Ensure you have a valid Named User license")
+    print("- Check that your license hasn't expired")
+    print("- Verify network connectivity to licensing portal")
+    print("- Contact IT about upgrading to Standard/Advanced license")
+    print("- Consider Single Use licensing for automation workstations")
+    sys.exit(1)
+
+# Now safe to import other modules
+try:
+    import arcpy
+    from config import CRIME_FOLDER_MAPPING, APR_PATH, get_excel_report_name, get_correct_folder_name, validate_all_paths
+    from map_export import export_maps
+    from chart_export import export_chart
+except ImportError as e:
+    print(f"[ERROR] Failed to import required modules: {e}")
+    print("[SOLUTION] Verify all required modules are in the Python path")
+    logging.error(f"Module import failed: {e}")
+    sys.exit(1)
+
+def setup_logging(debug=False, custom_log_dir=None):
+    """Set up comprehensive logging configuration.""" log_level = logging.DEBUG if debug else logging.INFO
+    
+    # Determine log directory
+    if custom_log_dir:
+        log_dir = Path(custom_log_dir)
+    else:
+        log_dir = Path(os.environ.get('SCRPA_LOG_DIR', 
+                                     os.path.expanduser("~/Documents/SCRPA_logs")))
+    
+    # Create log directory
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create timestamped log file
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"crime_analysis_{timestamp}.log"
+    
+    # Configure logging
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        ]
+    )
+    
+    # Log system information
+    logging.info("=" * 60)
+    logging.info("Crime Analysis Automation Started - Version 4.0 Excel Integration")
+    logging.info(f"Python version: {sys.version}")
+    logging.info(f"ArcGIS Pro version: {arcpy.GetInstallInfo()['Version']}")
+    logging.info(f"License level: {arcpy.GetInstallInfo()['LicenseLevel']}")
+    logging.info(f"Log file: {log_file}")
+    logging.info("=" * 60)
+    
+    return str(log_file)
+
+def validate_arguments():
+    """Validate and parse command line arguments.""" if len(sys.argv) < 7:
+        print("[ERROR] Missing required arguments.") print("\nUsage: main.py <export_maps> <export_charts> <export_reports> <day_span> <debug> <date>")
+        print("\nArguments:")
+        print("  export_maps    : Export crime maps (true/false)")
+        print("  export_charts  : Export crime charts (true/false)")  
+        print("  export_reports : Export crime reports (true/false)")
+        print("  day_span       : Number of days for analysis (positive integer)")
+        print("  debug          : Enable debug logging (true/false)")
+        print("  date           : Analysis date (YYYY_MM_DD format)")
+        print("\nExample: main.py true true false 30 false 2025_06_10")
+        sys.exit(1)
+
+    try:
+        # Parse boolean arguments with validation
+        def parse_bool(value: str, param_name: str) -> bool:
+            if value.lower() not in ['true', 'false']:
+                raise ValueError(f"{param_name} must be 'true' or 'false', got: {value}")
+            return value.lower() == 'true'
+        
+        args = {
+            'export_maps_flag': parse_bool(sys.argv[1], "export_maps"),
+            'export_charts_flag': parse_bool(sys.argv[2], "export_charts"),
+            'export_reports_flag': parse_bool(sys.argv[3], "export_reports"),
+            'debug': parse_bool(sys.argv[5], "debug"),
+            'date_arg': sys.argv[6]
+        }
+        
+        # Validate and parse day_span
+        try:
+            args['day_span'] = int(sys.argv[4])
+            if args['day_span'] <= 0:
+                raise ValueError("Day span must be a positive integer")
+            if args['day_span'] > 365:
+                raise ValueError("Day span cannot exceed 365 days")
+        except ValueError as e:
+            if "invalid literal" in str(e):
+                raise ValueError(f"Day span must be a number, got: {sys.argv[4]}")
+            raise
+        
+        # Validate and parse date
+        try:
+            args['run_date'] = datetime.datetime.strptime(args['date_arg'], "%Y_%m_%d").date()
+        except ValueError:
+            raise ValueError(f"Invalid date format: {args['date_arg']}. Expected YYYY_MM_DD")
+        
+        # Validate that at least one export option is enabled
+        if not any([args['export_maps_flag'], args['export_charts_flag'], args['export_reports_flag']]):
+            raise ValueError("At least one export option (maps, charts, or reports) must be enabled")
+        
+        return args
+        
+    except (ValueError, IndexError) as e:
+        print(f"[ERROR] Argument validation error: {e}")
+        logging.error(f"Argument validation failed: {e}")
+        sys.exit(1)
+
+def calculate_analysis_period(run_date, cycle_type='weekly'):
+    """Calculate analysis period using Excel lookup.""" report_name = get_excel_report_name(run_date)
+    
+    if report_name:
+        date_str = run_date.strftime('%Y_%m_%d')
+        return f"{report_name}_{date_str}_7Day"
+    else:
+        # Fallback to old logic
+        iso_year, iso_week, _ = run_date.isocalendar()
+        date_str = run_date.strftime('%Y_%m_%d')
+        return f"C05W{iso_week:02d}_{date_str}_7Day"
+
+def create_output_folder_excel(run_date, cycle_type='weekly'):
+    """Create output folder with Excel integration and crime subfolders.""" try:
+        import shutil
+        from config import POWERPOINT_TEMPLATES, REPORT_BASE_DIR
+        
+        # Get correct folder name using Excel
+        folder_name = get_correct_folder_name(run_date)
+        
+        # Base path for reports  
+        base_path = Path(REPORT_BASE_DIR)
+        output_folder = base_path / folder_name
+        
+        # Create main directory
+        output_folder.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Created main folder: {folder_name}")
+        
+        # Create crime-specific subfolders
+        for crime_type, folder_name_mapping in CRIME_FOLDER_MAPPING.items():
+            crime_folder = output_folder / folder_name_mapping
+            crime_folder.mkdir(exist_ok=True)
+            print(f"  📁 Created: {folder_name_mapping}")
+        
+        # Copy and rename PowerPoint template
+        source_ppt = POWERPOINT_TEMPLATES["7day"]
+        dest_ppt = output_folder / f"{folder_name}.pptx"
+        
+        if os.path.exists(source_ppt):
+            shutil.copy2(source_ppt, dest_ppt)
+            print(f"✅ Copied PowerPoint: {folder_name}.pptx")
+        else:
+            print(f"⚠️ PowerPoint template not found: {source_ppt}")
+        
+        # Verify write permissions
+        test_file = output_folder / "test_write.tmp"
+        try:
+            test_file.touch()
+            test_file.unlink()
+        except OSError:
+            raise OSError(f"No write permission for output folder: {output_folder}")
+        
+        logging.info(f"Output folder created: {output_folder}")
+        print(f"✅ Output folder created: {output_folder}")
+        
+        return str(output_folder)
+        
+    except Exception as e:
+        logging.error(f"Failed to create output folder: {e}")
+        raise OSError(f"Failed to create output folder: {e}")
+
+def validate_dependencies():
+    """Validate that required dependencies and files exist.""" print("[INFO] Validating dependencies and configuration...")
+    
+    # Use the config validation function
+    all_valid = validate_all_paths()
+    
+    # Check crime types configuration
+    if not CRIME_FOLDER_MAPPING:
+        print("[ERROR] CRIME_FOLDER_MAPPING is empty or not defined in config")
+        all_valid = False
+    else:
+        logging.info(f"Found {len(CRIME_FOLDER_MAPPING)} crime types to process")
+        print(f"[INFO] Found {len(CRIME_FOLDER_MAPPING)} crime types to process")
+    
+    success = all_valid
+    if success:
+        logging.info("All critical dependencies validated successfully")
+        print("[SUCCESS] All dependencies validated")
+    
+    return success, []  # Return empty issues list since validate_all_paths() handles reporting
+
+class CrimeAnalysisProcessor:
+    """Crime analysis processing class with Excel integration.""" def __init__(self, output_folder, args):
+        self.output_folder = output_folder
+        self.args = args
+        self.logger = logging.getLogger(__name__)
+        self.results = []
+    
+    def process_single_crime_type(self, crime_type):
+        """Process a single crime type with comprehensive error handling.""" result = {
+            'crime_type': crime_type,
+            'maps_success': False,
+            'charts_success': False,
+            'reports_success': False,
+            'errors': [],
+            'start_time': time.time()
+        }
+        
+        try:
+            self.logger.info(f"Processing crime type: {crime_type}")
+            print(f"\n[PROCESSING] {crime_type}")
+            
+            # Process maps if requested
+            if self.args['export_maps_flag']:
+                result['maps_success'] = self._process_maps(crime_type, result)
+            
+            # Process charts if requested
+            if self.args['export_charts_flag']:
+                result['charts_success'] = self._process_charts(crime_type, result)
+            
+            # Process reports if requested (placeholder)
+            if self.args['export_reports_flag']:
+                result['reports_success'] = self._process_reports(crime_type, result)
+            
+            # Calculate processing time
+            result['processing_time'] = time.time() - result['start_time']
+            
+            # Determine overall success
+            requested_operations = []
+            if self.args['export_maps_flag']:
+                requested_operations.append(result['maps_success'])
+            if self.args['export_charts_flag']:
+                requested_operations.append(result['charts_success'])
+            
+            result['overall_success'] = all(requested_operations) if requested_operations else False
+            
+        except Exception as e:
+            error_msg = f"Critical error processing {crime_type}: {str(e)}"
+            self.logger.error(error_msg)
+            print(f"  [ERROR] Critical error: {e}")
+            result['errors'].append(error_msg)
+            result['overall_success'] = False
+            result['processing_time'] = time.time() - result['start_time']
+        
+        return result
+    
+    def _process_maps(self, crime_type, result):
+        """Process map exports for a crime type with subfolders.""" try:
+            self.logger.info(f"Exporting maps for {crime_type}")
+            print(f"  [MAPS] Exporting to crime subfolder...")
+            
+            # Maps will automatically use crime subfolders via get_crime_type_folder in map_export.py
+            map_success = export_maps(crime_type, self.output_folder, sys.argv)
+            
+            if map_success:
+                self.logger.info(f"Map export completed for {crime_type}")
+                print(f"  [SUCCESS] Maps exported to crime subfolder")
+                return True
+            else:
+                error_msg = f"Map export failed for {crime_type}"
+                self.logger.error(error_msg)
+                print(f"  [ERROR] Map export failed")
+                result['errors'].append(error_msg)
+                return False
+                
+        except Exception as e:
+            error_msg = f"Map export error for {crime_type}: {str(e)}"
+            self.logger.error(error_msg)
+            print(f"  [ERROR] Map export error: {e}")
+            result['errors'].append(error_msg)
+            return False
+    
+    def _process_charts(self, crime_type, result):
+        """Process chart exports for a crime type with subfolders.""" try:
+            self.logger.info(f"Exporting charts for {crime_type}")
+            print(f"  [CHARTS] Exporting to crime subfolder...")
+            
+            # Charts will automatically use crime subfolders via get_crime_type_folder in chart_export.py
+            chart_success = export_chart(crime_type)
+            
+            if chart_success:
+                self.logger.info(f"Chart export completed for {crime_type}")
+                print(f"  [SUCCESS] Charts exported to crime subfolder")
+                return True
+            else:
+                error_msg = f"Chart export failed for {crime_type}"
+                self.logger.error(error_msg)
+                print(f"  [ERROR] Chart export failed")
+                result['errors'].append(error_msg)
+                return False
+                
+        except Exception as e:
+            error_msg = f"Chart export error for {crime_type}: {str(e)}"
+            self.logger.error(error_msg)
+            print(f"  [ERROR] Chart export error: {e}")
+            result['errors'].append(error_msg)
+            return False
+    
+    def _process_reports(self, crime_type, result):
+        """Process report exports for a crime type (placeholder).""" self.logger.warning(f"Report export requested for {crime_type} but not implemented")
+        print(f"  [WARNING] Report export not yet implemented")
+        return None  # Indicates not implemented
+    
+    def process_all_crime_types(self, crime_types):
+        """Process all crime types with comprehensive error handling.""" total_crimes = len(crime_types)
+        print(f"\n[INFO] Processing {total_crimes} crime types...")
+        
+        for i, crime_type in enumerate(crime_types, 1):
+            print(f"\n[{i}/{total_crimes}] {crime_type}")
+            result = self.process_single_crime_type(crime_type)
+            self.results.append(result)
+        
+        return self.results
+
+def generate_summary_report(results, output_folder):
+    """Generate a comprehensive summary report.""" try:
+        summary_file = Path(output_folder) / "processing_summary.txt"
+        
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write("Hackensack PD Crime Analysis Processing Summary\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Analysis Date: {datetime.datetime.now().strftime('%Y-%m-%d')}\n")
+            f.write("Excel Integration: ENABLED\n")
+            f.write("Crime Subfolder Organization: ENABLED\n\n")
+````
+
+
+
+## Prompt:
+6/10/2025, 1:13:12 PM
+
+check version 2 of the chart_export.py. is it complete
+
+
+
+## Response:
+6/10/2025, 1:13:46 PM
+
+Looking at your chart_export.py file, I can see it's **mostly complete** but it's **missing some key variables** that your updated config.py now has. Let me check what's missing:
+
+## 🔍 **Issues Found:**
+
+1. **Missing `SUFFIXES` variable** - Your map_export.py imports this but it's not in your config.py
+2. **Chart_export.py references old functions** that aren't in your current config.py
+3. **Some import mismatches**
+
+Let me create the missing variables you need:
+
+**Missing Config Variables - Add to Your config.py**
+
+````python
+# 🕒 2025-06-10-22-15-00
+# Police_Data_Analysis/missing_config_variables
+# Author: R. A. Carucci
+# Purpose: Add these missing variables to your config.py file
+
+# =============================================================================
+# ADD THESE MISSING VARIABLES TO YOUR CONFIG.PY
+# =============================================================================
+
+# Symbology layer path (add this if you have a symbology file)
+SYM_LAYER_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\symbology\crime_symbology.lyrx"
+# Set to None if you don't have a symbology file:
+# SYM_LAYER_PATH = None
+
+# Suffixes for layer naming (used by map_export.py)
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+
+# Crime types list (this should match your CRIME_FOLDER_MAPPING keys)
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+
+# =============================================================================
+# VERIFICATION FUNCTION - ADD THIS TO TEST YOUR COMPLETE CONFIG
+# =============================================================================
+
+def verify_complete_config():
+    """Verify that all required variables exist in config"""
+    print("🔍 VERIFYING COMPLETE CONFIG")
+    print("=" * 40)
+    
+    required_vars = [
+        'EXCEL_CYCLE_PATH',
+        'REPORT_BASE_DIR', 
+        'APR_PATH',
+        'POWERPOINT_TEMPLATES',
+        'CRIME_FOLDER_MAPPING',
+        'CRIME_SQL_PATTERNS',
+        'FOLDER_NAME_MAPPING',
+        'SYM_LAYER_PATH',
+        'SUFFIXES',
+        'CRIME_TYPES'
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        if var in globals():
+            print(f"✅ {var}")
+        else:
+            print(f"❌ {var} - MISSING")
+            missing_vars.append(var)
+    
+    if missing_vars:
+        print(f"\n⚠️ Missing variables: {', '.join(missing_vars)}")
+        return False
+    else:
+        print("\n🎉 ALL REQUIRED VARIABLES PRESENT!") return True
+
+# =============================================================================
+# COMPLETE VARIABLE SUMMARY FOR YOUR CONFIG.PY
+# =============================================================================
+
+"""
+YOUR CONFIG.PY SHOULD HAVE ALL OF THESE:
+
+# Paths
+EXCEL_CYCLE_PATH = "path to Excel file"
+REPORT_BASE_DIR = "path to reports folder" 
+APR_PATH = "path to ArcGIS project"
+SYM_LAYER_PATH = "path to symbology file or None"
+
+# Templates
+POWERPOINT_TEMPLATES = {"main": "path", "7day": "path"}
+
+# Crime Configuration
+CRIME_FOLDER_MAPPING = {crime mappings}
+CRIME_SQL_PATTERNS = {SQL patterns}
+FOLDER_NAME_MAPPING = CRIME_FOLDER_MAPPING  # For compatibility
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+
+# Functions
+get_excel_report_name()
+get_excel_7day_period()
+get_correct_folder_name()
+get_7day_period_dates()
+get_crime_type_folder()
+get_standardized_filename()
+get_output_folder()
+get_sql_pattern_for_crime()
+validate_all_paths()
+quick_config_test()
+"""
+
+if __name__ == "__main__":
+    verify_complete_config()
+````
+
+## 📋 **Your chart_export.py Analysis:**
+
+✅ **Complete sections:**
+- Time period definitions
+- Color schemes  
+- Chart creation logic
+- Excel-based date filtering
+- ArcGIS data extraction
+
+❌ **Issues found:**
+1. **References `get_sql_pattern_for_crime`** - ✅ This exists in your config
+2. **Uses proper Excel integration** - ✅ Good
+3. **Crime subfolder logic** - ✅ Good
+
+## 🔧 **What You Need To Do:**
+
+**Add these missing variables to your config.py:**
+
+```python
+# Add these lines to your config.py file:
+SYM_LAYER_PATH = None  # Or path to your symbology file if you have one
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+```
+
+## 🧪 **Test Your Complete Setup:**
+
+**In ArcGIS Pro Python window:**
+```python
+# Test if you have all required variables
+import config
+required = ['EXCEL_CYCLE_PATH', 'APR_PATH', 'CRIME_FOLDER_MAPPING', 'SUFFIXES', 'CRIME_TYPES']
+for var in required:
+    if hasattr(config, var):
+        print(f"✅ {var}")
+    else:
+        print(f"❌ {var} - MISSING")
+```
+
+**Your chart_export.py should work perfectly once you add those 3 missing variables to config.py! ** 🎯
+
+The file is otherwise complete and properly integrates with your Excel system. ## Prompt:
+6/10/2025, 1:17:22 PM
+
+> File: chart_export.py
+
+does the chart_export need updating? ## Response:
+6/10/2025, 1:17:35 PM
+
+Looking at your updated chart_export.py file, it looks **excellent and complete! ** This version has all the Excel integration and should work perfectly. ## ✅ **What's Good in Your Current chart_export.py:**
+
+1. **Excel Integration**: ✅ Uses `get_7day_period_dates()` for Excel-based periods
+2. **Crime Subfolders**: ✅ Uses `get_crime_type_folder()` for organization  
+3. **Standardized Naming**: ✅ Uses `get_standardized_filename()`
+4. **Proper SQL Filtering**: ✅ Uses `get_sql_pattern_for_crime()`
+5. **Date Range Logic**: ✅ Correctly limits 7-day to exact Excel window
+6. **Error Handling**: ✅ Good fallback logic
+7. **Chart Formatting**: ✅ Proper colors, labels, and styling
+
+## 🔧 **Only ONE Small Update Needed:**
+
+You just need to add the missing variables to your **config.py**:
+
+**Add these 3 lines to your config.py:**
+```python
+# Add these missing variables to config.py:
+SYM_LAYER_PATH = None  # or path to symbology file if you have one
+SUFFIXES = ["7-Day", "28-Day", "YTD"] 
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+```
+
+## 🧪 **Quick Test:**
+
+**In ArcGIS Pro Python window:**
+```python
+# Test if chart_export can import everything it needs
+try:
+    from config import APR_PATH, get_sql_pattern_for_crime, get_7day_period_dates, get_crime_type_folder, get_standardized_filename
+    print("✅ All chart_export imports work!") except ImportError as e:
+    print(f"❌ Missing import: {e}")
+```
+
+## 🎯 **Your chart_export.py is ready to go! ** 
+
+Once you add those 3 variables to config.py, your chart export should work perfectly with:
+- Excel-based C06W23 folder naming
+- June 3-9, 2025 date filtering  
+- Crime-specific subfolders
+- Standardized file names
+
+No other changes needed to chart_export.py! 🎉
+
+
+
+## Prompt:
+6/10/2025, 1:18:39 PM
+
+> File: config.py
+
+is the config file up to date? ## Response:
+6/10/2025, 1:18:53 PM
+
+Looking at your config.py file, it's **almost perfect** but needs a few small additions to be completely up-to-date with your other scripts. ## ❌ **Missing Variables:**
+
+Your config.py is missing these 3 variables that your other scripts need:
+
+```python
+# Add these to your config.py:
+SYM_LAYER_PATH = None  # Symbology layer path (or actual path if you have one)
+SUFFIXES = ["7-Day", "28-Day", "YTD"]  # Layer suffixes for map_export.py
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())  # Crime types list for main.py
+```
+
+## ⚠️ **One Path Issue:**
+
+Your `APR_PATH` is still set to the **laptop version**:
+```python
+# CURRENT (for laptop):
+APR_PATH = r"...7_Day_Templet_SCRPA_Time_PD_BCI_LT.aprx"
+
+# SHOULD BE (for desktop):
+APR_PATH = r"...7_Day_Templet_SCRPA_Time.aprx"
+```
+
+## ✅ **Quick Fix in ArcGIS Pro Python Window:**
+
+```python
+# Add the missing variables
+import config
+
+# Fix the APR_PATH for desktop
+config.APR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\7_Day_Templet_SCRPA_Time.aprx"
+
+# Add missing variables
+config.SYM_LAYER_PATH = None
+config.SUFFIXES = ["7-Day", "28-Day", "YTD"]
+config.CRIME_TYPES = list(config.CRIME_FOLDER_MAPPING.keys())
+
+# Test everything
+config.quick_config_test()
+```
+
+## 🎯 **Add These Lines to Your config.py File:**
+
+```python
+# Add after the FOLDER_NAME_MAPPING line:
+SYM_LAYER_PATH = None  # Set to path if you have symbology file
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+
+# Fix the APR_PATH (replace existing line):
+APR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\7_Day_Templet_SCRPA_Time.aprx"
+```
+
+Once you add those 3 variables and fix the APR_PATH, your config will be **100% complete and ready!

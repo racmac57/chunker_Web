@@ -1,0 +1,188 @@
+in
+            if rawNotes = "" then null
+            else
+                let
+                    // Extract first timestamp and format as MM/DD/YYYY HH:MM:SS
+                    segments = Text.Split(rawNotes, " - "),
+                    timestamps = List.Select(segments, each 
+                        Text.Contains(_, "/") and Text.Contains(_, ":") and (Text.Contains(_, "AM") or Text.Contains(_, "PM"))
+                    ),
+                    
+                    firstTimestamp = if List.Count(timestamps) > 0 then 
+                        let
+                            rawTimestamp = Text.Trim(timestamps{0}),
+                            // Parse and reformat: "1/10/2025 10:52:32 AM" -> "01/10/2025 10:52:32"
+                            parsedDateTime = try DateTime.FromText(rawTimestamp) otherwise null,
+                            formattedTimestamp = if parsedDateTime <> null then
+                                Text.PadStart(Text.From(Date.Month(parsedDateTime)), 2, "0") & "/" &
+                                Text.PadStart(Text.From(Date.Day(parsedDateTime)), 2, "0") & "/" &
+                                Text.From(Date.Year(parsedDateTime)) & " " &
+                                Text.PadStart(Text.From(Time.Hour(Time.From(parsedDateTime))), 2, "0") & ":" &
+                                Text.PadStart(Text.From(Time.Minute(Time.From(parsedDateTime))), 2, "0") & ":" &
+                                Text.PadStart(Text.From(Time.Second(Time.From(parsedDateTime))), 2, "0")
+                            else rawTimestamp
+                        in
+                            formattedTimestamp
+                    else null
+                in
+                    firstTimestamp, type text),
+    
+    // ✅ ENHANCED Time_Spent_Minutes Formatting
+    WithTimeSpentFormatted = Table.AddColumn(WithCADNotesTimestamp, "Time_Spent_Formatted", each
+        let
+            minutes = [Time_Spent_Minutes]
+        in
+            if minutes = null then null
+            else
+                let
+                    totalMinutes = Number.Round(minutes, 0),
+                    hours = Number.IntegerDivide(totalMinutes, 60),
+                    remainingMinutes = Number.Mod(totalMinutes, 60)
+                in
+                    if hours = 0 then
+                        Text.From(remainingMinutes) & " Mins"
+                    else
+                        Text.From(hours) & " Hrs " & Text.PadStart(Text.From(remainingMinutes), 2, "0") & " Mins", type text),
+    
+    WithTimeSpentFlag = Table.AddColumn(WithTimeSpentFormatted, "Time_Spent_Flag", each
+        let
+            minutes = [Time_Spent_Minutes]
+        in
+            if minutes = null then null
+            else if minutes < 5 then "Under 5 Minutes"
+            else if minutes > 300 then "Over 5 Hours"  // 5 hours = 300 minutes
+            else "Normal", type text),
+    
+    // ✅ ENHANCED Time_Response_Minutes Formatting  
+    WithTimeResponseFormatted = Table.AddColumn(WithTimeSpentFlag, "Time_Response_Formatted", each
+        let
+            minutes = [Time_Response_Minutes]
+        in
+            if minutes = null then null
+            else
+                let
+                    totalSeconds = Number.Round(minutes * 60, 0),
+                    mins = Number.IntegerDivide(totalSeconds, 60),
+                    secs = Number.Mod(totalSeconds, 60)
+                in
+                    if mins = 0 then
+                        Text.From(secs) & " Secs"
+                    else
+                        Text.From(mins) & " Mins " & Text.PadStart(Text.From(secs), 2, "0") & " Secs", type text),
+    
+    WithTimeResponseFlag = Table.AddColumn(WithTimeResponseFormatted, "Time_Response_Flag", each
+        let
+            minutes = [Time_Response_Minutes]
+        in
+            if minutes = null then null
+            else if minutes <= 1 then "0-1 Minutes"
+            else if minutes > 10 then "Over 10 Minutes"
+            else "Normal", type text),
+    
+    // ✅ Create unified columns
+    WithUnifiedOfficer = Table.AddColumn(WithTimeResponseFlag, "Officer", each
+        if [CAD_Officer] <> null then [CAD_Officer] 
+        else [RMS_Officer], type text),
+        
+    WithUnifiedGrid = Table.AddColumn(WithUnifiedOfficer, "Grid", each
+        if [CAD_Grid] <> null then [CAD_Grid] 
+        else [RMS_Grid], type text),
+        
+    WithUnifiedZone = Table.AddColumn(WithUnifiedGrid, "Zone", each
+        if [CAD_Zone] <> null then [CAD_Zone] 
+        else [RMS_Zone], type text),
+    
+    // ✅ Enhanced Block with CAD fallback
+    WithEnhancedBlock = Table.AddColumn(WithUnifiedZone, "Enhanced_Block", each
+        let
+            rmsBlock = [RMS_Block],
+            cadBlock = [CAD_Block]
+        in
+            if (Text.Contains(rmsBlock ? ? "", "Check CAD Location Data") or 
+                Text.Contains(rmsBlock ? ? "", "Incomplete Address")) and 
+               cadBlock <> null then
+                cadBlock
+            else
+                rmsBlock, type text),
+    
+    // ✅ Select final columns
+    FinalColumns = Table.SelectColumns(WithEnhancedBlock, {
+        "Case Number",
+        "ReportNumberNew", 
+        "Incident_Date",
+        "Incident_Time",
+        "IncidentType",
+        "ALL_INCIDENTS",
+        "Crime_Category",
+        "TimeOfDay",
+        "Period",
+        "Officer",
+        "Grid",
+        "Zone", 
+        "RMS_Block",
+        "CAD_Block",
+        "Enhanced_Block",
+        "Has_CAD_Data",
+        "Time_Response_Minutes",
+        "Time_Response_Formatted",
+        "Time_Response_Flag",
+        "Time_Spent_Minutes", 
+        "Time_Spent_Formatted",
+        "Time_Spent_Flag",
+        "CADNotes",
+        "CADNotes_Cleaned",
+        "CADNotes_Username",
+        "CADNotes_Timestamp",
+        "CAD_Disposition",
+        "CAD_Response_Type"
+    })
+in
+    FinalColumns
+````
+
+## ✅ **FIXED CADNotes Processing Logic**
+
+I've completely rewritten the CADNotes parsing to correctly handle the pattern you showed:
+
+### **🔧 How the Fixed Logic Works:**
+
+**Input:** `"- Gervasi_J - 1/10/2025 10:52:32 AM PARKED LOOKS BROKEN INTO WITH DOORS OPEN. CALLER WILL BE IN THE LOBBY - Gervasi_J - 1/10/2025 10:54:04 AM MAROON 1995 MERCURY GRAND MARKEE, CC#25-011821 - Gervasi_J - 1/10/2025 10:54:04 AM"`
+
+### **✅ Pattern Recognition:**
+1. **Splits by " - "** to get segments
+2. **Identifies usernames** (contains "_")
+3. **Identifies timestamps** (contains "/" and ":" and "AM"/"PM")
+4. **Keeps only content** (everything else)
+
+### **📊 Expected Results:**
+
+| **Field** | **Result** |
+|-----------|------------|
+| **CADNotes_Cleaned** | `"PARKED LOOKS BROKEN INTO WITH DOORS OPEN. CALLER WILL BE IN THE LOBBY MAROON 1995 MERCURY GRAND MARKEE, CC#25-011821"` |
+| **CADNotes_Username** | `"Gervasi_J"` |
+| **CADNotes_Timestamp** | `"01/10/2025 10:52:32"` |
+
+### **⏰ Timestamp Formatting:**
+- **Input:** `"1/10/2025 10:52:32 AM"`
+- **Output:** `"01/10/2025 10:52:32"` (MM/DD/YYYY HH:MM:SS format)
+
+### **🧹 Content Cleaning:**
+- **Removes** all username/timestamp patterns
+- **Combines** remaining content parts
+- **Converts** to UPPERCASE
+- **Cleans up** extra spaces and dashes
+
+### **⚡ Implementation:**
+
+1. **Replace CAD_RMS_Matched** with the fixed version above
+2. **Refresh** and test with your example
+3. **Verify** the three new columns show correct results
+
+**This should now properly parse your CADNotes exactly as shown in your screenshot! **
+
+
+
+## Prompt:
+7/23/2025, 8:54:05 PM
+
+!

@@ -1,0 +1,12 @@
+
+---
+title: Time Off Master Refactor and Summary Calculations
+date: 2025-06-12
+participants:
+  - RAC (User)
+  - AI (Excel Assistant)
+summary: |
+  This conversation focused on updating the Power BI queries to incorporate enhanced time-off calculations including FTE types and scheduled hours. The Time_Off_Master query was refactored to use a new export source, and Time_Accruals_Summary was updated to calculate percentage off. RAC confirmed the output and moved toward closing the master Excel query used for loading.
+---
+
+**RAC:** Perfect

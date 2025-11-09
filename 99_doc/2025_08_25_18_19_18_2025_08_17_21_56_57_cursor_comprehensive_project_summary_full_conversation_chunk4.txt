@@ -1,0 +1,182 @@
+Now let me create a Python script to inspect the final_incident_datetime column in the latest output file:
+
+
+```python
+import pandas as pd
+import os
+
+# Load the latest output file
+output_file = r"C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v3\04_powerbi\20250817_212037_final_cad_rms_reconciled_C09W33.xlsx"
+
+print("=== INSPECTING final_incident_datetime COLUMN ===")
+print(f"File: {output_file}")
+print("=" * 60)
+
+# Load the main data sheet
+df = pd.read_excel(output_file, sheet_name='Reconciled_Data')
+
+print(f"Total records: {len(df)}")
+print(f"Columns: {list(df.columns)}")
+print()
+
+# Check final_incident_datetime column
+if 'final_incident_datetime' in df.columns:
+    print("=== final_incident_datetime ANALYSIS ===")
+    
+    # Basic stats
+    non_null_count = df['final_incident_datetime'].notna().sum()
+    null_count = df['final_incident_datetime'].isna().sum()
+    
+    print(f"Non-null records: {non_null_count}")
+    print(f"Null records: {null_count}")
+    print(f"Null percentage: {(null_count/len(df)*100):.1f}%")
+    print()
+    
+    # Show sample of datetime values
+    print("=== SAMPLE final_incident_datetime VALUES ===")
+    sample_data = df[['case_number', 'final_incident_datetime', 'time_of_day', 'incident_type']].head(20)
+    print(sample_data.to_string(index=False))
+    print()
+    
+    # Check for records with 12:00:00 time (the previous issue)
+    print("=== CHECKING FOR 12:00:00 TIME ISSUE ===")
+    if non_null_count > 0:
+        # Convert to string and check for 12:00:00 pattern
+        datetime_str = df['final_incident_datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        noon_time_count = datetime_str.str.contains('12:00:00').sum()
+        print(f"Records with 12:00:00 time: {noon_time_count}")
+        print(f"Percentage with 12:00:00: {(noon_time_count/len(df)*100):.1f}%")
+        
+        if noon_time_count > 0:
+            print("\nRecords with 12:00:00 time:")
+            noon_records = df[datetime_str.str.contains('12:00:00')][['case_number', 'final_incident_datetime', 'time_of_day']].head(10)
+            print(noon_records.to_string(index=False))
+    print()
+    
+    # Check time_of_day distribution
+    print("=== time_of_day DISTRIBUTION ===")
+    tod_dist = df['time_of_day'].value_counts()
+    print(tod_dist)
+    print()
+    
+    # Check incident_type filtering
+    print("=== incident_type ANALYSIS ===")
+    incident_dist = df['incident_type'].value_counts()
+    print("Incident type distribution:")
+    print(incident_dist)
+    print()
+    
+    # Check for records with "Exceptionally Cleared/Closed" vs "Sexual Assault"
+    print("=== CHECKING INCIDENT TYPE PRIORITY ===")
+    if 'all_incidents' in df.columns:
+        sexual_records = df[df['all_incidents'].str.contains('Sexual', case=False, na=False)]
+        cleared_records = df[df['all_incidents'].str.contains('Exceptionally Cleared/Closed', case=False, na=False)]
+        
+        print(f"Records with 'Sexual' in all_incidents: {len(sexual_records)}")
+        print(f"Records with 'Exceptionally Cleared/Closed' in all_incidents: {len(cleared_records)}")
+        
+        # Check specific cases
+        combined_records = df[df['all_incidents'].str.contains('Exceptionally Cleared/Closed.*Sexual|Sexual. *Exceptionally Cleared/Closed', case=False, na=False)]
+        if len(combined_records) > 0:
+            print(f"\nRecords with both 'Exceptionally Cleared/Closed' and 'Sexual': {len(combined_records)}")
+            print("Sample of these records:")
+            sample_combined = combined_records[['case_number', 'all_incidents', 'incident_type']].head(5)
+            print(sample_combined.to_string(index=False))
+    
+else:
+    print("ERROR: final_incident_datetime column not found!") print("\n=== INSPECTION COMPLETE ===")
+```
+
+Let me fix the path issue and run the inspection script:
+
+
+```python
+import pandas as pd
+import os
+
+# Load the latest output file
+output_file = r"..\04_powerbi\20250817_212037_final_cad_rms_reconciled_C09W33.xlsx"
+
+print("=== INSPECTING final_incident_datetime COLUMN ===")
+print(f"File: {output_file}")
+print("=" * 60)
+
+# Load the main data sheet
+df = pd.read_excel(output_file, sheet_name='Reconciled_Data')
+
+print(f"Total records: {len(df)}")
+print(f"Columns: {list(df.columns)}")
+print()
+
+# Check final_incident_datetime column
+if 'final_incident_datetime' in df.columns:
+    print("=== final_incident_datetime ANALYSIS ===")
+    
+    # Basic stats
+    non_null_count = df['final_incident_datetime'].notna().sum()
+    null_count = df['final_incident_datetime'].isna().sum()
+    
+    print(f"Non-null records: {non_null_count}")
+    print(f"Null records: {null_count}")
+    print(f"Null percentage: {(null_count/len(df)*100):.1f}%")
+    print()
+    
+    # Show sample of datetime values
+    print("=== SAMPLE final_incident_datetime VALUES ===")
+    sample_data = df[['case_number', 'final_incident_datetime', 'time_of_day', 'incident_type']].head(20)
+    print(sample_data.to_string(index=False))
+    print()
+    
+    # Check for records with 12:00:00 time (the previous issue)
+    print("=== CHECKING FOR 12:00:00 TIME ISSUE ===")
+    if non_null_count > 0:
+        # Convert to string and check for 12:00:00 pattern
+        datetime_str = df['final_incident_datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        noon_time_count = datetime_str.str.contains('12:00:00').sum()
+        print(f"Records with 12:00:00 time: {noon_time_count}")
+        print(f"Percentage with 12:00:00: {(noon_time_count/len(df)*100):.1f}%")
+        
+        if noon_time_count > 0:
+            print("\nRecords with 12:00:00 time:")
+            noon_records = df[datetime_str.str.contains('12:00:00')][['case_number', 'final_incident_datetime', 'time_of_day']].head(10)
+            print(noon_records.to_string(index=False))
+    print()
+    
+    # Check time_of_day distribution
+    print("=== time_of_day DISTRIBUTION ===")
+    tod_dist = df['time_of_day'].value_counts()
+    print(tod_dist)
+    print()
+    
+    # Check incident_type filtering
+    print("=== incident_type ANALYSIS ===")
+    incident_dist = df['incident_type'].value_counts()
+    print("Incident type distribution:")
+    print(incident_dist)
+    print()
+    
+    # Check for records with "Exceptionally Cleared/Closed" vs "Sexual Assault"
+    print("=== CHECKING INCIDENT TYPE PRIORITY ===")
+    if 'all_incidents' in df.columns:
+        sexual_records = df[df['all_incidents'].str.contains('Sexual', case=False, na=False)]
+        cleared_records = df[df['all_incidents'].str.contains('Exceptionally Cleared/Closed', case=False, na=False)]
+        
+        print(f"Records with 'Sexual' in all_incidents: {len(sexual_records)}")
+        print(f"Records with 'Exceptionally Cleared/Closed' in all_incidents: {len(cleared_records)}")
+        
+        # Check specific cases
+        combined_records = df[df['all_incidents'].str.contains('Exceptionally Cleared/Closed.*Sexual|Sexual. *Exceptionally Cleared/Closed', case=False, na=False)]
+        if len(combined_records) > 0:
+            print(f"\nRecords with both 'Exceptionally Cleared/Closed' and 'Sexual': {len(combined_records)}")
+            print("Sample of these records:")
+            sample_combined = combined_records[['case_number', 'all_incidents', 'incident_type']].head(5)
+            print(sample_combined.to_string(index=False))
+    
+else:
+    print("ERROR: final_incident_datetime column not found!") print("\n=== INSPECTION COMPLETE ===")
+```
+
+Let me try running the inspection script again:
+
+
+Let me check if the file exists and create a simpler inspection script:

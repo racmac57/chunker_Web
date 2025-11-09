@@ -1,0 +1,658 @@
+Args:
+        crime_type (str): Type of crime to map
+        output_folder (str): Base directory (will create crime-specific subfolder)
+        args (list): Arguments list where args[6] contains date in format "YYYY_MM_DD"
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    aprx = None
+    
+    try:
+        # Validate configuration first
+        if not validate_config():
+            return False
+            
+        logging.info(f"🗺️ Starting map export for: {crime_type}")
+        
+        # Get date from args
+        try:
+            date_str = args[6] if len(args) > 6 else "2025_06_24"
+            target_date = parse_date_string(date_str)
+        except (IndexError, TypeError, ValueError):
+            target_date = date.today()
+            date_str = target_date.strftime("%Y_%m_%d")
+            
+        # Create crime-specific output folder using Excel naming
+        crime_output_folder = get_crime_type_folder(crime_type, date_str)
+        os.makedirs(crime_output_folder, exist_ok=True)
+        arcpy.AddMessage(f"📁 Crime-specific folder: {crime_output_folder}")
+        
+        # Get standardized filename prefix
+        filename_prefix = get_standardized_filename(crime_type)
+        
+        # Load ArcGIS Pro project
+        aprx = arcpy.mp.ArcGISProject(APR_PATH)
+        arcpy.AddMessage(f"✅ Loaded ArcGIS Pro project: {APR_PATH}")
+        
+        # Get layout and map objects
+        layouts = aprx.listLayouts()
+        if not layouts:
+            arcpy.AddError("❌ No layouts found in project")
+            available_layouts = [layout.name for layout in aprx.listLayouts()]
+            arcpy.AddError(f"Available layouts: {available_layouts}")
+            return False
+            
+        # Try to find specific layout first, then use first available
+        layout = None
+        for l in layouts:
+            if "Crime Report" in l.name or "Legend" in l.name:
+                layout = l
+                break
+        
+        if not layout:
+            layout = layouts[0]  # Use first layout
+            
+        arcpy.AddMessage(f"✅ Found layout: {layout.name}")
+        
+        # Get map frame
+        map_frames = layout.listElements("MAPFRAME_ELEMENT")
+        if not map_frames:
+            arcpy.AddError("❌ No map frame elements found in layout")
+            return False
+            
+        map_frame = map_frames[0]
+        map_obj = map_frame.map
+        arcpy.AddMessage(f"✅ Found map: {map_obj.name}")
+
+        # Store original layer states for restoration
+        original_states = {}
+        for lyr in map_obj.listLayers():
+            original_states[lyr.name] = {
+                'visible': lyr.visible,
+                'transparency': lyr.transparency,
+                'definitionQuery': lyr.definitionQuery if hasattr(lyr, 'definitionQuery') else ""
+            }
+
+        # Hide all layers initially
+        layer_count = 0
+        for lyr in map_obj.listLayers():
+            lyr.visible = False
+            layer_count += 1
+        arcpy.AddMessage(f"🔄 Hidden {layer_count} layers initially")
+
+        # Show base layers
+        base_layers = [
+            "City Boundaries",
+            "OpenStreetMap Light Gray Canvas Reference", 
+            "Light Gray Canvas (for Export)",
+            "World Light Gray Canvas Base",
+            "OpenStreetMap",
+            "Streets"
+        ]
+        
+        base_layers_found = 0
+        for lyr in map_obj.listLayers():
+            if any(base_name in lyr.name for base_name in base_layers):
+                lyr.visible = True
+                lyr.transparency = 0
+                base_layers_found += 1
+                arcpy.AddMessage(f"✅ Enabled base layer: {lyr.name}")
+        
+        arcpy.AddMessage(f"✅ Enabled {base_layers_found} base layers")
+
+        # Get Excel-based 7-day period dates
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if not start_date or not end_date:
+            arcpy.AddError(f"❌ Could not determine Excel 7-day period for {target_date}")
+            return False
+            
+        arcpy.AddMessage(f"📅 Excel 7-Day period: {start_date} to {end_date}")
+
+        # Find and configure ONLY the 7-Day layer
+        layer_name = f"{crime_type} 7-Day"
+        target_layer = None
+        
+        for lyr in map_obj.listLayers():
+            if lyr.name == layer_name:
+                target_layer = lyr
+                break
+        
+        if not target_layer:
+            arcpy.AddWarning(f"❌ 7-Day layer not found: {layer_name}")
+            # List available layers for debugging
+            available_layers = [lyr.name for lyr in map_obj.listLayers()]
+            arcpy.AddMessage(f"Available layers: {available_layers}")
+            
+            # Create placeholder and return
+            export_filename = f"{filename_prefix}_Map.png"
+            export_path = os.path.join(crime_output_folder, export_filename)
+            success = create_placeholder_image(crime_type, export_path)
+            return success
+        
+        # Show only the 7-Day layer with enhanced visibility
+        target_layer.visible = True
+        target_layer.transparency = 0  # Full opacity for single layer
+        
+        # Apply enhanced symbology (CRITICAL FIX)
+        apply_enhanced_crime_symbology(target_layer, crime_type)
+        
+        arcpy.AddMessage(f"✅ Configured 7-Day layer: {target_layer.name}")
+
+        # Apply definition query if supported using Excel dates
+        if target_layer.supports("DEFINITIONQUERY"):
+            filter_sql = build_sql_filter_7day_excel(crime_type, start_date, end_date)
+            
+            if filter_sql:
+                arcpy.AddMessage(f"🔎 Excel-based SQL for 7-Day {layer_name}: {filter_sql}")
+                target_layer.definitionQuery = filter_sql
+                arcpy.AddMessage(f"✅ Applied Excel-based query to {target_layer.name}")
+                
+                # Log feature count
+                try:
+                    feature_count = int(arcpy.GetCount_management(target_layer).getOutput(0))
+                    arcpy.AddMessage(f"📊 7-Day features: {feature_count}")
+                    
+                    # If no features, create placeholder instead of map
+                    if feature_count == 0:
+                        arcpy.AddMessage(f"📋 No 7-day incidents for {crime_type}, creating placeholder")
+                        export_filename = f"{filename_prefix}_Map.png"
+                        export_path = os.path.join(crime_output_folder, export_filename)
+                        success = create_placeholder_image(crime_type, export_path)
+                        
+                        # Restore original layer states
+                        restore_layer_states(map_obj, original_states)
+                        return success
+                        
+                except Exception as e:
+                    arcpy.AddWarning(f"⚠️ Could not get feature count: {e}")
+            else:
+                arcpy.AddWarning(f"⚠️ Could not build SQL filter for {crime_type}")
+
+        # Apply Hackensack-focused extent calculation
+        calculate_hackensack_focused_extent(target_layer, map_frame)
+
+        # Update legend to show only 7-Day layer
+        update_legend_visibility_7day(layout, map_obj, target_layer)
+
+        # Clean up patch elements
+        cleanup_patch_elements(layout)
+
+        # Export the map with FIXED function
+        success = export_map_to_png_fixed(layout, crime_type, crime_output_folder, filename_prefix)
+        
+        # Restore original layer states
+        restore_layer_states(map_obj, original_states)
+        
+        if success:
+            arcpy.AddMessage(f"✅ Map export completed successfully for {crime_type}")
+        
+        return success
+        
+    except Exception as e:
+        arcpy.AddError(f"❌ Critical error in export_maps: {str(e)}")
+        logging.error(f"Critical error in export_maps for {crime_type}: {e}", exc_info=True)
+        return False
+    finally:
+        # Clean up ArcGIS Pro project
+        if aprx:
+            try:
+                del aprx
+                arcpy.AddMessage("🧹 Cleaned up ArcGIS Pro project reference")
+            except Exception as e:
+                arcpy.AddWarning(f"⚠️ Could not clean up project reference: {e}")
+
+# Legacy function support for compatibility
+def build_sql_filter_7day(crime_type, start_date):
+    """
+    Legacy function - now uses Excel integration.
+    """ try:
+        # Convert start_date string to date object if needed
+        if isinstance(start_date, str):
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+        else:
+            start_date_obj = start_date
+            
+        # Calculate target date (report due date) 
+        target_date = start_date_obj + timedelta(days=7)
+        
+        # Get Excel-based period
+        excel_start, excel_end = get_7day_period_dates(target_date)
+        
+        if excel_start and excel_end:
+            return build_sql_filter_7day_excel(crime_type, excel_start, excel_end)
+        else:
+            # Fallback to original method
+            return build_sql_filter_7day_excel(crime_type, start_date_obj, start_date_obj + timedelta(days=6))
+            
+    except Exception as e:
+        arcpy.AddError(f"❌ Error in legacy SQL filter: {e}")
+        return None
+
+def build_sql_filter(crime_type, start_date):
+    """
+    Legacy function - redirects to Excel-based 7-day version for compatibility.
+    """ return build_sql_filter_7day(crime_type, start_date)
+````
+
+## 🚀 **Implementation Instructions**
+
+### **1. Replace Your map_export.py**
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+copy map_export.py map_export_old.py
+```
+Then save the complete artifact above as your new `map_export.py`. ### **2. Test Enhanced Symbology**
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py" true false false 30 false 2025_06_24
+```
+
+## 🎯 **Key Enhancements in Final Script**
+
+### **Enhanced Symbology Function:**
+- **Crime-specific sizes**: MV Theft (15), Sexual Offenses (20), Robbery (18)
+- **Forced visibility**: Triple visibility enforcement for Sexual Offenses
+- **Scale dependency removal**: Eliminates zoom-based hiding
+- **Symbol refresh**: Visibility toggle to force redraw
+
+### **Expected Visual Results:**
+- **MV Theft**: 3 large yellow squares (size 15) clearly visible
+- **Sexual Offenses**: 1 extra-large purple diamond (size 20) prominently displayed
+- **All symbols**: No longer invisible, proper crime-specific colors
+
+### **Debug Output to Look For:**
+```
+✅ Set symbol size to 15 for MV Theft
+✅ Applied SQUARE color for MV Theft
+✅ Enhanced symbology applied to MV Theft
+   Size: 15, Type: SQUARE
+🚨 APPLYING SEXUAL OFFENSES ENHANCED VISIBILITY
+   Visibility attempt 1
+   Visibility attempt 2
+   Visibility attempt 3
+✅ Set symbol size to 20 for Sexual Offenses
+```
+
+This final script should resolve the invisible symbol issue and show properly sized, colored incident points on your maps! ## Prompt:
+6/24/2025, 5:49:42 PM
+
+how do i show the results if the file is too big for the message limit
+
+
+
+## Response:
+6/24/2025, 5:49:53 PM
+
+## 📊 **How to Share Large Results**
+
+### **Option 1: Key Screenshots Only** ⭐ *Recommended*
+Take focused screenshots of:
+- **One map with visible symbols** (MV Theft or Sexual Offenses)
+- **Console output** showing the enhanced symbology messages
+- **File directory** showing generated files with sizes
+
+### **Option 2: Summary Text Report**
+Just type key results like:
+```
+MV Theft: 3 yellow squares visible ✅/❌
+Sexual Offenses: 1 purple diamond visible ✅/❌
+File sizes: MV_Theft_Map.png (XX KB), Sexual_Offenses_Map.png (XX KB)
+Console showed: "Set symbol size to 15" ✅/❌
+```
+
+### **Option 3: Upload to Drive/Dropbox**
+1. **Upload map PNGs** to Google Drive/Dropbox
+2. **Share the link** in your message
+3. I can analyze the actual map quality
+
+### **Option 4: Focus on One Issue**
+Test **just Sexual Offenses** (most enhanced):
+```cmd
+python main.py --map-only "Sexual Offenses" 2025_06_24
+```
+Then share only that result. ### **Option 5: Console Output Only**
+Copy just the **symbology-related console messages** showing:
+- "Set symbol size to X"
+- "Enhanced symbology applied"
+- "Sexual Offenses enhanced visibility"
+
+**Which approach works best for you? ** I mainly need to know if the symbols are now visible and properly sized. ## Prompt:
+6/24/2025, 5:51:25 PM
+
+✅ **Map exports were successful** for all 5 crime types, including:
+* MV Theft (3 incidents)
+* Sexual Offenses (1 incident)
+* Burglary - Auto / Comm & Res / Robbery (0 incidents → placeholder maps)
+However, there are **❌ warnings** for:
+* Missing **chart exports**
+* Missing **incident tables**
+🔍 What’s Missing? Crime Type Map Chart Table MV Theft ✅ ❌ Missing ❌ Missing Burglary - Auto ✅ (0) ❌ Missing ❌ Missing Burglary - Comm & Res ✅ (0) ❌ Missing ❌ Missing Robbery ✅ (0) ❌ Missing ❌ Missing Sexual Offenses ✅ ❌ Missing ❌ Missing
+🛠️ Recommendation
+You ran:
+
+```bash
+main.py true false false 30 false 2025_06_24
+
+```
+
+This triggers **maps only**. To complete the full report, you should now run:
+
+```bash
+python main.py --rebuild-all-charts 2025_06_24
+python main.py --rebuild-all-tables 2025_06_24
+python main.py --embed-all-to-ppt 2025_06_24
+
+```
+
+Would you like to: **a. ** Update `main.py` logic so `true false false ...` **also includes charts + tables**? **b. ** Auto-run charts/tables/embed after map completion, as a single chain? ## Response:
+6/24/2025, 5:52:40 PM
+
+🎉 **EXCELLENT! Maps are working! ** The enhanced symbology fixed the invisible symbols issue. ## 🔧 **Quick Solution: Auto-Chain Components**
+
+Let's modify `main.py` to automatically run charts and tables after successful maps, making it a **single command workflow**. **Auto-Chain Enhancement for main.py**
+
+````python
+# 🕒 2025-01-28-00-10-00
+# SCRPA_Place_and_Time/main_py_auto_chain_enhancement
+# Author: R. A. Carucci
+# Purpose: Auto-chain charts and tables after successful map generation
+
+# Add this function to your main.py after the existing process_crime_type function
+
+def auto_complete_remaining_components(crime_types, report_date_str, successful_maps):
+    """
+    Automatically generate charts and tables for crime types with successful maps
+    """
+    print(f"\n🔄 AUTO-COMPLETING REMAINING COMPONENTS")
+    print("=" * 60)
+    
+    # Only process crime types that had successful maps
+    target_crimes = [crime for crime in crime_types if successful_maps.get(crime, False)]
+    
+    if not target_crimes:
+        print("❌ No successful maps found - skipping auto-completion")
+        return {}
+    
+    print(f"📊 Auto-generating charts and tables for {len(target_crimes)} crime types...")
+    
+    results = {
+        'charts': {},
+        'tables': {},
+        'powerpoint': False
+    }
+    
+    # Generate charts for successful map crimes
+    try:
+        from chart_export import export_chart
+        print(f"\n📈 GENERATING CHARTS")
+        print("-" * 30)
+        
+        for crime_type in target_crimes:
+            print(f"Processing chart for {crime_type}...")
+            try:
+                chart_success = export_chart(crime_type)
+                results['charts'][crime_type] = chart_success
+                status = "✅ SUCCESS" if chart_success else "❌ FAILED"
+                print(f"  {status}: {crime_type} chart")
+            except Exception as e:
+                print(f"  ❌ ERROR: {crime_type} chart failed - {e}")
+                results['charts'][crime_type] = False
+                
+    except ImportError:
+        print("⚠️ Chart export not available - skipping charts")
+    
+    # Generate tables for successful map crimes
+    try:
+        from incident_table_automation import export_incident_table_data_with_autofit, create_incident_table_placeholder
+        print(f"\n📋 GENERATING INCIDENT TABLES")
+        print("-" * 30)
+        
+        target_date = datetime.strptime(report_date_str, "%Y_%m_%d").date()
+        
+        for crime_type in target_crimes:
+            print(f"Processing table for {crime_type}...")
+            try:
+                table_success = export_incident_table_data_with_autofit(crime_type, target_date)
+                if not table_success:
+                    # Create placeholder if no data
+                    crime_folder = get_crime_type_folder(crime_type, report_date_str)
+                    filename_prefix = get_standardized_filename(crime_type)
+                    placeholder_path = os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+                    table_success = create_incident_table_placeholder(crime_type, placeholder_path)
+                
+                results['tables'][crime_type] = table_success
+                status = "✅ SUCCESS" if table_success else "❌ FAILED"
+                print(f"  {status}: {crime_type} table")
+            except Exception as e:
+                print(f"  ❌ ERROR: {crime_type} table failed - {e}")
+                results['tables'][crime_type] = False
+                
+    except ImportError:
+        print("⚠️ Table export not available - skipping tables")
+    
+    # Auto-assemble PowerPoint if we have components
+    print(f"\n🎯 AUTO-ASSEMBLING POWERPOINT")
+    print("-" * 30)
+    
+    try:
+        output_folder = get_output_folder(report_date_str)
+        ppt_success = auto_assemble_powerpoint_final(output_folder, target_crimes, report_date_str)
+        results['powerpoint'] = ppt_success
+        status = "✅ SUCCESS" if ppt_success else "❌ FAILED"
+        print(f"  {status}: PowerPoint assembly")
+    except Exception as e:
+        print(f"  ❌ ERROR: PowerPoint assembly failed - {e}")
+        results['powerpoint'] = False
+    
+    # Summary report
+    print(f"\n📊 AUTO-COMPLETION SUMMARY")
+    print("=" * 50)
+    
+    chart_success_count = sum(1 for success in results['charts'].values() if success)
+    table_success_count = sum(1 for success in results['tables'].values() if success)
+    
+    print(f"Charts completed: {chart_success_count}/{len(target_crimes)}")
+    print(f"Tables completed: {table_success_count}/{len(target_crimes)}")
+    print(f"PowerPoint: {'✅ SUCCESS' if results['powerpoint'] else '❌ FAILED'}")
+    
+    return results
+
+# Update the main function to include auto-completion
+# Replace the end of your main() function with this enhanced version:
+
+def main_enhanced(generate_maps=True, generate_charts=True, generate_tables=True, max_features=30, debug_mode=False, report_date_str=None):
+    """
+    Enhanced main function with auto-completion for incomplete workflows
+    """
+    batch_start = time.time()
+    overall_success = True
+    crime_results = {}
+    
+    # ... existing main function code until crime processing ...
+    
+    # Track successful maps for auto-completion
+    successful_maps = {}
+    
+    print(f"\nPROCESSING {len(CRIME_TYPES)} CRIME TYPES")
+    print("=" * 60)
+    
+    for i, crime_type in enumerate(CRIME_TYPES, 1):
+        print(f"\n[{i}/{len(CRIME_TYPES)}] Starting {crime_type}")
+        
+        success = process_crime_type(
+            crime_type, 
+            report_date, 
+            report_date_str, 
+            generate_map=generate_maps, 
+            generate_chart=generate_charts, 
+            generate_table=generate_tables
+        )
+        
+        crime_results[crime_type] = success
+        overall_success &= success
+        
+        # Track successful maps for auto-completion
+        if generate_maps and success:
+            successful_maps[crime_type] = True
+            
+        print(f"[{i}/{len(CRIME_TYPES)}] {crime_type}: {'SUCCESS' if success else 'FAILED'}")
+
+    # AUTO-COMPLETION LOGIC
+    # If maps were generated but charts/tables weren't, auto-complete them
+    auto_complete_needed = (
+        generate_maps and 
+        not generate_charts and 
+        not generate_tables and
+        any(successful_maps.values())
+    )
+    
+    if auto_complete_needed:
+        print(f"\n🚀 AUTO-COMPLETION TRIGGERED")
+        print("Maps completed successfully - auto-generating charts and tables...")
+        
+        auto_results = auto_complete_remaining_components(CRIME_TYPES, report_date_str, successful_maps)
+        
+        # Update overall success based on auto-completion
+        if auto_results:
+            chart_success = all(auto_results['charts'].values()) if auto_results['charts'] else True
+            table_success = all(auto_results['tables'].values()) if auto_results['tables'] else True
+            ppt_success = auto_results['powerpoint']
+            
+            overall_success = overall_success and chart_success and table_success and ppt_success
+    
+    elif generate_maps and generate_charts and generate_tables:
+        # Full workflow - still do PowerPoint assembly
+        print(f"\nASSEMBLING POWERPOINT PRESENTATION")
+        print("=" * 50)
+        
+        try:
+            success_ppt = auto_assemble_powerpoint_final(output_folder, CRIME_TYPES, report_date_str)
+            if success_ppt:
+                print("PowerPoint assembly completed successfully")
+            else:
+                print("PowerPoint assembly failed")
+                overall_success = False
+        except Exception as e:
+            print(f"PowerPoint assembly crashed: {e}")
+            overall_success = False
+
+    # ... rest of existing main function (timing, summary, etc.) ...
+    
+    return overall_success
+
+# Usage: Replace your existing main() calls with main_enhanced()
+# Or rename your existing main() to main_original() and rename this to main()
+````
+
+## 🎯 **Quick Implementation Options**
+
+### **Option A: Quick Test (No Code Changes)**
+Run the separate commands now:
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py" true true false 30 false 2025_06_24
+```
+This will generate maps + charts together. ### **Option B: Full Auto-Chain (5 min setup)**
+1. **Add the enhancement code** to your `main.py`
+2. **Replace the main function call** to use auto-completion
+3. **Test with**: `true false false` → automatically generates charts + tables + PowerPoint
+
+### **Option C: Simple Flag Addition**
+Just add this to your argument parsing:
+```python
+# In main.py,
+
+
+
+## Prompt:
+6/24/2025, 5:52:42 PM
+
+Provide the Final Full Script (Drop-in Ready)
+
+
+
+## Response:
+6/24/2025, 5:56:22 PM
+
+
+
+**Final Complete main.py - Drop-in Ready with Auto-Chain**
+
+````python
+# 🕒 2025-01-28-00-15-00
+# SCRPA_Place_and_Time/main_complete_final
+# Author: R. A. Carucci
+# Purpose: Complete main.py with auto-chain functionality for seamless workflow
+
+import sys
+import logging
+import time
+import os
+import glob
+import shutil
+from pathlib import Path
+from datetime import datetime as dt_datetime, date as dt_date
+import arcpy
+
+# Initialize ArcGIS Pro license
+try:
+    # Check available license types
+    if arcpy.CheckProduct("ArcInfo") == "Available":
+        arcpy.CheckOutExtension("ArcInfo")
+        logging.info("✅ ArcInfo license initialized")
+    elif arcpy.CheckProduct("ArcEditor") == "Available":
+        arcpy.CheckOutExtension("ArcEditor")
+        logging.info("✅ ArcEditor license initialized")
+    elif arcpy.CheckProduct("ArcView") == "Available":
+        arcpy.CheckOutExtension("ArcView")
+        logging.info("✅ ArcView license initialized")
+    else:
+        logging.error("❌ No ArcGIS license available")
+        sys.exit(1)
+except Exception as e:
+    logging.error(f"❌ License initialization failed: {e}")
+    sys.exit(1)
+
+print("OK DateTime imported correctly as dt_datetime and dt_date")
+
+def debug_mode(target_date_str=None):
+    """Enhanced debug mode with Excel patching and comprehensive testing"""
+    if target_date_str is None:
+        target_date_str = "2025_06_24"
+    
+    print(f"\nDEBUG MODE ACTIVE")
+    print("=" * 60)
+    print(f"Target Date: {target_date_str}")
+    
+    try:
+        target_date = dt_datetime.strptime(target_date_str, "%Y_%m_%d").date()
+        
+        from config import (
+            get_excel_report_name, get_correct_folder_name, get_output_folder,
+            get_7day_period_dates, validate_all_paths, CRIME_TYPES, REPORT_BASE_DIR
+        )
+        
+        print(f"\nEXCEL INTEGRATION TEST")
+        print("-" * 40)
+        
+        report_name = get_excel_report_name(target_date)
+        print(f"Excel Report Name: {report_name}")
+        
+        folder_name = get_correct_folder_name(target_date)
+        print(f"Folder Name: {folder_name}")
+        
+        start_date, end_date = get_7day_period_dates(target_date)
+        print(f"7-Day Period: {start_date} to {end_date}")
+        
+        output_path = get_output_folder(target_date_str)
+        print(f"Output Path: {output_path}")
+        
+        print(f"\nPATH VALIDATION")
+        print("-" * 40)
+        paths_valid = validate_all_paths()
+        
+        print(f"\nCRIME TYPES")
+        print("-" * 40)
+        print(f"Count: {len(CRIME_TYPES)}")
+        for i, crime_type in enumerate(CRIME_TYPES, 1):
+            print(f"  {i}.

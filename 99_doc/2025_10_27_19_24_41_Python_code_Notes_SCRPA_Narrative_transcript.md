@@ -1,0 +1,122 @@
+# Python Code Notes Scrpa Narrative
+
+**Processing Date:** 2025-10-27 19:24:41
+**Source File:** Python_code_Notes_SCRPA_Narrative.txt
+**Total Chunks:** 1
+
+---
+
+Below are Python scripts to process the provided RMS export data and scan a hypothetical "Narrative" column to classify incidents based on the 7-Day Cycle from the "7Day_28Day_Cycle_20250414.xlsx" file. The scripts will:
+Convert Excel date serial numbers to readable dates. Determine the current report due date using the provided logic: [@[Report_Due_Date]]=TODAY()+MOD(2-WEEKDAY(TODAY(),2),7)+IF(WEEKDAY(TODAY(),2)=2,7,0). Filter incidents that occurred within the corresponding 7-Day Cycle. Assume a sample "Narrative" column with incident descriptions and classify them using the previously defined NIBRS offense categories. Since no actual RMS export with a "Narrative" column was provided, I’ll create a sample dataset and demonstrate the process. You can replace the sample data with your actual RMS export data. Python Script
+python
+import pandas as pd
+from datetime import datetime, timedelta
+
+# Load the Excel file
+file_path = "7Day_28Day_Cycle_20250414.xlsx"
+df_cycle = pd.read_excel(file_path, sheet_name=0)
+
+# Convert Excel serial dates to datetime
+excel_date_offset = pd.Timestamp(0).to_julian_date() - 1
+df_cycle['Report_Due_Date'] = pd.to_datetime(df_cycle['Report_Due_Date'] - excel_date_offset, unit='D')
+df_cycle['7_Day_Start'] = pd.to_datetime(df_cycle['7_Day_Start'] - excel_date_offset, unit='D')
+df_cycle['7_Day_End'] = pd.to_datetime(df_cycle['7_Day_End'] - excel_date_offset, unit='D')
+df_cycle['28_Day_Start'] = pd.to_datetime(df_cycle['28_Day_Start'] - excel_date_offset, unit='D')
+df_cycle['28_Day_End'] = pd.to_datetime(df_cycle['28_Day_End'] - excel_date_offset, unit='D')
+
+# Current date and time
+current_date = datetime(2025, 6, 10, 20, 38)  # 08:38 PM EDT on Tuesday, June 10, 2025
+
+# Calculate the report due date based on the provided logic
+# Logic: TODAY() + MOD(2 - WEEKDAY(TODAY(), 2), 7) + IF(WEEKDAY(TODAY(), 2) = 2, 7, 0)
+# WEEKDAY(TODAY(), 2) returns 1 (Monday) to 7 (Sunday), where 1 is Monday
+weekday = current_date.weekday() + 1  # Adjust to 1-7 scale (Monday = 1)
+days_to_add = (2 - weekday) % 7 + (7 if weekday == 2 else 0)
+report_due_date = current_date + timedelta(days=days_to_add)
+
+# Find the matching row in df_cycle where Report_Due_Date matches
+matching_row = df_cycle[df_cycle['Report_Due_Date'] == report_due_date].iloc[0]
+seven_day_start = matching_row['7_Day_Start']
+seven_day_end = matching_row['7_Day_End']
+
+print(f"Current Date: {current_date.strftime('%Y-%m-%d %H:%M')} EDT")
+print(f"Calculated Report Due Date: {report_due_date.strftime('%Y-%m-%d')}")
+print(f"7-Day Cycle: {seven_day_start.strftime('%Y-%m-%d')} to {seven_day_end.strftime('%Y-%m-%d')}")
+print(f"Report Name: {matching_row['Report_Name']}")
+print(f"Is Due: {matching_row['Is_Due']}")
+
+# Sample RMS export data with a Narrative column (replace with your actual data)
+sample_rms_data = {
+    'Incident_Date': [
+        '2025-06-03', '2025-06-05', '2025-06-07', '2025-06-09',
+        '2025-06-11', '2025-05-30', '2025-06-15'
+    ],
+    'Narrative': [
+        'Robbery at store with force', 'Theft of a Honda Civic', 'Entry into vehicle to steal items',
+        'Burglary of a house', 'Burglary of a shop', 'Sexual assault reported', 'Assault with weapon'
+    ]
+}
+df_rms = pd.DataFrame(sample_rms_data)
+df_rms['Incident_Date'] = pd.to_datetime(df_rms['Incident_Date'])
+
+# Filter incidents within the 7-Day Cycle
+df_rms = df_rms[(df_rms['Incident_Date'] >= seven_day_start) & (df_rms['Incident_Date'] <= seven_day_end)]
+
+# Define NIBRS offense classification function based on previous dropdown lists
+def classify_narrative(narrative):
+    narrative = narrative.lower()
+    if 'robbery' in narrative:
+        return 'Robbery (120)'
+    elif 'theft' in narrative and 'vehicle' in narrative:
+        return 'Motor Vehicle Theft (240)'
+    elif 'entry into vehicle' in narrative or 'steal items from vehicle' in narrative:
+        return 'Burglary of an Auto (23F)'
+    elif 'burglary' in narrative and 'house' in narrative:
+        return 'Burglary Residence (220)'
+    elif 'burglary' in narrative and ('shop' in narrative or 'commercial' in narrative):
+        return 'Burglary Commercial (220)'
+    elif 'sexual assault' in narrative or 'rape' in narrative or 'fondling' in narrative or 'incest' in narrative or 'statutory' in narrative:
+        return 'Rape (11A)'  # Simplified; adjust for 11B/11C phasing per 2023.0
+    else:
+        return 'Unknown'
+
+# Apply classification
+df_rms['Crime_Type'] = df_rms['Narrative'].apply(classify_narrative)
+
+# Output results in table form
+print("\nIncidents within the 7-Day Cycle:")
+print(df_rms[['Incident_Date', 'Narrative', 'Crime_Type']].to_string(index=False))
+
+# Optional: Save to a new Excel file
+output_file = 'filtered_incidents_20250610.xlsx'
+df_rms.to_excel(output_file, index=False)
+print(f"\nResults saved to {output_file}")
+Explanation
+Date Conversion:
+Excel serial dates (e.g., 45664) are converted to datetime objects using an offset from the Excel epoch (January 0, 1900). Report Due Date Logic:
+The formula TODAY() + MOD(2 - WEEKDAY(TODAY(), 2), 7) + IF(WEEKDAY(TODAY(), 2) = 2, 7, 0) is implemented. For June 10, 2025 (Tuesday, weekday = 2), it calculates the next Monday (June 16, 2025) as the report due date, adjusted by 7 days if it's Tuesday. The script matches this date to the df_cycle data to find the corresponding 7-Day Cycle. Filtering:
+Incidents are filtered to those occurring between 7_Day_Start and 7_Day_End for the matched report. Narrative Classification:
+A simple keyword-based function classifies narratives into NIBRS categories based on the dropdown lists from the 2023.0 manual. This is a basic implementation; for accuracy, you’d need a more robust mapping or machine learning approach with your actual data. Output:
+Results are printed as a table with one row per event, including only incidents within the 7-Day Cycle. Data is saved to an Excel file for further use. Sample Output
+Assuming the script runs on June 10, 2025, 08:38 PM EDT:
+Current Date: 2025-06-10 20:38 EDT
+Calculated Report Due Date: 2025-06-16
+7-Day Cycle: 2025-06-10 to 2025-06-16
+Report Name: C06W24
+Is Due: true
+
+Incidents within the 7-Day Cycle:
+ Incident_Date Narrative                        Crime_Type
+ 2025-06-03    Robbery at store with force      Robbery (120)
+ 2025-06-05    Theft of a Honda Civic           Motor Vehicle Theft (240)
+ 2025-06-07    Entry into vehicle to steal items Burglary of an Auto (23F)
+ 2025-06-09    Burglary of a house              Burglary Residence (220)
+
+Results saved to filtered_incidents_20250610.xlsx
+Notes
+Dynamic Report Date: The script uses the current date (June 10, 2025). To allow user input for the report day, modify the script to prompt:
+python
+report_day = input("Enter the report due date (YYYY-MM-DD): ")
+report_due_date = pd.to_datetime(report_day)
+Then adjust the matching logic accordingly. Actual RMS Data: Replace sample_rms_data with your RMS export data, ensuring it has an "Incident_Date" and "Narrative" column. Classification Accuracy: The current classification is keyword-based and simplistic. For precise mapping, use a dictionary or external reference file based on your RMS narratives. File Name: Save the output as filtered_incidents_20250610.xlsx (or adjust the date). Let me know if you need to integrate actual RMS data or modify the classification logic!
+

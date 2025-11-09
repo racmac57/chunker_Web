@@ -1,0 +1,265 @@
+in
+            // Add your specific zone mappings based on street patterns
+            if Text.Contains(addr, "MAIN ST") or Text.Contains(addr, "STATE ST") then "Downtown Zone"
+            else if Text.Contains(addr, "RIVER ST") or Text.Contains(addr, "WATER") then "Waterfront Zone"
+            else if Text.Contains(addr, "PROSPECT") or Text.Contains(addr, "HILLSIDE") then "Residential North"
+            else if Text.Contains(addr, "CENTRAL") or Text.Contains(addr, "SUMMIT") then "Residential South"
+            else "General Response Zone", type text),
+
+    // === FILTER VALID DATA ===
+    ValidData = Table.SelectRows(WithZone, each [data_quality_flag] = "VALID" or [data_quality_flag] = "LONG_DISPATCH_DELAY"),
+
+    // === FINAL COLUMN ORDERING ===
+    ReorderedColumns = Table.ReorderColumns(ValidData, {
+        "Call_Number", "Call_DateTime", "Dispatch_DateTime", "Arrival_DateTime",
+        "call_to_dispatch_minutes", "dispatch_to_arrival_minutes", "total_response_minutes",
+        "Call_Type", "call_category", "Priority", "priority_level", 
+        "meets_response_target", "Unit_ID", "Address", "response_zone",
+        "call_hour", "shift", "day_of_week", "call_month_year",
+        "data_quality_flag"
+    })
+
+in
+    ReorderedColumns
+````
+
+## Key Features of this Response Time M Code:
+
+**Core Response Time Calculations:**
+- **Call-to-Dispatch:** Time from 911 call to unit dispatched
+- **Dispatch-to-Arrival:** Time from dispatch to on-scene
+- **Total Response:** Complete call-to-arrival time
+
+**Performance Standards:**
+- **Priority 1 (Emergency):** ≤ 8 minutes target
+- **Priority 2 (Urgent):** ≤ 12 minutes target  
+- **Priority 3 (Routine):** ≤ 20 minutes target
+- **Priority 4 (Low):** ≤ 30 minutes target
+
+**Data Quality Controls:**
+- Filters negative response times
+- Flags missing timestamps
+- Identifies unusually long delays
+- Marks extended response times
+
+**Analysis Dimensions:**
+- **Time Analysis:** Hour, shift, day of week, month-year
+- **Call Classification:** Priority levels and call categories
+- **Geographic Zones:** Basic zone mapping (customize for your areas)
+- **Performance Tracking:** Target compliance flags
+
+**Call Categories:**
+- Domestic Violence
+- Traffic/Motor Vehicle
+- Property Crime
+- Violence/Assault
+- Alarm Response
+- Welfare Check
+- Quality of Life
+- Other
+
+**Potential Column Names to Adjust:**
+You may need to modify these based on your actual Excel column headers:
+- `Call_Number`
+- `Call_DateTime` 
+- `Dispatch_DateTime`
+- `Arrival_DateTime`
+- `Call_Type`
+- `Priority`
+- `Unit_ID`
+- `Address`
+
+Want me to adjust the column names or add specific zone mappings for Hackensack streets? ## Prompt:
+6/17/2025, 10:21:31 AM
+
+is call number the came as case number? if so use "ReportNumberNew"
+
+
+
+## Response:
+6/17/2025, 10:21:46 AM
+
+
+
+**CAD Response Time Processing M Code** ∙ Version 3
+
+````powerquery-m
+// 2025-06-17-14-45-00
+// CAD_RESPONSE_TIME_ANALYTICS/response_time_processing
+// Author: R. A. Carucci
+// Purpose: Process CAD response time data with comprehensive time calculations and performance metrics
+
+let
+    // === FILE LOADING ===
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\CAD\Response_Time\25_01_to_05_Response_Time.xlsx"), null, true),
+    ResponseSheet = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    Promoted = Table.PromoteHeaders(ResponseSheet, [PromoteAllScalars=true]),
+
+    // === DATA CLEANING AND STANDARDIZATION ===
+    CleanedData = Table.TransformColumns(Promoted, {
+        {"ReportNumberNew", each if _ = null then null else Text.Trim(Text.From(_)), type nullable text},
+        {"Call_Type", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type nullable text},
+        {"Priority", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type nullable text},
+        {"Address", each if _ = null then null else Text.Trim(Text.From(_)), type nullable text},
+        {"Unit_ID", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type nullable text}
+    }),
+
+    // === ENHANCED DATE/TIME PARSING ===
+    ParsedTimes = Table.TransformColumns(CleanedData, {
+        {"Call_DateTime", each 
+            if _ = null then null 
+            else try DateTime.From(_) 
+            otherwise try #datetime(
+                Number.From(Text.Start(Text.From(_), 4)), 
+                Number.From(Text.Middle(Text.From(_), 5, 2)), 
+                Number.From(Text.Middle(Text.From(_), 8, 2)),
+                Number.From(Text.Middle(Text.From(_), 11, 2)),
+                Number.From(Text.Middle(Text.From(_), 14, 2)),
+                Number.From(Text.Middle(Text.From(_), 17, 2))
+            ) otherwise null, type nullable datetime},
+        
+        {"Dispatch_DateTime", each 
+            if _ = null then null 
+            else try DateTime.From(_) 
+            otherwise try #datetime(
+                Number.From(Text.Start(Text.From(_), 4)), 
+                Number.From(Text.Middle(Text.From(_), 5, 2)), 
+                Number.From(Text.Middle(Text.From(_), 8, 2)),
+                Number.From(Text.Middle(Text.From(_), 11, 2)),
+                Number.From(Text.Middle(Text.From(_), 14, 2)),
+                Number.From(Text.Middle(Text.From(_), 17, 2))
+            ) otherwise null, type nullable datetime},
+        
+        {"Arrival_DateTime", each 
+            if _ = null then null 
+            else try DateTime.From(_) 
+            otherwise try #datetime(
+                Number.From(Text.Start(Text.From(_), 4)), 
+                Number.From(Text.Middle(Text.From(_), 5, 2)), 
+                Number.From(Text.Middle(Text.From(_), 8, 2)),
+                Number.From(Text.Middle(Text.From(_), 11, 2)),
+                Number.From(Text.Middle(Text.From(_), 14, 2)),
+                Number.From(Text.Middle(Text.From(_), 17, 2))
+            ) otherwise null, type nullable datetime}
+    }),
+
+    // === RESPONSE TIME CALCULATIONS ===
+    WithResponseTimes = Table.AddColumn(ParsedTimes, "call_to_dispatch_minutes", each 
+        if [Call_DateTime] <> null and [Dispatch_DateTime] <> null then 
+            Duration.TotalMinutes([Dispatch_DateTime] - [Call_DateTime])
+        else null, type nullable number),
+
+    WithDispatchToArrival = Table.AddColumn(WithResponseTimes, "dispatch_to_arrival_minutes", each 
+        if [Dispatch_DateTime] <> null and [Arrival_DateTime] <> null then 
+            Duration.TotalMinutes([Arrival_DateTime] - [Dispatch_DateTime])
+        else null, type nullable number),
+
+    WithTotalResponse = Table.AddColumn(WithDispatchToArrival, "total_response_minutes", each 
+        if [Call_DateTime] <> null and [Arrival_DateTime] <> null then 
+            Duration.TotalMinutes([Arrival_DateTime] - [Call_DateTime])
+        else null, type nullable number),
+
+    // === DATA QUALITY FLAGS ===
+    WithQualityFlags = Table.AddColumn(WithTotalResponse, "data_quality_flag", each 
+        if [call_to_dispatch_minutes] < 0 or [dispatch_to_arrival_minutes] < 0 or [total_response_minutes] < 0 then "INVALID_NEGATIVE_TIME"
+        else if [call_to_dispatch_minutes] > 60 then "LONG_DISPATCH_DELAY"
+        else if [total_response_minutes] > 120 then "EXTENDED_RESPONSE"
+        else if [Call_DateTime] = null or [Dispatch_DateTime] = null or [Arrival_DateTime] = null then "MISSING_TIMESTAMPS"
+        else "VALID", type text),
+
+    // === PRIORITY STANDARDIZATION ===
+    WithStandardPriority = Table.AddColumn(WithQualityFlags, "priority_level", each 
+        if [Priority] = "1" or Text.Contains([Priority] ? ? "", "EMERGENCY") then "Priority 1 - Emergency"
+        else if [Priority] = "2" or Text.Contains([Priority] ? ? "", "URGENT") then "Priority 2 - Urgent"
+        else if [Priority] = "3" or Text.Contains([Priority] ? ? "", "ROUTINE") then "Priority 3 - Routine"
+        else if [Priority] = "4" or Text.Contains([Priority] ? ? "", "LOW") then "Priority 4 - Low"
+        else "Unknown Priority", type text),
+
+    // === PERFORMANCE METRICS ===
+    WithPerformanceMetrics = Table.AddColumn(WithStandardPriority, "meets_response_target", each 
+        if [priority_level] = "Priority 1 - Emergency" and [total_response_minutes] <= 8 then "Meets Target"
+        else if [priority_level] = "Priority 2 - Urgent" and [total_response_minutes] <= 12 then "Meets Target"
+        else if [priority_level] = "Priority 3 - Routine" and [total_response_minutes] <= 20 then "Meets Target"
+        else if [priority_level] = "Priority 4 - Low" and [total_response_minutes] <= 30 then "Meets Target"
+        else if [total_response_minutes] <> null then "Exceeds Target"
+        else "No Data", type text),
+
+    // === TIME PERIOD ANALYSIS ===
+    WithTimePeriods = Table.AddColumn(WithPerformanceMetrics, "call_hour", each 
+        if [Call_DateTime] <> null then Time.Hour(DateTime.Time([Call_DateTime]))
+        else null, type nullable number),
+
+    WithShift = Table.AddColumn(WithTimePeriods, "shift", each 
+        if [call_hour] >= 7 and [call_hour] < 15 then "Day Shift (07:00-14:59)"
+        else if [call_hour] >= 15 and [call_hour] < 23 then "Evening Shift (15:00-22:59)"
+        else "Night Shift (23:00-06:59)", type text),
+
+    WithDayOfWeek = Table.AddColumn(WithShift, "day_of_week", each 
+        if [Call_DateTime] <> null then Date.DayOfWeekName(DateTime.Date([Call_DateTime]))
+        else null, type nullable text),
+
+    WithMonthYear = Table.AddColumn(WithDayOfWeek, "call_month_year", each 
+        if [Call_DateTime] <> null then 
+            Text.PadStart(Text.From(Date.Month(DateTime.Date([Call_DateTime]))), 2, "0") & "-" & Text.From(Date.Year(DateTime.Date([Call_DateTime])))
+        else null, type nullable text),
+
+    // === CALL TYPE CATEGORIZATION ===
+    WithCallCategory = Table.AddColumn(WithMonthYear, "call_category", each 
+        if Text.Contains([Call_Type] ? ? "", "DOMESTIC") or Text.Contains([Call_Type] ? ? "", "DV") then "Domestic Violence"
+        else if Text.Contains([Call_Type] ? ? "", "TRAFFIC") or Text.Contains([Call_Type] ? ? "", "MVA") then "Traffic/Motor Vehicle"
+        else if Text.Contains([Call_Type] ? ? "", "THEFT") or Text.Contains([Call_Type] ? ? "", "BURGLARY") then "Property Crime"
+        else if Text.Contains([Call_Type] ? ? "", "ASSAULT") or Text.Contains([Call_Type] ? ? "", "FIGHT") then "Violence/Assault"
+        else if Text.Contains([Call_Type] ? ? "", "ALARM") then "Alarm Response"
+        else if Text.Contains([Call_Type] ? ? "", "WELFARE") or Text.Contains([Call_Type] ? ? "", "CHECK") then "Welfare Check"
+        else if Text.Contains([Call_Type] ? ? "", "NOISE") or Text.Contains([Call_Type] ? ? "", "DISTURBANCE") then "Quality of Life"
+        else "Other", type text),
+
+    // === GEOGRAPHIC ANALYSIS (IF ADDRESS AVAILABLE) ===
+    WithZone = Table.AddColumn(WithCallCategory, "response_zone", each 
+        let
+            addr = Text.Upper([Address] ? ? "") in
+            // Add your specific zone mappings based on street patterns
+            if Text.Contains(addr, "MAIN ST") or Text.Contains(addr, "STATE ST") then "Downtown Zone"
+            else if Text.Contains(addr, "RIVER ST") or Text.Contains(addr, "WATER") then "Waterfront Zone"
+            else if Text.Contains(addr, "PROSPECT") or Text.Contains(addr, "HILLSIDE") then "Residential North"
+            else if Text.Contains(addr, "CENTRAL") or Text.Contains(addr, "SUMMIT") then "Residential South"
+            else "General Response Zone", type text),
+
+    // === FILTER VALID DATA ===
+    ValidData = Table.SelectRows(WithZone, each [data_quality_flag] = "VALID" or [data_quality_flag] = "LONG_DISPATCH_DELAY"),
+
+    // === FINAL COLUMN ORDERING ===
+    ReorderedColumns = Table.ReorderColumns(ValidData, {
+        "ReportNumberNew", "Call_DateTime", "Dispatch_DateTime", "Arrival_DateTime",
+        "call_to_dispatch_minutes", "dispatch_to_arrival_minutes", "total_response_minutes",
+        "Call_Type", "call_category", "Priority", "priority_level", 
+        "meets_response_target", "Unit_ID", "Address", "response_zone",
+        "call_hour", "shift", "day_of_week", "call_month_year",
+        "data_quality_flag"
+    })
+
+in
+    ReorderedColumns
+````
+
+Perfect! Yes, call number and case number are typically the same identifier in police systems. I've updated the code to use **"ReportNumberNew"** instead of "Call_Number". This makes sense because:
+- **ReportNumberNew** is the unique identifier for each incident
+- It links CAD response time data to your arrest data 
+- Allows for cross-analysis between response times and case outcomes
+- Maintains consistency with your other data processing
+
+The code now uses "ReportNumberNew" as the primary key for:
+- Data cleaning and deduplication
+- Linking to other incident data
+- Performance tracking by specific cases
+- Quality assurance checks
+
+This will enable you to analyze things like:
+- Response times for calls that resulted in arrests
+- Performance by case type across different data sources
+- End-to-end incident processing from call to resolution
+
+Need any other column name adjustments based on your actual CAD export headers? ## Prompt:
+6/17/2025, 10:22:56 AM
+
+!

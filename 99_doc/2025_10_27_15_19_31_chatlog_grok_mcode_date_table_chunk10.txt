@@ -1,0 +1,127 @@
+- • Replace any existing date tables (e.g., Date, Date_Summary, Date_Table_Fix, Date_Summary_Simple). - • Columns: Date, Year, Month, MonthName, Quarter, DayOfMonth, DayOfWeek, DayName, WeekOfYear, FiscalYear, FiscalQuarter, YearMonth, YearQuarter, FiscalYearQuarter, DateKey, ShortDate, mmm-yy, mmm-yyyy, mmmm yyyy, mmmm, DayType. - • Fiscal Year: Starts July 1 (e.g., July 2025 is FY2026). Adjust AddFiscalYear and AddFiscalQuarter if your fiscal year starts differently (e.g., April 1). - • Performance: Generates dates in a single step using List.Dates, ensuring efficient processing. - • Sorting: Set mmm-yy, mmm-yyyy, mmmm yyyy to sort by YearMonth in Power BI (Modeling > Sort by column). - • Load this table into Power BI. - • Mark as the date table: Modeling > Mark as Date Table > set Date as the date column. - • Hide unused columns (e.g., YearMonth, DateKey) from report view to simplify the Fields pane. - • Rename IncDate to Incident_Date and IncTime to Incident_Time. - • Replace TimeOfDay with TimeOfDayCategory (format: HH:mm–HH:mm - Description) and add TimeOfDaySort. - • Ensure TimeOfDayCategory and TimeOfDaySort are only calculated for non-null Incident_Date and Incident_Time. - • Preserve existing columns (e.g., DayType, IsRushHour) and consolidate steps where possible without sacrificing performance. - • Consolidated Steps: Combined vehicle data cleaning into a single record column and expanded it to reduce repetitive Table.AddColumn calls, improving readability without impacting performance. - • Performance Considerations:
+    - ◦ Used try ... otherwise for error handling to avoid query failures. - ◦ Kept transformations lightweight (e.g., Text.Upper, Date.From) to minimize processing time. - ◦ Avoided unnecessary table buffering or complex loops, ensuring efficient data loading. - 
+- 
+- 
+- • Key Changes:
+    - ◦ Renamed IncDate to Incident_Date and IncTime to Incident_Time. - ◦ Replaced TimeOfDay with TimeOfDayCategory and added TimeOfDaySort, requiring non-null Incident_Date and Incident_Time. - ◦ Preserved DayType, IsRushHour, and other columns for compatibility with existing reports. - 
+- 
+- 
+- • Sorting: In Power BI, set TimeOfDayCategory to sort by TimeOfDaySort (Modeling > Sort by column). - • Fact table: MVA_MASTER (with Incident_Date, Incident_Time, TimeOfDayCategory, TimeOfDaySort, DayType, AllIncidents, Squad, Platoon, Block, etc.). - • Dimension table: ComprehensiveDateTable (with Date, DayType, mmm-yy, etc.). - • Relationship: MVA_MASTER[Incident_Date] → ComprehensiveDateTable[Date] (one-to-many, active). - • Measures are assigned to ComprehensiveDateTable for organization. - • Assign measures to ComprehensiveDateTable (right-click each measure in the Fields pane, set Home Table to ComprehensiveDateTable). - • Optionally, create a _Measures table:m
+    
+    ```
+    // _Measures
+    let
+        Source = #table({"Dummy"}, {{1}})
+    in
+        Source
+    ```
+    
+    - ◦ Hide _Measures from report view and move measures there for a cleaner Fields pane. - 
+- • Use these measures in visuals (e.g., tables, cards) to replicate PrimaryCompStatTable and OperationalTable. - • Example: Create a table visual with Metric (from a custom table or slicer) and measures like CurrentMVAs, MVAChangeMonth, FullTimeBreakdown. - • Tables:
+    - ◦ Fact Table: MVA_MASTER. - ◦ Dimension Table: ComprehensiveDateTable. - 
+- 
+- • Primary Relationship:
+    - ◦ MVA_MASTER[Incident_Date] → ComprehensiveDateTable[Date] (one-to-many, active). - 
+- • Secondary Date Columns:
+    - ◦ Add Report_Date to MVA_MASTER if needed:m
+        
+        ```
+        AddedReportDate = Table.AddColumn(AddedAllIncidents, "Report_Date", each
+            if [ReportDate] <> null then Date.From([ReportDate]) else null, type date)
+        ```
+        
+    - ◦ Create an inactive relationship: MVA_MASTER[Report_Date] → ComprehensiveDateTable[Date]. - ◦ Use USERELATIONSHIP for ReportDate-based analysis:dax
+        
+        ```
+        ReportDateIncidents =
+        CALCULATE(
+            COUNTROWS('MVA_MASTER'),
+            USERELATIONSHIP('MVA_MASTER'[Report_Date], 'ComprehensiveDateTable'[Date])
+        )
+        ```
+        
+- 
+    
+    ```
+    AddedReportDate = Table.AddColumn(AddedAllIncidents, "Report_Date", each
+        if [ReportDate] <> null then Date.From([ReportDate]) else null, type date)
+    ```
+    
+- 
+- 
+    
+    ```
+    ReportDateIncidents =
+    CALCULATE(
+        COUNTROWS('MVA_MASTER'),
+        USERELATIONSHIP('MVA_MASTER'[Report_Date], 'ComprehensiveDateTable'[Date])
+    )
+    ```
+    
+- • Single Fact Table: MVA_MASTER consolidates all data, eliminating the need for separate CurrentMonthData or PrevMonthData tables. - • Avoid Formatted Columns: Don’t relate mmm-yy or YearMonth; use them for filtering in visuals or DAX. - • Mark as Date Table: Ensure ComprehensiveDateTable is marked as the date table in Power BI. - • Hide Unused Columns: Hide columns like YearMonth, DateKey from report view. - • Disable Summary Tables: Disable load of PrimaryCompStatTable and OperationalTable (right-click in Queries pane > uncheck Enable load) after transitioning to DAX measures. 1. 1. Add ComprehensiveDateTable:
+    - ◦ In Power Query, create a new query with the provided M code. - ◦ Name it ComprehensiveDateTable and load it to the model. - ◦ Mark as date table in Power BI (Modeling > Mark as Date Table > set Date). - 
+- 
+- 
+1. 2. Update MVA_MASTER:
+    - ◦ Replace the existing MVA_MASTER query with the updated M code. - ◦ Verify columns (Incident_Date, Incident_Time, TimeOfDayCategory, TimeOfDaySort). - ◦ Set TimeOfDayCategory to sort by TimeOfDaySort in Power BI. - 
+- 
+- 
+1. 3. Create DAX Measures:
+    - ◦ Add the provided DAX measures to ComprehensiveDateTable. - ◦ Test in visuals (e.g., table with TimeOfDayCategory and MorningPeak, card with CurrentMVAs). - 
+- 
+1. 4. Set Up Relationships:
+    - ◦ Create active relationship: MVA_MASTER[Incident_Date] → ComprehensiveDateTable[Date]. - ◦ Add inactive relationship for Report_Date if needed. - 
+- 
+1. 5. Replace Summary Tables:
+    - ◦ Use DAX measures in visuals instead of PrimaryCompStatTable and OperationalTable. - ◦ Disable load of these tables to reduce model clutter. - 
+- 
+1. 6. Remove Old Date Tables:
+    - ◦ Identify and delete any existing date tables (e.g., Date, Date_Summary) in Power Query. - ◦ Update visuals to use ComprehensiveDateTable fields (e.g., mmm-yy). - 
+- 
+1. 7. Validate:
+    - ◦ Test visuals for correct sorting (e.g., TimeOfDayCategory in chronological order). - ◦ Verify time intelligence (e.g., PrevMVAs, YTDCurrent) using mmm-yy or Year slicers. - ◦ Check data quality metrics (TimeCompleteness, LocationCompleteness). - 
+- 
+- 
+- • Limited M Code Experience:
+    - ◦ The M code is consolidated into logical steps with clear comments. - ◦ Each query (ComprehensiveDateTable, MVA_MASTER) is self-contained, reducing complexity. - ◦ Avoided advanced M techniques (e.g., custom functions) to keep it beginner-friendly. - 
+- 
+- 
+- • Performance:
+    - ◦ Used efficient M transformations (e.g., List.Dates, single-step vehicle data cleaning). - ◦ Moved aggregations to DAX to reduce query refresh time. - ◦ Minimized relationships to optimize model performance. - 
+- 
+- 
+- • Avoiding Breakage:
+    - ◦ Documented steps in M code comments and recommended relationship comments in the model view. - ◦ Suggested testing changes in a duplicate .pbix file. - ◦ Used consistent naming (Incident_Date, Incident_Time) to prevent confusion. - 
+- 
+- 
+- • Fiscal Year: Assumed July 1 start. If different (e.g., April 1), adjust AddFiscalYear and AddFiscalQuarter in ComprehensiveDateTable. Example for April 1:m
+    
+    ```
+    AddFiscalYear = Table.AddColumn(AddWeekOfYear, "FiscalYear", each
+        if Date.Month([Date]) >= 4 then Date.Year([Date]) + 1 else Date.Year([Date]), Int64.Type),
+    AddFiscalQuarter = Table.AddColumn(AddFiscalYear, "FiscalQuarter", each
+        if Date.Month([Date]) >= 4 then Date.QuarterOfYear(Date.AddMonths([Date], -3))
+        else Date.QuarterOfYear(Date.AddMonths([Date], 9)), Int64.Type)
+    ```
+    
+- • Rush Hour vs. TimeOfDayCategory: Rush hour periods (06:00–09:00, 15:00–18:00) differ from TimeOfDayCategory (08:00–11:59, 16:00–19:59). If you want to align them, I can adjust TimeOfDayCategory to match rush hour ranges. - • Summary Tables: If you need to keep PrimaryCompStatTable or OperationalTable for specific visuals, let me know, and I’ll provide updated M code instead of disabling them. - • Additional Tables: If you have other fact tables, share their structure for tailored relationship advice. 1. 1. Power Query:
+    - ◦ Add ComprehensiveDateTable query. - ◦ Update MVA_MASTER query with the provided M code. - ◦ Disable load of PrimaryCompStatTable and OperationalTable (optional). - 
+- 
+- 
+1. 2. Power BI Model:
+    - ◦ Mark ComprehensiveDateTable as the date table. - ◦ Set up relationship: MVA_MASTER[Incident_Date] → ComprehensiveDateTable[Date]. - ◦ Add inactive relationship for Report_Date if needed. - ◦ Set sorting for TimeOfDayCategory and formatted date columns. - 
+- 
+- 
+- 
+1. 3. DAX Measures:
+    - ◦ Create measures in ComprehensiveDateTable. - ◦ Test in visuals (e.g., table with Metric, Current_Month, Month_vs_Month). - 
+- 
+1. 4. Visuals:
+    - ◦ Replace PrimaryCompStatTable visuals with DAX measures (e.g., table with CurrentMVAs, MVAChangeMonth). - ◦ Use ComprehensiveDateTable[mmm-yy] or [DayType] for slicers. - ◦ Verify sorting and filtering. - 
+- 
+- 
+1. 5. Validation:
+    - ◦ Check time-of-day visuals for correct order. - ◦ Test time intelligence (e.g., YTD, previous month). - ◦ Ensure no errors in visuals after changes. - 
+- 
+- 
+- • Support for Beginners: If you need step-by-step guidance on implementing these changes in Power BI Desktop, let me know, and I can provide screenshots or a detailed walkthrough. - • Performance Monitoring: Use Power BI’s Query Diagnostics to check refresh times after adding the new queries. - • Further Customization: If you have specific visual requirements (e.g., exact table layouts, charts), provide details, and I’ll suggest how to set them up with the new measures. - • Fiscal Year Confirmation: Please confirm your fiscal year start date to ensure accuracy.

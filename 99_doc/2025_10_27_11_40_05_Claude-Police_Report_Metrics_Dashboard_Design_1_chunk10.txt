@@ -1,0 +1,197 @@
+** Use the **exact M code** from the attached documents. I can see from your screenshot that you don't have these queries created yet, which is why `INFOCOP_INTEGRATED_SUMMONS` is failing. ## **🎯 STEP-BY-STEP IMPORT ORDER:**
+
+### **STEP 1: Create `SUMMONS_ASSIGNED_SHIFT`**
+1. **Get Data** → **Blank Query**
+2. **Advanced Editor** → **Delete all code**
+3. **Paste this code** from the attached document:
+
+```powerquery
+let
+    Source = Excel.Workbook(File.Contents("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\2025_Department_Full_List.xlsx"), null, true),
+    
+    // Load the PLATOONS table
+    PlatoonsData = Source{[Item="PLATOONS",Kind="Table"]}[Data],
+    
+    // Clean data types
+    CleanedTypes = Table.TransformColumnTypes(PlatoonsData,{
+        {"PATROL_MEMBER", type text},
+        {"ASSIGNMENT", type text},
+        {"ASSIGNMENT2", type text},
+        {"RANK", type text},
+        {"BADGE#", type text},
+        {"BADGE2", type text}
+    }),
+    
+    // Normalize badge numbers to 4-digit format for joining
+    NormalizedBadges = Table.TransformColumns(CleanedTypes, {
+        {"BADGE#", each Text.PadStart(Text.Clean(Text.Trim(Text.From(_))), 4, "0"), type text}
+    }),
+    
+    // Add platoon groupings based on assignment
+    WithPlatoon = Table.AddColumn(NormalizedBadges, "Platoon", each 
+        if Text.StartsWith([ASSIGNMENT], "A") then "Platoon A"
+        else if Text.StartsWith([ASSIGNMENT], "B") then "Platoon B" 
+        else if Text.StartsWith([ASSIGNMENT], "C") then "Platoon C"
+        else if [ASSIGNMENT] = "TRF" then "Traffic"
+        else if Text.StartsWith([ASSIGNMENT], "TCA") then "Traffic"
+        else if [ASSIGNMENT] = "STA" then "School Threat Assessment"
+        else if [ASSIGNMENT] = "CSB" then "Crime Suppression Bureau" 
+        else if [ASSIGNMENT] = "DET" then "Detectives"
+        else if [ASSIGNMENT] = "HACSOC" then "Special Operations"
+        else if Text.Contains([RANK] ? ? "", "LT") then "Supervision"
+        else if Text.Contains([RANK] ? ? "", "CAPT") then "Command"
+        else "Other", type text),
+    
+    WithSquad = Table.AddColumn(WithPlatoon, "Squad", each [ASSIGNMENT], type text),
+    
+    WithUnitGroup = Table.AddColumn(WithSquad, "Unit Group", each 
+        if [Platoon] = "Traffic" then "Enforcement"
+        else if Text.Contains([Platoon], "Platoon") then "Patrol"
+        else if [Platoon] = "Detectives" then "Investigations" 
+        else if [Platoon] = "Supervision" then "Management"
+        else if [Platoon] = "Command" then "Command Staff"
+        else "Support", type text)
+in
+    WithUnitGroup
+```
+
+4. **Click Done**
+5. **Rename** the query to: `SUMMONS_ASSIGNED_SHIFT`
+
+### **STEP 2: Create `Title39_Data`**
+1. **Get Data** → **Blank Query**
+2. **Advanced Editor** → **Paste the Title39_Data code** from the attached document
+3. **Rename** to: `Title39_Data`
+
+### **STEP 3: Create `SUMMONS_COURT_MASTER`**
+1. **Get Data** → **Blank Query**
+2. **Advanced Editor** → **Paste the SUMMONS_COURT_MASTER code** from the attached document
+3. **Rename** to: `SUMMONS_COURT_MASTER`
+
+### **STEP 4: Fix `INFOCOP_INTEGRATED_SUMMONS`**
+Once you have the first 3 queries working, then fix the integrated query using the code I provided earlier. ## **⚠️ IMPORTANT ORDER:**
+
+**Create them in this exact order:**
+1. ✅ `SUMMONS_ASSIGNED_SHIFT` (first - no dependencies)
+2. ✅ `Title39_Data` (second - no dependencies)  
+3. ✅ `SUMMONS_COURT_MASTER` (third - no dependencies)
+4. ✅ `INFOCOP_INTEGRATED_SUMMONS` (last - depends on others)
+
+## **🔧 FILE PATH CHECK:**
+
+Make sure these file paths exist on your system:
+- `C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\2025_Department_Full_List.xlsx`
+- `C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\Title39.xlsx`
+- `C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\Court\` (folder with court files)
+
+**Start with `SUMMONS_ASSIGNED_SHIFT` first and let me know if it loads successfully! **
+
+
+
+## Prompt:
+6/14/2025, 6:51:51 PM
+
+> File: m_code_with_no_preview_table.txt
+
+these attached quers have no table previews
+
+
+
+## Response:
+6/14/2025, 6:52:20 PM
+
+This is a **common Power BI issue**! The queries show "no preview" because they're trying to read from **folder paths that don't exist** or **don't have data yet**. ## **🔍 TROUBLESHOOTING STEPS:**
+
+### **STEP 1: CHECK FOLDER PATHS**
+Verify these folders exist and have `.xlsx` files:
+
+1. **Officer_Charge_Date_Case_Type folder:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type
+   ```
+
+2. **Officer_Charge_Date_Street folder:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Street
+   ```
+
+3. **Officer_Street_Statute folder:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Street_Statute
+   ```
+
+### **STEP 2: TEST ONE FOLDER AT A TIME**
+
+**Start with just the first query (`INFOCOP_OFFICER_CHARGE_TYPE`):**
+
+1. **Right-click** the query → **Edit Query**
+2. **Look at the error message** in the query editor
+3. **Check the "Source" step** - does it show files in the folder? ### **STEP 3: COMMON FIXES**
+
+**If folders are empty:**
+- InfoCop exports haven't been created yet
+- Need to export data from InfoCop first
+
+**If path is wrong:**
+- Update the folder paths in the M code
+- Use **Browse** to find the correct location
+
+**If files exist but query fails:**
+- Excel files might be corrupt
+- Column names might be different than expected
+
+## **🔧 QUICK TEST - SIMPLIFIED VERSION**
+
+Let me create a **simplified test query** to check if the basic folder structure works:
+
+**Test InfoCop Folder Connection**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Test_InfoCop_Folder_Connection
+// Author: R. A. Carucci
+// Purpose: Simple test to verify InfoCop folder structure and file access
+
+// ===================================================================
+// TEST QUERY: CHECK_INFOCOP_FOLDERS
+// Just lists files without processing - for troubleshooting
+// ===================================================================
+
+let
+    // Test the main folder path
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to Excel files only
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    // Just show file information without processing
+    FileInfo = Table.SelectColumns(FilteredFiles, {"Name", "Extension", "Date modified", "Date created"})
+in
+    FileInfo
+````
+
+## **🎯 NEXT STEPS:**
+
+**1. Create the test query above first**
+- If it works → shows files in the folder
+- If it fails → folder path issue
+
+**2. Check what the error message says:**
+- "Folder doesn't exist" → Path wrong
+- "Access denied" → Permission issue  
+- "No files found" → Need to export InfoCop data first
+
+**3. Let me know what you see:**
+- Does the test query show any files? - What's the exact error message? - Do those folder paths actually exist on your computer? **4. Alternative approach:**
+If InfoCop exports don't exist yet, we can:
+- Start with just `SUMMONS_COURT_MASTER` and `SUMMONS_ASSIGNED_SHIFT`
+- Build the basic dashboard with court data
+- Add InfoCop integration later when exports are available
+
+**What do you see when you run the test query? ** That will tell us exactly what's wrong. ## Prompt:
+6/14/2025, 7:02:23 PM
+
+!

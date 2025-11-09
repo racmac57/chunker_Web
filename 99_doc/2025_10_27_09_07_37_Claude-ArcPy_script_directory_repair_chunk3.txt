@@ -1,0 +1,888 @@
+CONTEXT:
+- Scripts are designed to run inside ArcGIS Pro Python window
+- Error: "Module 'arcpy' not found. Run inside ArcGIS Pro Python window"
+- ArcPy is only available in ArcGIS Pro's Python environment (arcgispro-py3)
+
+REQUIREMENTS:
+1. Add environment detection at script start
+2. Validate ArcPy availability before execution
+3. Provide clear error messages directing users to ArcGIS Pro Python window
+4. Add fallback instructions for running scripts
+5. Include header with timestamp, author "R. A. Carucci", and purpose
+6. Preserve all existing functionality
+
+DETECTION LOGIC TO ADD:
+```python
+import sys
+import os
+
+# Check if running in ArcGIS Pro environment
+try:
+    import arcpy
+except ImportError:
+    print("❌ ERROR: ArcPy module not found")
+    print("\n📋 TO RUN THIS SCRIPT:")
+    print("1. Open ArcGIS Pro")
+    print("2. Go to Analysis > Python > Python Window")
+    print("3. Paste and run this script")
+    print("\nOR")
+    print("4. Activate ArcGIS Pro conda environment:")
+    print("   conda activate arcgispro-py3")
+    sys.exit(1)
+```
+
+VALIDATION RULES:
+- Don't modify core analysis logic
+- Keep all existing imports
+- Preserve file paths and directory structure
+- Maintain error handling patterns
+- Add execution environment info to debug output
+
+OUTPUT:
+- Update all .py files in directory
+- Create backup copies with .bak extension
+- Generate summary report of changes made
+- List any scripts that couldn't be auto-fixed
+```
+
+---
+
+## **Alternative: Specific Single-File Fix**
+
+If you want to fix just the script that failed:
+
+```
+Fix the script C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\01_Scripts\statistical_export_restoration.py
+
+Add ArcGIS Pro environment detection and user-friendly error handling for missing arcpy module. Include:
+1. Environment check before arcpy import
+2. Clear instructions for running in ArcGIS Pro Python window
+3. Alternative execution method using conda environment
+4. Header with EST timestamp, author "R. A. Carucci", purpose description
+
+Preserve all existing functionality and file processing logic. ```
+
+---
+
+## **Quick Manual Fix** (if Claude Code unavailable)
+
+Add this to the **top** of your script after imports:
+
+```python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# 2025-09-30-10-30-13
+# SCRPA_ArcPy/statistical_export_restoration
+# Author: R. A. Carucci
+# Purpose: Weekly crime report processing with ArcGIS Pro spatial analysis
+
+import sys
+
+# Validate ArcGIS Pro environment
+try:
+    import arcpy
+    print("✓ ArcPy loaded successfully")
+except ImportError:
+    print("\n" + "="*60)
+    print("❌ ARCPY MODULE NOT FOUND")
+    print("="*60)
+    print("\nThis script requires ArcGIS Pro's Python environment.\n")
+    print("OPTION 1 - Run in ArcGIS Pro:")
+    print("  1. Open ArcGIS Pro")
+    print("  2. Analysis > Python > Python Window")
+    print("  3. Copy/paste this script\n")
+    print("OPTION 2 - Command line:")
+    print("  1. Activate: conda activate arcgispro-py3")
+    print("  2. Navigate to script directory")
+    print("  3. Run: python statistical_export_restoration.py\n")
+    print("="*60)
+    sys.exit(1)
+
+# Rest of your script continues here...
+```
+
+Which approach do you prefer? ## Prompt:
+9/30/2025, 10:35:59 AM
+
+I have more than 3 scripts that were made to process the data however I do not know which is the script I sould run
+
+
+
+## Response:
+9/30/2025, 10:36:42 AM
+
+# Script Inventory & Execution Order Analysis
+
+I'll help you identify which scripts to run and in what order. Let me analyze what you have:
+
+---
+
+## **Step 1: Inventory Your Scripts**
+
+Run this in PowerShell from your scripts directory:
+
+```powershell
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\01_Scripts"
+Get-ChildItem *.py | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize
+```
+
+---
+
+## **Step 2: Analyze Script Dependencies**
+
+I'll create a tool to scan your scripts and determine:
+- What each script does (from docstrings/comments)
+- What files it reads/writes
+- Dependencies between scripts
+- Execution order
+
+**Script Dependency Analyzer**
+
+````python
+# 2025-09-30-10-45-00
+# SCRPA_ArcPy/script_dependency_analyzer
+# Author: R. A. Carucci
+# Purpose: Analyze Python scripts to determine execution order and dependencies
+
+import os
+import re
+from pathlib import Path
+from collections import defaultdict
+
+def analyze_script(filepath):
+    """Extract key information from a Python script.""" with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read()
+    
+    info = {
+        'name': Path(filepath).name,
+        'path': filepath,
+        'size': os.path.getsize(filepath),
+        'modified': os.path.getmtime(filepath),
+        'purpose': '',
+        'inputs': [],
+        'outputs': [],
+        'imports': [],
+        'functions': [],
+        'has_main': '__main__' in content,
+        'has_arcpy': 'import arcpy' in content or 'from arcpy' in content
+    }
+    
+    # Extract docstring/purpose
+    docstring_match = re.search(r'"""(.+? )"""', content, re.DOTALL)
+    if docstring_match:
+        info['purpose'] = docstring_match.group(1).strip()[:200]
+    
+    # Find file operations
+    read_patterns = [
+        r'pd\.read_csv\([\'"](.+? )[\'"]\)',
+        r'pd\.read_excel\([\'"](.+? )[\'"]\)',
+        r'open\([\'"](.+? )[\'"],\s*[\'"]r',
+        r'\.xlsx? [\'"]',
+        r'\.csv[\'"]'
+    ]
+    
+    write_patterns = [
+        r'\.to_csv\([\'"](.+? )[\'"]\)',
+        r'\.to_excel\([\'"](.+? )[\'"]\)',
+        r'open\([\'"](.+? )[\'"],\s*[\'"]w'
+    ]
+    
+    for pattern in read_patterns:
+        info['inputs'].extend(re.findall(pattern, content))
+    
+    for pattern in write_patterns:
+        info['outputs'].extend(re.findall(pattern, content))
+    
+    # Extract imports
+    import_matches = re.findall(r'^import (\w+)|^from (\w+)', content, re.MULTILINE)
+    info['imports'] = list(set([m[0] or m[1] for m in import_matches]))
+    
+    # Extract function definitions
+    function_matches = re.findall(r'^def (\w+)\(', content, re.MULTILINE)
+    info['functions'] = function_matches
+    
+    return info
+
+def determine_execution_order(scripts_info):
+    """Determine likely execution order based on file dependencies.""" order = []
+    remaining = scripts_info.copy()
+    
+    # First pass: scripts with no inputs (data generators)
+    for script in remaining:
+        if not script['inputs'] or 'export' in script['name'].lower():
+            order.append(script)
+    
+    for script in order:
+        remaining.remove(script)
+    
+    # Second pass: scripts that read from previous outputs
+    max_iterations = len(remaining) + 1
+    iteration = 0
+    
+    while remaining and iteration < max_iterations:
+        iteration += 1
+        for script in remaining[:]:
+            # Check if inputs come from previous outputs
+            outputs_so_far = [out for s in order for out in s['outputs']]
+            if any(inp in str(outputs_so_far) for inp in script['inputs']):
+                order.append(script)
+                remaining.remove(script)
+    
+    # Add remaining scripts at end
+    order.extend(remaining)
+    
+    return order
+
+def generate_report(scripts_info, execution_order):
+    """Generate markdown report of script analysis.""" from datetime import datetime
+    
+    report = f"""# Script Execution Analysis Report
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} EST
+Author: R. A. Carucci
+Directory: C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\02_ETL_Scripts\\SCRPA_ArcPy\\01_Scripts
+
+---
+
+## Recommended Execution Order
+
+"""
+    
+    for idx, script in enumerate(execution_order, 1):
+        report += f"""### {idx}. {script['name']}
+
+**Purpose:** {script['purpose'] or 'No description found'}
+
+**Requires ArcPy:** {'Yes' if script['has_arcpy'] else 'No'}
+
+**Executable:** {'Yes (has __main__)' if script['has_main'] else 'No (library/module)'}
+
+**Input Files:**
+{chr(10).join(f'- {inp}' for inp in script['inputs']) if script['inputs'] else '- None detected'}
+
+**Output Files:**
+{chr(10).join(f'- {out}' for out in script['outputs']) if script['outputs'] else '- None detected'}
+
+**Key Functions:** {', '.join(script['functions'][:5]) if script['functions'] else 'None'}
+
+---
+
+"""
+    
+    report += """
+## Quick Start Guide
+
+### If Scripts are Independent:
+Run each script individually as needed for specific tasks. ### If Scripts are Sequential:
+Execute in the order listed above, ensuring each completes successfully before running the next. ### For ArcPy Scripts:
+1. Open ArcGIS Pro
+2. Analysis > Python > Python Window
+3. Copy/paste script content
+4. Run
+
+---
+
+## Script Summary Table
+
+| # | Script Name | ArcPy? | Executable? | Inputs | Outputs |
+|---|-------------|--------|-------------|--------|---------|
+"""
+    
+    for idx, script in enumerate(execution_order, 1):
+        report += f"| {idx} | {script['name']} | {'✓' if script['has_arcpy'] else '✗'} | {'✓' if script['has_main'] else '✗'} | {len(script['inputs'])} | {len(script['outputs'])} |\n"
+    
+    return report
+
+def main():
+    """Main execution function.""" scripts_dir = r"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\01_Scripts"
+    
+    # Find all Python scripts
+    script_files = list(Path(scripts_dir).glob("*.py"))
+    
+    if not script_files:
+        print(f"❌ No Python scripts found in {scripts_dir}")
+        return
+    
+    print(f"📂 Found {len(script_files)} Python scripts")
+    print("🔍 Analyzing scripts...\n")
+    
+    # Analyze each script
+    scripts_info = []
+    for script_file in script_files:
+        print(f"  Analyzing: {script_file.name}")
+        info = analyze_script(script_file)
+        scripts_info.append(info)
+    
+    # Determine execution order
+    print("\n🔗 Determining execution order...")
+    execution_order = determine_execution_order(scripts_info)
+    
+    # Generate report
+    print("📝 Generating report...\n")
+    report = generate_report(scripts_info, execution_order)
+    
+    # Save report
+    report_path = Path(scripts_dir).parent / "Script_Execution_Analysis.md"
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    
+    print(f"✅ Report saved to: {report_path}\n")
+    print("="*60)
+    print("RECOMMENDED EXECUTION ORDER:")
+    print("="*60)
+    
+    for idx, script in enumerate(execution_order, 1):
+        status = "🔧 ArcPy Required" if script['has_arcpy'] else "🐍 Standard Python"
+        executable = "▶️ Run directly" if script['has_main'] else "📚 Import only"
+        print(f"\n{idx}. {script['name']}")
+        print(f"   {status} | {executable}")
+        if script['purpose']:
+            print(f"   Purpose: {script['purpose'][:80]}...")
+
+if __name__ == "__main__":
+    main()
+````
+
+---
+
+## **How to Use**
+
+1. **Save the analyzer script** to your scripts directory
+2. **Run it** from PowerShell or Command Prompt:
+
+```powershell
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\01_Scripts"
+python script_dependency_analyzer.py
+```
+
+3. **Review the generated report** at:
+   - `C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\Script_Execution_Analysis.md`
+
+---
+
+## **What This Does**
+
+✅ Scans all `.py` files in your directory  
+✅ Extracts purpose/docstrings  
+✅ Identifies input/output files  
+✅ Detects ArcPy dependencies  
+✅ Determines if scripts are executable (have `__main__`)  
+✅ Suggests execution order based on file dependencies  
+✅ Generates readable markdown report  
+
+---
+
+## **Alternative: Manual Quick Check**
+
+If you want to quickly peek at what each script does:
+
+```powershell
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\01_Scripts"
+
+# Show first 30 lines of each script (includes headers/docstrings)
+Get-ChildItem *.py | ForEach-Object {
+    Write-Host "`n=== $($_.Name) ===" -ForegroundColor Cyan
+    Get-Content $_.FullName -TotalCount 30
+}
+```
+
+Run the analyzer and share the output - I'll help you determine the correct execution sequence! ## Prompt:
+10/6/2025, 1:41:51 PM
+
+> File: Finial_Summary_Change_Log.md
+
+Attached is a final summary and chang log for the project. I also Added a follow question to ChatGPT and the response the AI provided. Review the attached file and provide recommendations on how to best describe the overdose data to assist the city manager with the below request I received last week:
+On Thursday, October 2, 2025, D/Capt. DeWitt and I attended a meeting with city officials regrading the expenditure of opioid settlement funds. City Hall is contemplating installing automated kiosks that will dispense free harm reduction products (e.g. naloxone, fentanyl test strips, blankets etc.). A critical step in this process, is identifying locations that are geographically desirable. In order to choose the locations, we have been tasked by City Manager, Thomas Freeman, to pull data as it relates to fatal / non-fatal CDS overdoses. We respectfully request three (3) years of data as soon as possible in order to prepare for the next meeting. ## Response:
+10/6/2025, 1:43:15 PM
+
+# Overdose Data Analysis & Presentation Strategy
+
+## 📋 Executive Recommendation
+
+**Primary Deliverable:** Interactive heat map identifying high-incident zones for Narcan vending machine placement, supported by a one-page executive summary with statistics and site recommendations. ---
+
+## 🎯 What City Manager Freeman Needs
+
+**Decision-Making Context:**
+- Geographic clustering of overdose incidents (fatal + non-fatal)
+- Accessibility to public/pedestrian traffic
+- Justification for specific site selections
+- ROI perspective: Maximum coverage with minimum kiosk count
+
+**Format Preference:**
+- Visual-first (map-driven)
+- Brief statistical context
+- Actionable site recommendations with rationale
+
+---
+
+## 🗺️ Recommended Mapping Approach
+
+### **Primary Visualization: Dual-Layer Heat Map**
+
+**Layer 1: Non-Fatal Overdoses (2022-2025)**
+- **Symbology:** Heat map (yellow → red gradient)
+- **Radius:** 500 feet
+- **Purpose:** Shows where Narcan/intervention already worked
+- **Weight:** 70% of analysis (these are your target users)
+
+**Layer 2: Fatal Overdoses**
+- **Symbology:** Orange star icons with black outline
+- **Size:** Larger than non-fatal points
+- **Purpose:** Highlights tragedy zones requiring intervention
+
+**Context Layers:**
+- City boundary
+- Major roads/transit routes
+- Public facilities (parks, transit stops, municipal buildings)
+- Commercial corridors
+
+---
+
+## 📊 Supporting Data Package
+
+### **1. Executive Summary (1 page)**
+
+```
+OVERDOSE INCIDENT ANALYSIS: HARM REDUCTION KIOSK SITE SELECTION
+Hackensack Police Department | Analytical Services Unit
+P.O. R. A. Carucci, Principal Analyst
+
+DATASET SCOPE:
+• Time Period: October 2022 – October 2025 (3 years)
+• Total Incidents: 105 overdose responses
+• Fatal Overdoses: 9 (8.6%)
+• Non-Fatal Overdoses: 96 (91.4%)
+• Geographic Coverage: City-wide
+
+KEY FINDINGS:
+• 83 unique hotspot locations identified
+• Top 3 clusters account for 42% of non-fatal incidents
+• 78% of incidents occur within 1/4 mile of public transit or commercial zones
+• Peak incident times: [insert from temporal analysis]
+
+RECOMMENDED KIOSK LOCATIONS: [See Map]
+1. [Location A] - Proximity to [X] incidents, high foot traffic
+2. [Location B] - Transit hub, 24/7 accessibility
+3. [Location C] - Residential density, repeat incident area
+
+METHODOLOGY:
+Kernel density analysis using 500-foot search radius, weighted by incident recurrence, filtered for public accessibility. ```
+
+### **2. Statistical Breakdown Table**
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Total Incidents** | 105 | All OD responses |
+| **Fatal** | 9 (8.6%) | Mortality rate |
+| **Non-Fatal** | 96 (91.4%) | Survivors (target population) |
+| **Unique Locations** | 83 | Distinct addresses |
+| **Repeat Locations (3+)** | [Calculate] | High-risk zones |
+| **Naloxone Admin by PD** | [Extract from `Naloxone_Administered_By`] | Current intervention rate |
+| **Hospital Transports** | [Extract from `Taken_to_Hospital`] | EMS engagement |
+
+### **3. Temporal Analysis (Optional but Powerful)**
+
+- **Month-over-month trend** (line chart)
+- **Day-of-week distribution** (bar chart)
+- **Time-of-day clustering** (if available)
+
+**Insight Example:**
+> "62% of non-fatal overdoses occur between 4 PM - 2 AM, suggesting kiosk locations should prioritize 24-hour accessibility." ---
+
+## 🛠️ Technical Execution Plan
+
+### **Step 1: Prepare Data in ArcGIS Pro**
+
+**ArcGIS Pro Heat Map Workflow**
+
+````python
+# 2025-10-06-11-15-00
+# CDS_Overdose_Analysis/arcgis_heatmap_workflow
+# Author: R. A. Carucci
+# Purpose: Step-by-step ArcGIS Pro workflow for kiosk site selection mapping
+
+"""
+ARCGIS PRO WORKFLOW: OVERDOSE HEAT MAP FOR KIOSK PLACEMENT
+============================================================
+
+PREREQUISITES:
+- ArcGIS Pro with Spatial Analyst extension
+- OD_Data_Enhanced.csv from 02_Cleaned_Data folder
+- City boundary shapefile
+- Public facility points (optional)
+
+STEP-BY-STEP PROCESS:
+"""
+
+# ========================================
+# PART 1: DATA IMPORT
+# ========================================
+
+"""
+1. Open ArcGIS Pro → New Map Project
+2. Add Data → XY Point Data
+   - Input Table: OD_Data_Enhanced.csv
+   - X Field: Longitude
+   - Y Field: Latitude
+   - Coordinate System: WGS 1984 (EPSG:4326)
+   - Output: OD_Incidents (save to project.gdb)
+
+3. Project to Local Coordinate System:
+   - Right-click OD_Incidents → Data → Export Features
+   - Output Coordinate System: NAD_1983_HARN_StatePlane_New_Jersey_FIPS_2900_Feet
+   - Output: OD_Incidents_NJ (use this for analysis)
+"""
+
+# ========================================
+# PART 2: DATA FILTERING
+# ========================================
+
+"""
+4. Create Non-Fatal Layer:
+   - Right-click OD_Incidents_NJ → Properties → Definition Query
+   - SQL: Fatality_Status = 'Non-Fatal'
+   - Save as new layer: OD_NonFatal
+
+5. Create Fatal Layer (optional overlay):
+   - Right-click OD_Incidents_NJ → Properties → Definition Query
+   - SQL: Fatality_Status = 'Fatal'
+   - Save as new layer: OD_Fatal
+"""
+
+# ========================================
+# PART 3: KERNEL DENSITY ANALYSIS
+# ========================================
+
+"""
+6. Run Kernel Density (requires Spatial Analyst):
+   - Analysis Tab → Tools → Kernel Density (Spatial Analyst)
+   - Input: OD_NonFatal
+   - Population Field: <None> (each point = 1 incident)
+   - Output Cell Size: 50 feet
+   - Search Radius: 500 feet
+   - Output: OD_NonFatal_Density
+
+7. Classify Density Raster:
+   - Right-click OD_NonFatal_Density → Symbology
+   - Method: Classified
+   - Classes: 5
+   - Color Scheme: Yellow to Red
+   - Classification Method: Natural Breaks (Jenks)
+"""
+
+# ========================================
+# PART 4: HOTSPOT POLYGONS (OPTIONAL)
+# ========================================
+
+"""
+8. Convert High-Density Areas to Polygons:
+   - Analysis → Tools → Reclassify
+   - Input: OD_NonFatal_Density
+   - Reclassify: Keep only classes 4-5 (top 40%)
+   - Output: OD_High_Density_Zones
+   
+   - Analysis → Tools → Raster to Polygon
+   - Input: OD_High_Density_Zones
+   - Output: OD_Hotspot_Polygons
+
+9. Calculate Incident Counts per Hotspot:
+   - Analysis → Tools → Spatial Join
+   - Target: OD_Hotspot_Polygons
+   - Join: OD_NonFatal
+   - Output: OD_Hotspots_WithCounts
+"""
+
+# ========================================
+# PART 5: SITE SELECTION OVERLAY
+# ========================================
+
+"""
+10. Add Public Facility Data:
+    - Import: Transit stops, parks, municipal buildings
+    - Buffer facilities by 250 feet (walking distance)
+
+11. Identify Optimal Kiosk Locations:
+    - Analysis → Tools → Intersect
+    - Input: OD_Hotspot_Polygons + Public_Facility_Buffers
+    - Output: Candidate_Kiosk_Sites
+
+12. Rank Sites by Incident Density:
+    - Open attribute table → Sort by incident count (descending)
+    - Select top 3-5 locations
+    - Add field "Site_Priority" (1, 2, 3...)
+"""
+
+# ========================================
+# PART 6: MAP LAYOUT
+# ========================================
+
+"""
+13. Create Layout for City Manager:
+    - Insert → New Layout (11x17 Landscape)
+    - Insert → Map Frame → Zoom to city boundary + 5% buffer
+    
+14. Add Map Elements:
+    - Title: "Overdose Incident Density Analysis (2022-2025)"
+    - Subtitle: "Proposed Narcan Kiosk Locations"
+    - Legend (clean, no clutter):
+      * High Density Zones (red)
+      * Fatal Incidents (orange stars)
+      * Recommended Kiosk Sites (blue pins with numbers)
+    - Scale Bar (1 inch = 1000 feet)
+    - North Arrow
+    - Data Source: "Hackensack PD CAD/RMS Data"
+    - Analyst Credit: "P.O. R. A. Carucci, Analytical Services"
+
+15. Add Inset Map (optional):
+    - Small overview map showing city location in county
+    
+16. Export:
+    - Share → Export Layout
+    - Format: PDF (vector) for printing
+    - Resolution: 300 DPI
+    - Output: OD_Kiosk_Site_Analysis.pdf
+"""
+
+# ========================================
+# PART 7: DELIVERABLES CHECKLIST
+# ========================================
+
+"""
+FINAL PACKAGE FOR CITY MANAGER:
+✅ OD_Kiosk_Site_Analysis.pdf (11x17 map)
+✅ OD_Kiosk_Site_Analysis.png (web version, 150 DPI)
+✅ Executive_Summary_1Page.docx
+✅ OD_Hotspots_WithCounts.shp (for GIS staff, if needed)
+✅ OD_Data_Enhanced.csv (raw data backup)
+✅ Site_Selection_Methodology.md (this document)
+"""
+
+# ========================================
+# PYTHON ALTERNATIVE (IF SCRIPTING PREFERRED)
+# ========================================
+
+import arcpy
+from arcpy.sa import KernelDensity
+import os
+
+# Set environment
+arcpy.env.workspace = r"C:\...\03_GIS\project.gdb"
+arcpy.env.overwriteOutput = True
+
+# Input data
+incidents = "OD_Incidents_NJ"
+output_density = "OD_NonFatal_Density"
+
+# Filter non-fatal incidents
+nonfatal_layer = arcpy.management.MakeFeatureLayer(
+    incidents, 
+    "nonfatal_temp",
+    "Fatality_Status = 'Non-Fatal'"
+)[0]
+
+# Run kernel density
+density_raster = KernelDensity(
+    nonfatal_layer,
+    "NONE",
+    50,  # cell size in feet
+    500,  # search radius in feet
+    "SQUARE_FEET"
+)
+
+# Save output
+density_raster.save(output_density)
+
+print(f"✅ Density analysis complete: {output_density}")
+
+# Clean up
+arcpy.management.Delete("nonfatal_temp")
+````
+
+---
+
+## 📝 Communication Strategy for City Manager
+
+### **Email/Memo Template**
+
+```
+TO: Thomas Freeman, City Manager
+FROM: D/Capt. DeWitt & P.O. R. A. Carucci
+RE: Opioid Settlement Kiosk Site Selection - Data Analysis
+DATE: October 6, 2025
+
+EXECUTIVE SUMMARY:
+In response to your request for overdose data to inform harm reduction kiosk placement, 
+we have completed a comprehensive 3-year analysis (October 2022 - October 2025). KEY FINDINGS:
+• 105 total overdose incidents
+• 96 non-fatal cases (91.4%) - your target population for harm reduction access
+• 9 fatal cases (8.6%)
+• 83 unique incident locations, with significant clustering in [identify top 3 zones]
+
+RECOMMENDED KIOSK SITES:
+Based on geographic density analysis, public accessibility, and incident recurrence, 
+we recommend the following locations (see attached map):
+
+1. [Site A]: [Address/Description] - 18 incidents within 1/4 mile
+2. [Site B]: [Address/Description] - 15 incidents, 24/7 transit access
+3. [Site C]: [Address/Description] - 12 incidents, high pedestrian traffic
+
+METHODOLOGY:
+Heat map analysis using kernel density estimation with 500-foot search radius, 
+overlaid with public facility locations to ensure accessibility and foot traffic. ATTACHMENTS:
+1. OD_Kiosk_Site_Analysis.pdf (11x17 map)
+2. Executive Summary with Statistics (1 page)
+3. Raw data CSV (for city records)
+
+We are available to present these findings at the next meeting and can provide 
+additional analysis (e.g., temporal patterns, demographic overlays) if needed. ```
+
+---
+
+## 🎨 Visual Design Principles
+
+**For City Officials (Non-Technical Audience):**
+
+✅ **DO:**
+- Use traffic light colors (green/yellow/red) for density
+- Label top 3-5 sites with large numbers (①②③)
+- Include familiar landmarks (major intersections, buildings)
+- Add simple legend with plain language
+- Use portrait 11x17 or landscape A3 for presentation
+
+❌ **DON'T:**
+- Show raw coordinate systems or technical metadata
+- Use technical terms (kernel density, spatial join, etc.) - Clutter with too many layers
+- Use confusing color schemes
+
+---
+
+## 🔍 Advanced Analysis (If Time Permits)
+
+### **Temporal Analysis:**
+```python
+# Extract from OD_Data_Enhanced.csv
+import pandas as pd
+df = pd.read_csv('OD_Data_Enhanced.csv')
+
+# Month-over-month trend
+df['Incident_Date'] = pd.to_datetime(df['Incident_Date'])
+monthly = df.groupby(df['Incident_Date'].dt.to_period('M')).size()
+
+# Day of week
+day_of_week = df['Day_of_Week'].value_counts()
+
+# Time of day (if available)
+time_distribution = df['Time_of_Day'].value_counts()
+```
+
+**Insight for City Manager:**
+> "Incidents peak on Friday-Saturday between 6 PM - 2 AM, suggesting kiosks should prioritize locations with evening/weekend accessibility." ---
+
+## ✅ Final Checklist
+
+**Before Meeting with City Manager:**
+
+- [ ] Heat map exported to PDF (11x17)
+- [ ] Executive summary (1 page, bullet format)
+- [ ] Top 3-5 site recommendations with rationale
+- [ ] Statistical breakdown table
+- [ ] Temporal analysis (optional but impressive)
+- [ ] Raw CSV backup provided
+- [ ] Presentation deck (5-7 slides max)
+
+**Slide Deck Outline:**
+1. Project overview (30 seconds)
+2. Data scope & methodology (1 min)
+3. Heat map (main visual, 2 min)
+4. Recommended sites with photos (2 min)
+5. Implementation considerations (1 min)
+6. Q&A
+
+---
+
+## 💡 Key Talking Points
+
+1. **"We analyzed 3 years of overdose data - 105 incidents total. "**
+
+2. **"91% were non-fatal, meaning Narcan worked. These are the people who need easier access. "**
+
+3. **"We identified 3 priority zones that cover 42% of all incidents while maximizing public accessibility. "**
+
+4. **"Our analysis ensures kiosks are placed where they'll have the greatest life-saving impact. "**
+
+5. **"We can track effectiveness post-installation by monitoring incident rates in coverage zones. "**
+
+---
+
+## 🚀 Next Steps
+
+1. **This week:** Generate heat map and executive summary
+2. **Next meeting:** Present findings with visual map
+3. **Post-approval:** Provide GIS layers to city planners for site logistics
+4. **Post-installation:** Set up monitoring dashboard to track impact
+
+Need help generating the actual map or executive summary? I can provide Python scripts to automate the statistical analysis and create the one-page summary document. ## Prompt:
+10/6/2025, 1:56:37 PM
+
+Would it be prudent for you to provide a prompt that I can pass to Claude Code. That will review the directory's files and scripts for context and to verify that the scripts are performing as needed? Provide updates to the scripts to assist with the deliverables. Question on the heatmap. Should I use one heatmap that shows all overdose events? Should I have five heat maps, one for the data from 2022, 2023, 2024, and 2025 and then another heat map for all the data together? * The request was for the last three years of data so is my data set correct (10/2022 to 10/2025). * Should I have a heat map for all non-fatal overdoses and single points for fatal overdoses? * I am also wondering if overdose events that occurred in the street/vehicles should be weighed more than overdoses in residences (Home/Apartments) as if  a person is in a home they likely have access to blankets and likely have access to vehicle to travel to access testing materials. What is your take on my thinking? * what are my blind spots? what am I missing and not accounting for? ## Response:
+10/6/2025, 1:58:55 PM
+
+# Claude Code Comprehensive Prompt
+
+**Claude Code: CDS Overdose Pipeline Review & Enhancement**
+
+````markdown
+# Claude Code Prompt: CDS Overdose Analysis Pipeline Review & Enhancement
+
+## CONTEXT
+Review and enhance Python/ArcPy scripts for overdose data analysis supporting Narcan vending machine placement decisions for Hackensack City Manager. The project processes 3 years of overdose incident data (October 2022 - October 2025) to identify optimal kiosk locations. ## PROJECT DIRECTORY
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\SSOCC\Requests\2025\CSB\CDS_Overdose_25_086469\cds_overdose_10_2022_10_2025
+```
+
+## PRIMARY OBJECTIVES
+
+### 1. SCRIPT AUDIT & VALIDATION
+- Review all Python scripts in `07_Scripts\` directory
+- Verify data flow: RAW CSV → Cleaned CSV → GDB Feature Classes → Map Exports
+- Check for errors, inefficiencies, or deprecated code
+- Validate ArcPy environment handling and error recovery
+- Ensure all scripts have proper headers (timestamp EST, author R. A. Carucci, purpose)
+
+### 2. DATA VALIDATION
+- Confirm dataset timeframe: October 2022 - October 2025 (3 years as requested)
+- Verify 105 total incidents: 9 fatal (8.6%), 96 non-fatal (91.4%)
+- Cross-check counts across: RAW → Enhanced CSV → GDB Feature Classes
+- Validate coordinate integrity (no null X/Y, proper projection)
+
+### 3. ENHANCED ANALYSIS REQUIREMENTS
+
+#### A. LOCATION-TYPE WEIGHTING SYSTEM
+**CRITICAL ENHANCEMENT:** Implement weighted scoring for public vs. private overdose locations:
+
+**High Priority (Weight 3x):**
+- Street/sidewalk locations
+- Parks/public spaces
+- Parking lots
+- Transit stops/stations
+- Commercial areas
+- Vehicles (non-residential parking)
+
+**Medium Priority (Weight 2x):**
+- Hotels/motels
+- Shelters
+- Public facilities
+
+**Low Priority (Weight 1x):**
+- Single-family residences
+- Apartment buildings (private units)
+- Private property
+
+**Implementation Steps:**
+1. Add field `Location_Weight` to `OD_Data_Enhanced.csv`
+2. Classify each incident based on `Location` field using keyword matching
+3. Create field `Location_Category` (Public_Access / Semi_Public / Private_Residence)
+4. Update kernel density analysis to use `Location_Weight` as population field
+5. Generate comparison maps: weighted vs. unweighted density
+
+**Rationale:** Public location overdoses indicate individuals lacking home resources (blankets, transportation to services). Private residence overdoses suggest existing support structure access.

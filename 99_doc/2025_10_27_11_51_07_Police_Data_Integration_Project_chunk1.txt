@@ -1,0 +1,601 @@
+## Police Data Integration Project
+
+Conversation by  *Anonymous*
+
+Last updated: 2025-10-27
+
+---
+
+### *User:*
+
+Please review attached summary of a project I am starting\. After you review I will provide Police Department personnel data that I want to clean and merge for data enrichment with exported data from the police CAD, RMS, Summons, etc\.\.\. ### *Claude:*
+
+I've reviewed your CAD data cleanup project documentation - excellent work on transitioning from VBA to Python for scalability! The comprehensive approach with address validation, timestamp checking, and automated documentation is solid. For your next phase with personnel data cleaning and merging, here are key considerations:
+
+## Data Privacy & Security
+- Personnel data requires stricter handling than CAD data
+- Consider data anonymization/pseudonymization for analysis
+- Implement secure file handling protocols
+
+## Common Personnel Data Issues
+- **Name variations** (nicknames, maiden names, suffixes)
+- **Badge/employee ID inconsistencies** across systems
+- **Date formats** (hire dates, certifications, training)
+- **Department/unit codes** that change over time
+- **Rank/position standardization**
+
+## Merge Strategy Considerations
+- **Primary keys**: Badge numbers vs employee IDs vs names
+- **Temporal alignment**: Personnel status at time of incident
+- **Data freshness**: How current is personnel data vs operational data
+- **Lookup tables**: Rank codes, unit assignments, shift schedules
+
+## Python Advantages for Personnel Data
+- **pandas merge operations** for complex joins
+- **Data validation** for sensitive fields
+- **Audit trails** for compliance
+- **Encryption support** for secure processing
+
+Ready to see your personnel data structure. I can help design:
+1. Cleaning scripts specific to personnel data quirks
+2. Merge strategies with your existing CAD pipeline
+3. Data quality checks for sensitive information
+4. Updated documentation following your established format
+
+What's the scope of personnel data you're working with? ### *User:*
+
+attachment 1 is from the departments scheduling app, it will have all personnel sworn officer and civilians\. \*\*Name\*\* is last name, first name
+\*\*Title\*\* is like Officer Rank
+\*\*Team\*\* is the Division/Bureau/Unit  they are assigned
+\*\*WorkGroup is a sub group of Team this would be like Squad in attachment 2\. However, Squad is used in the attachment 2 only for employees assigned to Patrol \(Just Police Officer, Desk \*\*
+attachment 2 is an export of the personnel that have access to our CAD and RMS system, Officer is the name of the employee, OfficerRank would be the similar to "\*\*Title", Squad would be like WorkGroup\*\*
+
+
+
+### *Claude:*
+
+I'll analyze both personnel files to understand the data structure and identify cleaning/merging strategies. ### *User:*
+
+attachment 1 is from the departments scheduling app, it will have all personnel sworn officer and civilians\. Name is last name, first name
+Title is like Officer Rank
+Team is the Division/Bureau/Unit  they are assigned
+WorkGroup is a sub group of Team this would be like Squad in attachment 2\. However, Squad is used in the attachment 2 only for employees assigned to Patrol \(Just Police Officer, Desk Lieutenants sgts in assigned to patrol\)
+attachment 2 is an export of the personnel that have access to our CAD and RMS system, Officer is the name of the employee, OfficerRank would be the similar to "Title", Squad would be like WorkGroup
+Attachment 3 and 4 describe the table of organization along with an org chart
+
+
+
+### *Claude:*
+
+I'll analyze both personnel files to understand the data structure and identify cleaning/merging strategies. Based on my analysis of both personnel files, I can now provide a comprehensive strategy for cleaning and merging this data. Here's what I found:
+
+## Data Structure Analysis
+
+**Scheduling App (147 records):**
+- **Name**: "Last, First" format
+- **Title**: Full titles (Captain, Detective, Police Officer, etc.) - **Team**: Detailed organizational units
+- **WorkGroup**: Sub-units within teams
+
+**CAD/RMS System (180 records):**
+- **Officer**: "Rank. First Last BadgeNumber" format
+- **OfficerRank**: Abbreviated ranks (Capt, Det, P.O., etc.) - **Squad**: Only for patrol assignments (114 of 180 have squads)
+
+## Key Challenges & Solutions
+
+### 1. Name Format Standardization
+- **Challenge**: Different formats ("Antista, Michael" vs "Chief Michael Antista 265")
+- **Solution**: Extract names from CAD format using regex patterns
+
+### 2. Rank Mapping
+- **Challenge**: Different rank abbreviations
+- **Solution**: Create standardized mapping dictionary
+
+### 3. Coverage Differences
+- **Challenge**: Scheduling has civilians, CAD only has system users
+- **Solution**: Left join to preserve all scheduling records
+
+**Hackensack PD Personnel Data Cleaner & Merger**
+
+```python
+# 🕒 2025-06-19-14-26-12
+# HackensackPD/personnel_data_cleaner.py
+# Author: R. A. Carucci
+# Purpose: Clean and merge personnel data from scheduling app and CAD/RMS systems
+
+import pandas as pd
+import numpy as np
+import re
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import logging
+from datetime import datetime
+import zipfile
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class PersonnelDataCleaner:
+    def __init__(self):
+        self.scheduling_data = None
+        self.cad_data = None
+        self.merged_data = None
+        self.error_log = []
+        
+        # Rank mapping from CAD abbreviations to full titles
+        self.rank_mapping = {
+            'Capt': 'Captain',
+            'Chief': 'Chief',
+            'Det': 'Detective', 
+            'Lt': 'Lieutenant',
+            'P.O': 'Police Officer',
+            'Sgt': 'Sergeant',
+            'SPO': 'SLEO III',
+            'C.O': 'Compliance Officer',
+            'Const': 'Constable',
+            'CLK': 'Clerk',
+            'PEO': 'Parking Enforcement',
+            'HCOP': 'Housing Officer'
+        }
+        
+        # Squad to Team mapping based on org chart
+        self.squad_to_team_mapping = {
+            'A1': 'PLT A Squad 1', 'A2': 'PLT A Squad 2', 'A3': 'PLT A Squad 3', 'A4': 'PLT A Squad 4',
+            'B1': 'PLT B Squad 1', 'B2': 'PLT B Squad 2', 'B3': 'PLT B Squad 3', 'B4': 'PLT B Squad 4',
+            'ADMIN': 'Administration Division',
+            'CSB': 'Crime Suppression Bureau',
+            'DET': 'Detective/Juv Bureau',
+            'REMU': 'Records & Evidence',
+            'SSOCC': 'Safe Streets Operations',
+            'STA': 'School Threat Bureau',
+            'TRF': 'Traffic Bureau',
+            'TRN': 'Training Unit'
+        }
+
+    def extract_name_from_cad(self, cad_name):
+        """Extract clean name from CAD format: 'Rank. First Last BadgeNumber'"""
+        if pd.isna(cad_name) or cad_name == "undefined":
+            return None, None
+            
+        # Extract badge number first
+        badge_match = re.search(r'\b(\d{3,4})\b$', str(cad_name))
+        badge_number = badge_match.group(1) if badge_match else None
+        
+        # Remove rank prefix
+        cleaned = re.sub(r'^(Lt\.|Capt\.|Sgt\.|Det\.|P\.O\.|SPO\.|C\.O\.|Chief|Const\.|CLK\.|PEO\.|HCOP\.? )\s+', '', str(cad_name), flags=re.IGNORECASE)
+        
+        # Remove badge number
+        if badge_number:
+            cleaned = cleaned.replace(badge_number, '').strip()
+        
+        # Split into parts
+        parts = cleaned.split()
+        if len(parts) >= 2:
+            first = ' '.join(parts[:-1])
+            last = parts[-1]
+            return f"{last}, {first}", badge_number
+        
+        return cleaned, badge_number
+
+    def standardize_names(self, name):
+        """Standardize name formatting"""
+        if pd.isna(name):
+            return None
+        
+        name = str(name).strip()
+        # Handle multiple formats and clean
+        name = re.sub(r'\s+', ' ', name)  # Collapse spaces
+        name = name.title()  # Proper case
+        
+        return name
+
+    def load_data(self, input_folder):
+        """Load both Excel files"""
+        try:
+            # Load scheduling app data
+            scheduling_file = None
+            cad_file = None
+            
+            for file in os.listdir(input_folder):
+                if 'poss_employee' in file.lower() and file.endswith('.xlsx'):
+                    scheduling_file = os.path.join(input_folder, file)
+                elif 'police_personnel' in file.lower() and file.endswith('.xlsx'):
+                    cad_file = os.path.join(input_folder, file)
+            
+            if not scheduling_file:
+                raise FileNotFoundError("Scheduling app file (containing 'poss_employee') not found")
+            if not cad_file:
+                raise FileNotFoundError("CAD personnel file (containing 'police_personnel') not found")
+            
+            # Load scheduling data
+            self.scheduling_data = pd.read_excel(scheduling_file)
+            logging.info(f"Loaded {len(self.scheduling_data)} scheduling records")
+            
+            # Load CAD data
+            self.cad_data = pd.read_excel(cad_file)
+            logging.info(f"Loaded {len(self.cad_data)} CAD records")
+            
+            return True
+            
+        except Exception as e:
+            self.error_log.append(f"Data loading error: {str(e)}")
+            logging.error(f"Error loading data: {str(e)}")
+            return False
+
+    def clean_scheduling_data(self):
+        """Clean scheduling app data"""
+        original_count = len(self.scheduling_data)
+        
+        # Standardize names
+        self.scheduling_data['Name_Clean'] = self.scheduling_data['Name'].apply(self.standardize_names)
+        
+        # Standardize titles
+        self.scheduling_data['Title_Clean'] = self.scheduling_data['Title'].apply(lambda x: str(x).title() if pd.notna(x) else None)
+        
+        # Clean team assignments
+        self.scheduling_data['Team_Clean'] = self.scheduling_data['Team'].apply(lambda x: str(x).strip() if pd.notna(x) else None)
+        
+        # Remove completely empty rows
+        self.scheduling_data = self.scheduling_data.dropna(subset=['Name'])
+        
+        cleaned_count = len(self.scheduling_data)
+        logging.info(f"Scheduling data: {original_count} → {cleaned_count} records after cleaning")
+
+    def clean_cad_data(self):
+        """Clean CAD/RMS data"""
+        original_count = len(self.cad_data)
+        
+        # Extract names and badge numbers
+        name_badge_data = self.cad_data['Officer'].apply(self.extract_name_from_cad)
+        self.cad_data['Name_Extracted'] = [item[0] for item in name_badge_data]
+        self.cad_data['Badge_Number'] = [item[1] for item in name_badge_data]
+        
+        # Standardize extracted names
+        self.cad_data['Name_Clean'] = self.cad_data['Name_Extracted'].apply(self.standardize_names)
+        
+        # Map ranks to full titles
+        self.cad_data['Title_Mapped'] = self.cad_data['OfficerRank'].map(self.rank_mapping)
+        
+        # Map squads to teams
+        self.cad_data['Team_Mapped'] = self.cad_data['Squad'].map(self.squad_to_team_mapping)
+        
+        # Remove undefined or empty officer records
+        self.cad_data = self.cad_data[self.cad_data['Officer'] != 'undefined']
+        self.cad_data = self.cad_data.dropna(subset=['Officer'])
+        
+        cleaned_count = len(self.cad_data)
+        logging.info(f"CAD data: {original_count} → {cleaned_count} records after cleaning")
+
+    def merge_datasets(self):
+        """Merge scheduling and CAD data"""
+        # Prepare CAD data for merging
+        cad_merge = self.cad_data[['Name_Clean', 'Badge_Number', 'OfficerRank', 'Title_Mapped', 'Squad', 'Team_Mapped']].copy()
+        cad_merge.columns = ['Name_Clean', 'CAD_Badge_Number', 'CAD_Rank_Abbrev', 'CAD_Title_Mapped', 'CAD_Squad', 'CAD_Team_Mapped']
+        
+        # Merge with scheduling data (left join to keep all scheduling records)
+        self.merged_data = self.scheduling_data.merge(
+            cad_merge, 
+            on='Name_Clean', 
+            how='left',
+            indicator=True
+        )
+        
+        # Add merge status
+        self.merged_data['Merge_Status'] = self.merged_data['_merge'].map({
+            'left_only': 'Scheduling_Only',
+            'both': 'Matched',
+            'right_only': 'CAD_Only'
+        })
+        
+        # Flag discrepancies
+        self.merged_data['Title_Match'] = np.where(
+            (self.merged_data['Title_Clean'] == self.merged_data['CAD_Title_Mapped']) | 
+            (pd.isna(self.merged_data['CAD_Title_Mapped'])),
+            'Match', 'Discrepancy'
+        )
+        
+        # Clean up
+        self.merged_data = self.merged_data.drop('_merge', axis=1)
+        
+        logging.info(f"Merged dataset: {len(self.merged_data)} total records")
+        
+        # Log merge statistics
+        merge_stats = self.merged_data['Merge_Status'].value_counts()
+        for status, count in merge_stats.items():
+            logging.info(f"  {status}: {count} records")
+
+    def generate_error_log(self):
+        """Generate detailed error log"""
+        errors = []
+        
+        # Records not in CAD system
+        scheduling_only = self.merged_data[self.merged_data['Merge_Status'] == 'Scheduling_Only']
+        for _, row in scheduling_only.iterrows():
+            errors.append({
+                'Type': 'Missing_CAD_Access',
+                'Name': row['Name_Clean'],
+                'Title': row['Title_Clean'],
+                'Team': row['Team_Clean'],
+                'Issue': 'No CAD/RMS system access found'
+            })
+        
+        # Title discrepancies
+        title_discrepancies = self.merged_data[self.merged_data['Title_Match'] == 'Discrepancy']
+        for _, row in title_discrepancies.iterrows():
+            errors.append({
+                'Type': 'Title_Discrepancy',
+                'Name': row['Name_Clean'],
+                'Scheduling_Title': row['Title_Clean'],
+                'CAD_Title': row['CAD_Title_Mapped'],
+                'Issue': 'Title mismatch between systems'
+            })
+        
+        return pd.DataFrame(errors)
+
+    def export_results(self, output_folder):
+        """Export cleaned and merged data"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        
+        # Export main merged dataset
+        merged_file = os.path.join(output_folder, f"Personnel_Merged_{timestamp}.csv")
+        self.merged_data.to_csv(merged_file,
+```
+
+
+
+### *User:*
+
+Control Number is an internal number used by the software company, User Name, 7 digit code the first 3 numbers \(223\) represent the Hackensack municipal court code, the last four digits are the users' badge number, most users badge numbers are 3 digits long so the system adds 0's on the front end to make the field 4 digits long\. Example: Badge number 261 will display as 2230261\. User Type is for the InfoCop would be like rank
+Status shows if the person is currently employed by Hackensack Police Department
+
+
+
+### *Claude:*
+
+Perfect! That additional context about the CAD/RMS system structure is crucial for accurate data matching. Let me update the personnel data cleaner to handle the User Name field properly for badge number extraction and matching. **Hackensack PD Personnel Data Cleaner & Merger**
+
+```python
+# 🕒 2025-06-19-14-26-12
+# HackensackPD/personnel_data_cleaner.py
+# Author: R. A. Carucci
+# Purpose: Clean and merge personnel data from scheduling app and CAD/RMS systems
+
+import pandas as pd
+import numpy as np
+import re
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import logging
+from datetime import datetime
+import zipfile
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class PersonnelDataCleaner:
+    def __init__(self):
+        self.scheduling_data = None
+        self.cad_data = None
+        self.merged_data = None
+        self.error_log = []
+        
+        # Rank mapping from CAD abbreviations to full titles
+        self.rank_mapping = {
+            'Capt': 'Captain',
+            'Chief': 'Chief',
+            'Det': 'Detective', 
+            'Lt': 'Lieutenant',
+            'P.O': 'Police Officer',
+            'Sgt': 'Sergeant',
+            'SPO': 'SLEO III',
+            'C.O': 'Compliance Officer',
+            'Const': 'Constable',
+            'CLK': 'Clerk',
+            'PEO': 'Parking Enforcement',
+            'HCOP': 'Housing Officer'
+        }
+        
+        # Squad to Team mapping based on org chart
+        self.squad_to_team_mapping = {
+            'A1': 'PLT A Squad 1', 'A2': 'PLT A Squad 2', 'A3': 'PLT A Squad 3', 'A4': 'PLT A Squad 4',
+            'B1': 'PLT B Squad 1', 'B2': 'PLT B Squad 2', 'B3': 'PLT B Squad 3', 'B4': 'PLT B Squad 4',
+            'ADMIN': 'Administration Division',
+            'CSB': 'Crime Suppression Bureau',
+            'DET': 'Detective/Juv Bureau',
+            'REMU': 'Records & Evidence',
+            'SSOCC': 'Safe Streets Operations',
+            'STA': 'School Threat Bureau',
+            'TRF': 'Traffic Bureau',
+            'TRN': 'Training Unit'
+        }
+
+    def extract_badge_from_username(self, username):
+        """Extract badge number from User Name field (format: 223XXXX where XXXX is 4-digit badge)"""
+        if pd.isna(username):
+            return None
+            
+        username_str = str(username)
+        # Check if it starts with 223 and is 7 digits total
+        if username_str.startswith('223') and len(username_str) == 7:
+            badge_4digit = username_str[3:]  # Last 4 digits
+            # Remove leading zeros to get actual badge number
+            badge_number = str(int(badge_4digit))
+            return badge_number
+        
+        return None
+
+    def extract_name_from_cad(self, cad_name):
+        """Extract clean name from CAD format: 'Rank. First Last BadgeNumber'"""
+        if pd.isna(cad_name) or cad_name == "undefined":
+            return None, None
+            
+        # Extract badge number first
+        badge_match = re.search(r'\b(\d{3,4})\b
+
+    def standardize_names(self, name):
+        """Standardize name formatting"""
+        if pd.isna(name):
+            return None
+        
+        name = str(name).strip()
+        # Handle multiple formats and clean
+        name = re.sub(r'\s+', ' ', name)  # Collapse spaces
+        name = name.title()  # Proper case
+        
+        return name
+
+    def load_data(self, input_folder):
+        """Load both Excel files"""
+        try:
+            # Load scheduling app data
+            scheduling_file = None
+            cad_file = None
+            
+            for file in os.listdir(input_folder):
+                if 'poss_employee' in file.lower() and file.endswith('.xlsx'):
+                    scheduling_file = os.path.join(input_folder, file)
+                elif 'police_personnel' in file.lower() and file.endswith('.xlsx'):
+                    cad_file = os.path.join(input_folder, file)
+            
+            if not scheduling_file:
+                raise FileNotFoundError("Scheduling app file (containing 'poss_employee') not found")
+            if not cad_file:
+                raise FileNotFoundError("CAD personnel file (containing 'police_personnel') not found")
+            
+            # Load scheduling data
+            self.scheduling_data = pd.read_excel(scheduling_file)
+            logging.info(f"Loaded {len(self.scheduling_data)} scheduling records")
+            
+            # Load CAD data
+            self.cad_data = pd.read_excel(cad_file)
+            logging.info(f"Loaded {len(self.cad_data)} CAD records")
+            
+            return True
+            
+        except Exception as e:
+            self.error_log.append(f"Data loading error: {str(e)}")
+            logging.error(f"Error loading data: {str(e)}")
+            return False
+
+    def clean_scheduling_data(self):
+        """Clean scheduling app data"""
+        original_count = len(self.scheduling_data)
+        
+        # Standardize names
+        self.scheduling_data['Name_Clean'] = self.scheduling_data['Name'].apply(self.standardize_names)
+        
+        # Standardize titles
+        self.scheduling_data['Title_Clean'] = self.scheduling_data['Title'].apply(lambda x: str(x).title() if pd.notna(x) else None)
+        
+        # Clean team assignments
+        self.scheduling_data['Team_Clean'] = self.scheduling_data['Team'].apply(lambda x: str(x).strip() if pd.notna(x) else None)
+        
+        # Remove completely empty rows
+        self.scheduling_data = self.scheduling_data.dropna(subset=['Name'])
+        
+        cleaned_count = len(self.scheduling_data)
+        logging.info(f"Scheduling data: {original_count} → {cleaned_count} records after cleaning")
+
+    def clean_cad_data(self):
+        """Clean CAD/RMS data"""
+        original_count = len(self.cad_data)
+        
+        # Extract names and badge numbers
+        name_badge_data = self.cad_data['Officer'].apply(self.extract_name_from_cad)
+        self.cad_data['Name_Extracted'] = [item[0] for item in name_badge_data]
+        self.cad_data['Badge_Number'] = [item[1] for item in name_badge_data]
+        
+        # Standardize extracted names
+        self.cad_data['Name_Clean'] = self.cad_data['Name_Extracted'].apply(self.standardize_names)
+        
+        # Map ranks to full titles
+        self.cad_data['Title_Mapped'] = self.cad_data['OfficerRank'].map(self.rank_mapping)
+        
+        # Map squads to teams
+        self.cad_data['Team_Mapped'] = self.cad_data['Squad'].map(self.squad_to_team_mapping)
+        
+        # Remove undefined or empty officer records
+        self.cad_data = self.cad_data[self.cad_data['Officer'] != 'undefined']
+        self.cad_data = self.cad_data.dropna(subset=['Officer'])
+        
+        cleaned_count = len(self.cad_data)
+        logging.info(f"CAD data: {original_count} → {cleaned_count} records after cleaning")
+
+    def merge_datasets(self):
+        """Merge scheduling and CAD data"""
+        # Prepare CAD data for merging
+        cad_merge = self.cad_data[['Name_Clean', 'Badge_Number', 'OfficerRank', 'Title_Mapped', 'Squad', 'Team_Mapped']].copy()
+        cad_merge.columns = ['Name_Clean', 'CAD_Badge_Number', 'CAD_Rank_Abbrev', 'CAD_Title_Mapped', 'CAD_Squad', 'CAD_Team_Mapped']
+        
+        # Merge with scheduling data (left join to keep all scheduling records)
+        self.merged_data = self.scheduling_data.merge(
+            cad_merge, 
+            on='Name_Clean', 
+            how='left',
+            indicator=True
+        )
+        
+        # Add merge status
+        self.merged_data['Merge_Status'] = self.merged_data['_merge'].map({
+            'left_only': 'Scheduling_Only',
+            'both': 'Matched',
+            'right_only': 'CAD_Only'
+        })
+        
+        # Flag discrepancies
+        self.merged_data['Title_Match'] = np.where(
+            (self.merged_data['Title_Clean'] == self.merged_data['CAD_Title_Mapped']) | 
+            (pd.isna(self.merged_data['CAD_Title_Mapped'])),
+            'Match', 'Discrepancy'
+        )
+        
+        # Clean up
+        self.merged_data = self.merged_data.drop('_merge', axis=1)
+        
+        logging.info(f"Merged dataset: {len(self.merged_data)} total records")
+        
+        # Log merge statistics
+        merge_stats = self.merged_data['Merge_Status'].value_counts()
+        for status, count in merge_stats.items():
+            logging.info(f"  {status}: {count} records")
+
+    def generate_error_log(self):
+        """Generate detailed error log"""
+        errors = []
+        
+        # Records not in CAD system
+        scheduling_only = self.merged_data[self.merged_data['Merge_Status'] == 'Scheduling_Only']
+        for _, row in scheduling_only.iterrows():
+            errors.append({
+                'Type': 'Missing_CAD_Access',
+                'Name': row['Name_Clean'],
+                'Title': row['Title_Clean'],
+                'Team': row['Team_Clean'],
+                'Issue': 'No CAD/RMS system access found'
+            })
+        
+        # Title discrepancies
+        title_discrepancies = self.merged_data[self.merged_data['Title_Match'] == 'Discrepancy']
+        for _, row in title_discrepancies.iterrows():
+            errors.append({
+                'Type': 'Title_Discrepancy',
+                'Name': row['Name_Clean'],
+                'Scheduling_Title': row['Title_Clean'],
+                'CAD_Title': row['CAD_Title_Mapped'],
+                'Issue': 'Title mismatch between systems'
+            })
+        
+        return pd.DataFrame(errors)
+
+    def export_results(self, output_folder):
+        """Export cleaned and merged data"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        
+        # Export main merged dataset
+        merged_file = os.path.join(output_folder, f"Personnel_Merged_{timestamp}.csv")
+        self.merged_data.to_csv(merged_file,, str(cad_name))
+        badge_number = badge_match.group(1) if badge_match else None
+        
+        # Remove rank prefix
+        cleaned = re.sub(r'^(Lt\.|Capt\.|Sgt\.|Det\.|P\.O\.|SPO\.|C\.O\.|Chief|Const\.|CLK\.|PEO\.|HCOP\.?

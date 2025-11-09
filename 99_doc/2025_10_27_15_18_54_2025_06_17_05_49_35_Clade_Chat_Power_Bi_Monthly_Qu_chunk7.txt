@@ -1,0 +1,568 @@
+Add Special Cases to County_State_Added
+
+For now, let's add these specific address patterns to your County_State_Added formula:
+
+m
+= Table.AddColumn(MatchCity, "County_State", each 
+    if [matched_municipality] <> null then 
+        // Bergen County, NJ
+        if [matched_municipality] = "hackensack" then "Bergen, NJ"
+        else if [matched_municipality] = "hacknesack" then "Bergen, NJ"
+        else if [matched_municipality] = "teaneck" then "Bergen, NJ"
+        else if [matched_municipality] = "ridgefield park" then "Bergen, NJ"
+        else if [matched_municipality] = "east rutherford" then "Bergen, NJ"
+        else if [matched_municipality] = "moonachie" then "Bergen, NJ"
+        else if [matched_municipality] = "fort lee" then "Bergen, NJ"
+        else if [matched_municipality] = "rochelle park" then "Bergen, NJ"
+        else if [matched_municipality] = "garfield" then "Bergen, NJ"
+        else if [matched_municipality] = "hasbrouck heights" then "Bergen, NJ"
+        else if [matched_municipality] = "wood ridge" then "Bergen, NJ"
+        else if [matched_municipality] = "bergenfield" then "Bergen, NJ"
+        else if [matched_municipality] = "saddle brook" then "Bergen, NJ"
+        else if [matched_municipality] = "river edge" then "Bergen, NJ"
+        else if [matched_municipality] = "oradell" then "Bergen, NJ"
+        else if [matched_municipality] = "new milford" then "Bergen, NJ"
+        else if [matched_municipality] = "upper saddle river" then "Bergen, NJ"
+        
+        // Essex County, NJ
+        else if [matched_municipality] = "newark" then "Essex, NJ"
+        else if [matched_municipality] = "east orange" then "Essex, NJ"
+        else if [matched_municipality] = "west orange" then "Essex, NJ"
+        else if [matched_municipality] = "bloomfield" then "Essex, NJ"
+        else if [matched_municipality] = "belleville" then "Essex, NJ"
+        
+        // Passaic County, NJ
+        else if [matched_municipality] = "paterson" then "Passaic, NJ"
+        else if [matched_municipality] = "passaic" then "Passaic, NJ"
+        else if [matched_municipality] = "clifton" then "Passaic, NJ"
+        else if [matched_municipality] = "berkshire" then "Passaic, NJ"  // Fix parsing error
+        
+        // Hudson County, NJ
+        else if [matched_municipality] = "jersey city" then "Hudson, NJ"
+        else if [matched_municipality] = "jersey" then "Hudson, NJ"  // Partial match
+        else if [matched_municipality] = "hoboken" then "Hudson, NJ"
+        
+        // Union County, NJ
+        else if [matched_municipality] = "elizabeth" then "Union, NJ"
+        else if [matched_municipality] = "linden" then "Union, NJ"
+        
+        // Other NJ Counties
+        else if [matched_municipality] = "raritan" then "Somerset, NJ"
+        else if [matched_municipality] = "thompson" then "Somerset, NJ"  // Fix parsing error
+        else if [matched_municipality] = "phillipsburg" then "Warren, NJ"
+        else if [matched_municipality] = "camden" then "Camden, NJ"
+        else if [matched_municipality] = "clementon" then "Camden, NJ"
+        else if [matched_municipality] = "wallington" then "Bergen, NJ"
+        else if [matched_municipality] = "little ferry" then "Bergen, NJ"
+        else if [matched_municipality] = "south hackensack" then "Bergen, NJ"
+        else if [mixed_municipality] = "irvington" then "Bergen, NJ"  // Fix teaneck parsing error
+        
+        // New York Counties
+        else if [matched_municipality] = "manhattan" then "New York, NY"
+        else if [matched_municipality] = "york" then "New York, NY"
+        else if [matched_municipality] = "bronx" then "Bronx, NY"
+        else if [matched_municipality] = "staten island" then "Richmond, NY"
+        else if [matched_municipality] = "spring valley" then "Rockland, NY"
+        else if [matched_municipality] = "mount vernon" then "Westchester, NY"
+        else if [matched_municipality] = "queens" then "Queens, NY"
+        
+        // Pennsylvania Counties
+        else if [matched_municipality] = "reading" then "Berks, PA"
+        else if [matched_municipality] = "chambersburg" then "Franklin, PA"
+        
+        else "Unmatched"
+    // Handle addresses where parsing completely failed
+    else if Text.Contains(Text.Lower([address] ? ? ""), "homeless") then "Bergen, NJ"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "spring valley") then "Rockland, NY"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "wood ridge") then "Bergen, NJ"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "reading, pa") then "Berks, PA"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "chambersburg") then "Franklin, PA"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "hasbrouck heig") then "Bergen, NJ"
+    else "N/A", type text)
+This enhanced formula:
+
+Fixes parsing errors (berkshire → Passaic, thompson → Somerset, etc.) Adds address-based fallbacks for failed parsing cases
+Should reduce N/A to near zero
+Apply this and your lookup should be much more complete! code for Final step is = Table.SelectColumns(County_State_Added, {
+    "case_number", "dob", "age", "address", "race", "sex", 
+    "arrest_date", "charge", "officer_of_record", "County_State",
+    "file_year_month", "place_of_arrest", "report_calc_summary",
+    "juvenile_flag", "ucr_code", "reviewed"
+})
+
+it has errors  is it because it is not formatted correctily? Edit
+Yes, the formatting is the issue. Power Query M code is sensitive to line breaks and spacing. Replace your Final step with this correctly formatted version:
+
+m
+= Table.SelectColumns(County_State_Added, {"case_number", "dob", "age", "address", "race", "sex", "arrest_date", "charge", "officer_of_record", "County_State", "file_year_month", "place_of_arrest", "report_calc_summary", "juvenile_flag", "ucr_code", "reviewed"})
+Key formatting rules for Power Query M:
+
+All on one line OR proper line continuation
+No spaces around commas in column lists
+Consistent quote types (use straight quotes, not curly quotes)
+Alternative - if you want multi-line formatting:
+
+m
+= Table.SelectColumns(County_State_Added, 
+    {"case_number", "dob", "age", "address", "race", "sex", 
+     "arrest_date", "charge", "officer_of_record", "County_State", 
+     "file_year_month", "place_of_arrest", "report_calc_summary", 
+     "juvenile_flag", "ucr_code", "reviewed"})
+The single-line version should work perfectly. Power Query doesn't like the way you had the column list formatted across multiple lines without proper continuation syntax. image.png
+Expression.Error: The field 'mixed_municipality' of the record wasn't found. Details:
+    Content=[Binary]
+    name=2025_01_Arrests.xlsx
+    Extension=.xlsx
+    Date accessed=6/13/2025 5:43:14 PM
+    Date modified=6/9/2025 3:45:24 PM
+    Date created=6/9/2025 3:45:20 PM
+    Attributes=
+        Content Type=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+Edit
+I see the typo! In the County_State_Added formula, I accidentally wrote [mixed_municipality] instead of [matched_municipality]. Find this line in your County_State_Added formula:
+
+m
+else if [mixed_municipality] = "irvington" then "Bergen, NJ"  // Fix teaneck parsing error
+And change it to:
+
+m
+else if [matched_municipality] = "irvington" then "Bergen, NJ"  // Fix teaneck parsing error
+The error is caused by the typo mixed_municipality instead of matched_municipality. Quick fix - just correct that one line and the error should disappear! Case number 25-009644, has no addess what should we do with records like this I do not like N/A
+
+Edit
+Good point! For records with completely missing addresses, let's assign them to your local jurisdiction since they were arrested by your department. Update your County_State_Added formula to handle null/empty addresses:
+
+m
+= Table.AddColumn(MatchCity, "County_State", each 
+    if [matched_municipality] <> null then 
+        // Your existing municipality mapping here...
+        if [matched_municipality] = "hackensack" then "Bergen, NJ"
+        // ... rest of your mappings
+        else "Unmatched"
+    // Handle special address cases
+    else if Text.Contains(Text.Lower([address] ? ? ""), "homeless") then "Bergen, NJ"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "spring valley") then "Rockland, NY"
+    // ... other address-based lookups
+    // Handle completely missing addresses - assign to local jurisdiction
+    else if [address] = null or Text.Trim([address] ? ? "") = "" then "Bergen, NJ"
+    else "Unmatched", type text)
+The key addition:
+
+m
+else if [address] = null or Text.Trim([address] ? ? "") = "" then "Bergen, NJ"
+This logic:
+
+Checks if address is null ([address] = null)
+Checks if address is empty/whitespace (Text.Trim([address] ? ? "") = "")
+Assigns to Bergen, NJ (your local jurisdiction)
+Reasoning:
+
+If someone was arrested by Hackensack PD with no address, they're likely local or transient in your area
+Bergen County is the most logical assignment since that's your jurisdiction
+Eliminates N/A values for missing addresses
+This should handle case 25-009644 and any other records with missing address data by assigning them to Bergen, NJ instead of N/A. = Table.AddColumn(MatchCity, "County_State", each if [matched_municipality] <> null then // Bergen County, NJ if [matched_municipality] = "hackensack" then "Bergen, NJ" else if [matched_municipality] = "hacknesack" then "Bergen, NJ" else if [matched_municip
+
+pasted
+
+add it for me
+
+Edit
+Here's your complete updated County_State_Added formula with the missing address handling:
+
+m
+= Table.AddColumn(MatchCity, "County_State", each 
+    if [matched_municipality] <> null then 
+        // Bergen County, NJ
+        if [matched_municipality] = "hackensack" then "Bergen, NJ"
+        else if [matched_municipality] = "hacknesack" then "Bergen, NJ"
+        else if [matched_municipality] = "teaneck" then "Bergen, NJ"
+        else if [matched_municipality] = "ridgefield park" then "Bergen, NJ"
+        else if [matched_municipality] = "east rutherford" then "Bergen, NJ"
+        else if [matched_municipality] = "moonachie" then "Bergen, NJ"
+        else if [matched_municipality] = "fort lee" then "Bergen, NJ"
+        else if [matched_municipality] = "rochelle park" then "Bergen, NJ"
+        else if [matched_municipality] = "garfield" then "Bergen, NJ"
+        else if [matched_municipality] = "hasbrouck heights" then "Bergen, NJ"
+        else if [matched_municipality] = "wood ridge" then "Bergen, NJ"
+        else if [matched_municipality] = "bergenfield" then "Bergen, NJ"
+        else if [matched_municipality] = "saddle brook" then "Bergen, NJ"
+        else if [matched_municipality] = "river edge" then "Bergen, NJ"
+        else if [matched_municipality] = "oradell" then "Bergen, NJ"
+        else if [matched_municipality] = "new milford" then "Bergen, NJ"
+        else if [matched_municipality] = "upper saddle river" then "Bergen, NJ"
+        
+        // Essex County, NJ
+        else if [matched_municipality] = "newark" then "Essex, NJ"
+        else if [matched_municipality] = "east orange" then "Essex, NJ"
+        else if [matched_municipality] = "west orange" then "Essex, NJ"
+        else if [matched_municipality] = "bloomfield" then "Essex, NJ"
+        else if [matched_municipality] = "belleville" then "Essex, NJ"
+        
+        // Passaic County, NJ
+        else if [matched_municipality] = "paterson" then "Passaic, NJ"
+        else if [matched_municipality] = "passaic" then "Passaic, NJ"
+        else if [matched_municipality] = "clifton" then "Passaic, NJ"
+        else if [matched_municipality] = "berkshire" then "Passaic, NJ"  // Fix parsing error
+        
+        // Hudson County, NJ
+        else if [matched_municipality] = "jersey city" then "Hudson, NJ"
+        else if [matched_municipality] = "jersey" then "Hudson, NJ"  // Partial match
+        else if [matched_municipality] = "hoboken" then "Hudson, NJ"
+        
+        // Union County, NJ
+        else if [matched_municipality] = "elizabeth" then "Union, NJ"
+        else if [matched_municipality] = "linden" then "Union, NJ"
+        
+        // Other NJ Counties
+        else if [matched_municipality] = "raritan" then "Somerset, NJ"
+        else if [matched_municipality] = "thompson" then "Somerset, NJ"  // Fix parsing error
+        else if [matched_municipality] = "phillipsburg" then "Warren, NJ"
+        else if [matched_municipality] = "camden" then "Camden, NJ"
+        else if [matched_municipality] = "clementon" then "Camden, NJ"
+        else if [matched_municipality] = "wallington" then "Bergen, NJ"
+        else if [matched_municipality] = "little ferry" then "Bergen, NJ"
+        else if [matched_municipality] = "south hackensack" then "Bergen, NJ"
+        else if [matched_municipality] = "irvington" then "Bergen, NJ"  // Fix teaneck parsing error
+        
+        // New York Counties
+        else if [matched_municipality] = "manhattan" then "New York, NY"
+        else if [matched_municipality] = "york" then "New York, NY"
+        else if [matched_municipality] = "bronx" then "Bronx, NY"
+        else if [matched_municipality] = "staten island" then "Richmond, NY"
+        else if [matched_municipality] = "spring valley" then "Rockland, NY"
+        else if [matched_municipality] = "mount vernon" then "Westchester, NY"
+        else if [matched_municipality] = "queens" then "Queens, NY"
+        
+        // Pennsylvania Counties
+        else if [matched_municipality] = "reading" then "Berks, PA"
+        else if [matched_municipality] = "chambersburg" then "Franklin, PA"
+        
+        else "Unmatched"
+    // Handle addresses where parsing completely failed
+    else if Text.Contains(Text.Lower([address] ? ? ""), "homeless") then "Bergen, NJ"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "spring valley") then "Rockland, NY"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "wood ridge") then "Bergen, NJ"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "reading, pa") then "Berks, PA"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "chambersburg") then "Franklin, PA"
+    else if Text.Contains(Text.Lower([address] ? ? ""), "hasbrouck heig") then "Bergen, NJ"
+    // Handle completely missing addresses - assign to local jurisdiction
+    else if [address] = null or Text.Trim([address] ? ? "") = "" then "Bergen, NJ"
+    else "Unmatched", type text)
+Key addition:
+
+Added the line else if [address] = null or Text.Trim([address] ? ? "") = "" then "Bergen, NJ"
+Changed final fallback from "N/A" to "Unmatched"
+This will assign case 25-009644 and any other records with missing addresses to Bergen, NJ instead of N/A. I have to start a new conversation what should I tell you first in the new chat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Based on the provided addresses, here are the counties for each location: **46 Arnold Dr, Wood Ridge, NJ 07075** Bergen County[1][2] **462 Kipp Avenue, Hasbrouck Heights, NJ 07604-2615** Bergen County[2] **44 Bethune Blvd, Apt. 102, Spring Valley, NY 10977** Rockland County[3] **333 S
+
+
+Content name Extension Date accessed Date modified Date created Attributes Folder Path file_year_month case_number dob ssn_calc age address race sex arrest_date place_of_arrest charge officer_of_record report_calc_summary juvenile_flag ucr_code reviewed address_lower matched_municipality Binary.Fro
+
+
+= Table.AddColumn(MatchCity, "County_State", each if [matched_municipality] <> null then // Bergen County, NJ if [matched_municipality] = "hackensack" then "Bergen, NJ" else if [matched_municipality] = "hacknesack" then "Bergen, NJ" else if [matched_municip
+
+
+
+Monthly_Report_Data_Aggregation /
+now lets connect the Policy_Training_Monthly file to the power bi power query
+Path:
+"C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Compstat\Contributions\Policy_Training\Policy_Training_Monthly.xlsx"
+
+Policy_Training query use sheet "MoM", table "mom_ptu"
+In_Person_Training query will use sheet: InPerson OnLine Firearms, Tables: InPerson, Firearms, OnLine, their column headers are Start Date End Date Course Duration Course Name of InPerson | Non-Firearms Related # Attendees   Cost Per Member   Total Cost  Start Date End Date Course Duration Firearms Related Course Name  # of Attendees   Cost  Start Date End Date Course Duration On-Line Training Course Name  # of Attendees   Cost , I want to combine all three into a single table with a columnthat will indicate what table they came from ie: "In Person Training", "Firearms Training" and "On-Line Training"
+I added the excel file to the Project knowledge
+
+Edit
+I'll help you create Power Query connections for the Policy Training Monthly file with the structure you specified. Policy Training Power Query Connections
+Code 
+Perfect! I've created comprehensive Power Query connections for your Policy Training data. Here's what each query does:
+
+📊 QUERY BREAKDOWN:
+1. POLICY_TRAINING_MOM
+Source: MoM sheet, mom_ptu table
+Purpose: Monthly metrics tracking across all months
+Features: Clean text fields, proper data types, filtered empty rows
+2. IN_PERSON_TRAINING_COMBINED
+Source: Combines InPerson, Firearms, OnLine tables
+Key Features:
+Standardized column names across all training types
+Added "Training Type" identifier column
+Calculated "Cost Per Member" for Firearms/Online (since they only have total cost)
+Added date components (Month, Year, Quarter)
+Duration calculations
+Filtered out invalid records
+3. TRAINING_SUMMARY_METRICS
+Purpose: Dashboard KPIs and summary statistics
+Provides: Course counts, attendees, costs by training type and month
+4. TRAINING_COST_ANALYSIS
+Purpose: Budget planning and cost efficiency
+Features:
+Cost efficiency ratings (High/Medium/Low Cost)
+Training categorization (Firearms, Tactical, Legal, etc.) Budget impact flags
+🎯 COMBINED TABLE STRUCTURE:
+Column	Description
+Start Date	Training start date
+End Date	Training end date
+Course Duration	Duration in days/hours
+Course Name	Standardized course name
+Attendees	Number of attendees
+Cost Per Member	Calculated cost per person
+Total Cost	Total training cost
+Training Type	"In Person Training", "Firearms Training", "On-Line Training"
+🔧 IMPLEMENTATION STEPS:
+Import into Power BI: Data → Get Data → Blank Query
+Paste each M code into separate queries
+Update file path if needed
+Load & Apply to create relationships
+The queries handle different cost structures between training types and provide rich analytics for your training budget management! image.png
+image.png
+image.png
+image.png
+code did not work for any query
+
+Edit
+I see the issues! The Excel file structure doesn't match what we expected. Let me create corrected queries based on the actual Excel file structure. Policy Training Power Query Connections
+Code ∙ Version 2 
+
+Policy Training Power Query Connections
+Code ∙ Version 3 
+
+Policy Training Power Query Connections
+Code ∙ Version 4 
+
+Policy Training Power Query Connections
+Code ∙ Version 5 
+🔧 FIXED QUERIES - READY TO USE
+The corrected queries now handle the real Excel file structure:
+
+🛠️ KEY FIXES IMPLEMENTED:
+Flexible Sheet Detection: Uses try...otherwise to find data in sheets OR tables
+Dynamic Column Mapping: Finds columns by pattern matching instead of exact names
+Robust Error Handling: Won't break if sheets/tables are missing
+Dependency Management: Later queries have fallbacks if earlier ones fail
+📋 IMPLEMENTATION ORDER:
+Start with POLICY_TRAINING_MOM - Test this first to see the actual structure
+Then IN_PERSON_TRAINING_COMBINED - This will show if the training sheets exist
+Finally the summary queries - These depend on #2 working
+🔍 TROUBLESHOOTING STEPS:
+If you still get errors:
+
+Check Excel file structure first:
+m
+// Test query to see what's actually in the file
+
+
+
+image.png
+image.png
+image.png
+TRAINING_SUMMARY_METRICS is an empty table in the preview
+ TRAINING_COST_ANALYSIS is also blank
+
+Edit
+The issue is that MissingField.Skip isn't recognized in Power Query. Let me fix this and provide a simpler, more robust solution. Simplified Policy Training Queries - Working Version
+Code 
+🔧 SIMPLIFIED WORKING SOLUTION
+I've created much simpler queries that should work with your Excel file structure:
+
+📋 IMPLEMENTATION STEPS:
+Delete the broken queries from your workbook
+Create these 4 new queries instead:
+POLICY_TRAINING_MOM (basic monthly data)
+TRAINING_SIMPLE_COMBINED (combined training data)
+TRAINING_SUMMARY_SIMPLE (monthly summary)
+TRAINING_TYPE_BREAKDOWN (breakdown by type)
+🎯 KEY SIMPLIFICATIONS:
+No complex column mapping - uses pattern matching to find columns
+Robust error handling - won't break if columns are missing
+Automatic sheet detection - finds training data wherever it exists
+Minimal dependencies - each query can work independently
+⚡ QUICK TEST:
+Start with just TRAINING_SIMPLE_COMBINED:
+
+m
+// Test query - paste this first to see if it finds your training data
+let
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Compstat\Contributions\Policy_Training\Policy_Training_Monthly.xlsx"), null, true)
+in
+    Source
+This will show you exactly what sheets and tables are available in your Excel file, then we can adjust the queries accordingly. The simplified approach should resolve the MissingField.Skip error and empty table issues! Name Data Item Kind Hidden January January Sheet FALSE February February Sheet TRUE March March Sheet TRUE May May Sheet TRUE June June Sheet TRUE July July Sheet TRUE August August Sheet TRUE September September Sheet TRUE October October Sheet TRUE November November Sheet TRUE
+
+pasted
+
+Test query preview table attached
+
+Edit
+Perfect! Now I can see the exact structure. The file has:
+
+InPerson table (visible)
+Firearms table (visible)
+OnLine table (visible)
+mom_ptu table (visible)
+MoM sheet (visible)
+Let me create the correct queries based on this structure:
+
+
+Correct Policy Training Queries - Based on Actual Structure
+Code 
+🎯 CORRECT QUERIES - BASED ON ACTUAL STRUCTURE
+Now I've created queries that match your exact Excel file structure:
+
+📋 IMPLEMENTATION STEPS:
+Create these 4 queries in order:
+POLICY_TRAINING_MOM (uses mom_ptu table)
+IN_PERSON_TRAINING_COMBINED (uses InPerson, Firearms, OnLine tables)
+TRAINING_SUMMARY_METRICS (references the combined query)
+TRAINING_COST_ANALYSIS (references the combined query)
+🔧 KEY IMPROVEMENTS:
+Uses exact table names from your file structure
+Dynamic column detection - finds columns by pattern matching
+Proper error handling - won't break if columns are missing
+Calculates Cost Per Member for Firearms and OnLine (since they only have total cost)
+📊 EXPECTED RESULTS:
+POLICY_TRAINING_MOM: Monthly tracking metrics
+IN_PERSON_TRAINING_COMBINED: All training data with "Training Type" column
+TRAINING_SUMMARY_METRICS: Monthly course counts, attendees, costs by type
+TRAINING_COST_ANALYSIS: Cost efficiency and budget impact analysis
+⚡ QUICK TEST:
+Start with IN_PERSON_TRAINING_COMBINED first - this should now show actual training data with the "Training Type" column you wanted! The summary queries will populate once the combined query works successfully. image.png
+image.png
+image.png
+Edit
+I see the issue! The first query (IN_PERSON_TRAINING_COMBINED) is failing, so the dependent queries can't find it. Let me check what's in the InPerson table first and create a simpler, more robust solution. Debug and Simple Training Queries
+Code 
+🔧 STEP-BY-STEP DEBUGGING APPROACH
+Let's debug this systematically. Create these 5 simple queries in this order:
+
+📋 PHASE 1: DEBUG (Create First)
+CHECK_INPERSON_TABLE - See actual column structure
+IN_PERSON_ONLY - Basic InPerson data with "Training Type" column
+FIREARMS_ONLY - Basic Firearms data with "Training Type" column
+ONLINE_ONLY - Basic OnLine data with "Training Type" column
+MOM_PTU_SIMPLE - Basic monthly data
+📋 PHASE 2: COMBINE (After Phase 1 Works)
+TRAINING_COMBINED_SIMPLE - Combines the working individual queries
+🎯 TROUBLESHOOTING STRATEGY:
+Start with CHECK_INPERSON_TABLE - This will show us the actual column names
+Then test each individual table (IN_PERSON_ONLY, FIREARMS_ONLY, ONLINE_ONLY)
+Finally combine them once we know they work individually
+⚡ LIKELY ISSUES:
+Column names might be different than expected
+Tables might be empty
+Date columns causing data type errors
+Column matching issues between tables
+Create CHECK_INPERSON_TABLE first and let me know what columns you see - then we can fix the column mapping! Start Date End Date Course Duration Course Name of InPerson | Non-Firearms Related # Attendees   Cost Per Member   Total Cost  01/01/24 01/01/24 1 RST C Squad Monthly 1  $                                                -    $                              -   01/04/24 01/04/24 1 ALPR Coordinators AUDIT MEETING 3  $                                                -    $                              -   01/10/24 01/10/24 1 RST A Squad Monthly 1  $                                                -    $                              -   01/16/24 01/16/24 1 ESU Tactical EMS 10  $                                                -    $                              -   01/18/24 01/18/24 1 Arrest, Search and Seizure Training 2  $                                                -    $                              -   01/19/24 01/19/24 1 Defensive Driving 1  $                                                -    $                              -   01/22/24 01/22/24 1 Open Public Records Update/Review 5  $                                                -    $                              -  
+
+Start Date End Date Course Duration Firearms Related Course Name  # of Attendees   Cost  02/29/24 02/29/24 1 Firearms Qualifications- Blended 7  $               -   03/11/24 03/11/24 1 Firearms Qualification - Blended 3  $               -   03/20/24 03/20/24 1 Firearms Qualification- Sub Gun 1  $               -   04/22/24 04/26/24 5  Class #132 Firearms Instructor 2  $               -   05/06/24 05/10/24 5   Class #132 Firearms Instructor 2  $               -   05/15/24 05/15/24 1 Class # 132 Firearms Night Fire 1  $               -   05/29/24 05/29/24 1 Emergency Services Unit-Firearms 13  $               -  
+
+Start Date End Date Course Duration On-Line Training Course Name  # of Attendees   Cost  01/18/24 01/18/24 1 School Behavioral Threat Assessment & Management 1  $              -   09/18/24 09/18/24 1 CODIS Compliance Training  2  $              -   12/11/24 12/11/24 1 CODIS Compliance Training  3   01/14/25 01/14/25 1 PEOSH Injury Reporting and Recording  1  $              -
+
+Edit
+Perfect! Now I can see the exact column structure. Let me create the correct queries based on the actual column names:
+
+
+Working Policy Training Queries - Exact Column Names
+Code 
+🎯 WORKING QUERIES - EXACT COLUMN NAMES
+Now I've created queries using the exact column names from your Excel file:
+
+📊 COLUMN MAPPING USED:
+InPerson Table:
+
+"Course Name of InPerson | Non-Firearms Related" → "Course Name"
+"# Attendees " → "Attendees"
+"Cost Per Member" → "Cost Per Member"
+"Total Cost" → "Total Cost"
+Firearms Table:
+
+"Firearms Related Course Name " → "Course Name"
+"# of Attendees " → "Attendees"
+"Cost" → "Total Cost"
+Calculated: "Cost Per Member" (Total Cost ÷ Attendees)
+OnLine Table:
+
+"On-Line Training Course Name " → "Course Name"
+"# of Attendees " → "Attendees"
+"Cost" → "Total Cost"
+Calculated: "Cost Per Member" (Total Cost ÷ Attendees)
+🔧 KEY FEATURES:
+Exact column matching - no more "column not found" errors
+Cost per member calculation for Firearms and OnLine
+Training categorization - RST, ESU, Firearms, Compliance, etc. Efficiency ratings - based on cost per person per day
+No cost handling - recognizes $0 entries as free training
+📋 CREATE THESE 5 QUERIES:
+IN_PERSON_TRAINING_COMBINED (main combined data)
+POLICY_TRAINING_MOM (monthly metrics)
+TRAINING_SUMMARY_METRICS (monthly summary)
+TRAINING_COST_ANALYSIS (detailed cost analysis)
+TRAINING_BY_TYPE_SUMMARY (overview by type)
+This should now work perfectly with your exact Excel structure! image.png
+image.png
+image.png
+image.png
+i uploaded the Policy_Training_Monthly to my Google Drive
+
+Edit
+The column name issue is still causing problems. Let me create a simpler, bulletproof version that works with exact column names. Let me check what you shared in your Google Drive first. Searched for “Policy Training Monthly Excel file training data”
+0 results
+
+
+Searched for “training monthly data excel”
+3 results
+
+
+
+
+Let me create a completely bulletproof query that will work regardless of exact column names. The issue is the column name has special characters that might be causing problems. Bulletproof Training Query - No Column Name Dependencies
+Code 
+🔧 BULLETPROOF SOLUTION
+I've created queries that use column positions instead of exact column names to avoid the special character issues:
+
+📋 IMPLEMENTATION STRATEGY:
+Try the main bulletproof query first - IN_PERSON_TRAINING_COMBINED (BULLETPROOF)
+If that works, add the summary queries
+If it still fails, use the emergency simple version at the bottom
+🎯 KEY DIFFERENCES:
+Uses column positions (0, 1, 2, 3...) instead of exact names
+No special character dependencies
+Automatic column mapping based on order
+Emergency fallback at the bottom
+📊 COLUMN POSITION MAPPING:
+All Tables Use Same Pattern:
+
+Position 0 = Start Date
+Position 1 = End Date
+Position 2 = Course Duration
+Position 3 = Course Name
+Position 4 = Attendees
+Position 5 = Cost (varies by table)
+Position 6 = Total Cost (InPerson only)
+⚡ QUICK TEST:
+Create IN_PERSON_TRAINING_COMBINED (BULLETPROOF) first
+If it works, you'll see data with "Training Type" column
+Then add the two summary queries
+🚨 BACKUP PLAN:
+If the bulletproof version still fails, use the EMERGENCY SIMPLE VERSION at the bottom - it just loads the InPerson table with minimal processing. This approach eliminates the column name character encoding issues completely! image.png
+image.png
+image.png
+the EMERGENCY SIMPLE VERSION  and IN_PERSON_TRAINING_COMBINED both worked
+
+Edit
+Excellent! The EMERGENCY SIMPLE VERSION and IN_PERSON_TRAINING_COMBINED both worked! Now let's create the summary queries that reference the working query. Since the main query is working, the dependent queries should work too.

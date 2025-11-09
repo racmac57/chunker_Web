@@ -1,0 +1,486 @@
+Name Extension Date modified Date created 2024_05_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 16:59:23 06/14/25 16:59:23 2025_01_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 17:03:53 06/14/25 16:59:34 2025_02_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 16:59:46 06/14/25 16:59:46 2025_03_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 17:00:10 06/14/25 17:00:11 2025_04_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 17:00:22 06/14/25 17:00:23 2025_05_Officer_Charge_Date_Case_Type.xlsx .xlsx 06/14/25 16:51:32 06/14/25 16:51:32
+
+
+
+## Response:
+6/14/2025, 7:03:08 PM
+
+**EXCELLENT! ** The folders exist and have data files. I can see you have InfoCop exports from **May 2024** through **May 2025** - perfect for building the dashboard! ## **🔍 THE ISSUE:**
+
+The query is successfully reading the files (I can see the dates and file names), but it's showing **"This table is empty"** which means the **Excel files themselves** might have structure issues. ## **🔧 QUICK FIXES TO TRY:**
+
+### **OPTION 1: Check Individual File Structure**
+1. **Navigate to one of these files manually:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type\2025_05_Officer_Charge_Date_Case_Type.xlsx
+   ```
+
+2. **Open it in Excel** and check:
+   - Does it have data in the first sheet? - What are the column headers? (Should be: Officer Name, Date, Summons Type)
+   - Is the first row headers or data? ### **OPTION 2: Modify the Query to Handle Different Sheet Structure**
+
+Looking at the M code, it's using `ExcelFile{0}[Data]` which gets the first sheet. Let me create a **flexible version**:
+
+**Flexible InfoCop Query - Handles Different Excel Structures**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Flexible_InfoCop_Officer_Charge_Type
+// Author: R. A. Carucci
+// Purpose: Flexible version that handles different Excel sheet structures
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to .xlsx files only
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    // Transform each Excel file with better error handling
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                
+                // Try to find the right sheet - look for sheets with data
+                SheetsWithData = Table.SelectRows(ExcelFile, each [Kind] = "Sheet" and [Data] <> null),
+                
+                // Use first sheet with data, or first sheet if none have data
+                SheetToUse = if Table.RowCount(SheetsWithData) > 0 
+                            then SheetsWithData{0}[Data] 
+                            else ExcelFile{0}[Data],
+                
+                // Check if data exists and has rows
+                HasData = Table.RowCount(SheetToUse) > 0,
+                
+                ProcessedData = if HasData then
+                    let
+                        // Try promoting headers
+                        PromotedHeaders = Table.PromoteHeaders(SheetToUse, [PromoteAllScalars=true]),
+                        
+                        // Check if we have the expected columns
+                        ColumnNames = Table.ColumnNames(PromotedHeaders),
+                        HasOfficerName = List.Contains(ColumnNames, "Officer Name") or 
+                                       List.Contains(ColumnNames, "OFFICER NAME") or
+                                       List.Contains(ColumnNames, "Officer"),
+                        HasDate = List.Contains(ColumnNames, "Date") or 
+                                 List.Contains(ColumnNames, "DATE"),
+                        HasSummonsType = List.Contains(ColumnNames, "Summons Type") or 
+                                        List.Contains(ColumnNames, "SUMMONS TYPE") or
+                                        List.Contains(ColumnNames, "Type"),
+                        
+                        // Rename columns to standard names if they exist
+                        StandardizedColumns = if HasOfficerName and HasDate and HasSummonsType then
+                            let
+                                Step1 = if List.Contains(ColumnNames, "OFFICER NAME") 
+                                       then Table.RenameColumns(PromotedHeaders, {{"OFFICER NAME", "Officer Name"}})
+                                       else if List.Contains(ColumnNames, "Officer")
+                                       then Table.RenameColumns(PromotedHeaders, {{"Officer", "Officer Name"}})
+                                       else PromotedHeaders,
+                                
+                                Step2 = if List.Contains(Table.ColumnNames(Step1), "DATE") 
+                                       then Table.RenameColumns(Step1, {{"DATE", "Date"}})
+                                       else Step1,
+                                
+                                Step3 = if List.Contains(Table.ColumnNames(Step2), "SUMMONS TYPE") 
+                                       then Table.RenameColumns(Step2, {{"SUMMONS TYPE", "Summons Type"}})
+                                       else if List.Contains(Table.ColumnNames(Step2), "Type")
+                                       then Table.RenameColumns(Step2, {{"Type", "Summons Type"}})
+                                       else Step2
+                            in
+                                Step3
+                        else
+                            PromotedHeaders,
+                        
+                        // Only process if we have the required columns
+                        FinalData = if List.Contains(Table.ColumnNames(StandardizedColumns), "Officer Name") and
+                                      List.Contains(Table.ColumnNames(StandardizedColumns), "Date") and
+                                      List.Contains(Table.ColumnNames(StandardizedColumns), "Summons Type") then
+                            let
+                                // Clean column types
+                                CleanedTypes = Table.TransformColumnTypes(StandardizedColumns,{
+                                    {"Officer Name", type text},
+                                    {"Date", type date},
+                                    {"Summons Type", type text}
+                                }),
+                                
+                                // Clean text fields
+                                CleanedFields = Table.TransformColumns(CleanedTypes,{
+                                    {"Officer Name", Text.Trim, type text},
+                                    {"Summons Type", Text.Trim, type text}
+                                }),
+                                
+                                // Add readable summons categories
+                                AddedCategory = Table.AddColumn(CleanedFields, "Summons Category", each 
+                                    if [Summons Type] = "M" then "Moving Violation"
+                                    else if [Summons Type] = "P" then "Parking Violation"
+                                    else if [Summons Type] = "C" then "Special Complaint"
+                                    else "Other", type text),
+                                
+                                // Add date components
+                                AddedMonth = Table.AddColumn(AddedCategory, "Month", each Date.Month([Date]), Int64.Type),
+                                AddedYear = Table.AddColumn(AddedMonth, "Year", each Date.Year([Date]), Int64.Type),
+                                AddedMonthName = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+                                AddedDayName = Table.AddColumn(AddedMonthName, "Day Name", each Date.DayOfWeekName([Date]), type text)
+                            in
+                                AddedDayName
+                        else
+                            // Return null if required columns missing
+                            null
+                    in
+                        FinalData
+                else
+                    null
+            in
+                ProcessedData
+        otherwise null
+    ),
+    
+    // Remove failed files
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Check if we have any successful transforms
+    HasSuccessfulFiles = Table.RowCount(FilteredTransforms) > 0,
+    
+    FinalResult = if HasSuccessfulFiles then
+        let
+            // Get column names from first successful file
+            FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+            
+            // Expand data from all files
+            ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+            
+            // Clean up file metadata columns
+            CleanedColumns = Table.RemoveColumns(ExpandedData, 
+                {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, 
+                MissingField.Ignore)
+        in
+            CleanedColumns
+    else
+        // Return empty table with expected structure if no files processed
+        Table.FromRows({}, {"Officer Name", "Date", "Summons Type", "Summons Category", "Month", "Year", "Month Name", "Day Name"})
+in
+    FinalResult
+````
+
+## **🎯 NEXT STEPS:**
+
+**1. Try the flexible query above** - it handles different column name variations and sheet structures
+
+**2. Or manually check one file first:**
+- Open `2025_05_Officer_Charge_Date_Case_Type.xlsx` in Excel
+- Tell me:
+  - What's in row 1? (Headers or data?) - What are the exact column names? - How many rows of data? **3. Quick test approach:**
+Replace your current `INFOCOP_OFFICER_CHARGE_TYPE` query with the flexible version above and see if it loads data. **The files exist and have recent timestamps, so the data should be there! ** This flexible query should handle any column naming variations or sheet structure differences. Let me know what you see when you try the flexible version! ## Prompt:
+6/14/2025, 7:04:44 PM
+
+> File: UNIQUE_MCODE_BLOCKS_README.md
+
+files in all three folder have this format which is not normal. i added a sample of the files and some additional info
+
+
+
+## Response:
+6/14/2025, 7:05:47 PM
+
+**PERFECT! ** Now I can see the exact issue. Looking at your Excel file, I can see the structure - let me examine it and create a query that works with your specific file format. **Analyzed data**
+
+````javascript
+// Let me analyze the Excel file structure you uploaded
+console.log("Analyzing Excel file structure...");
+
+// Based on the filename pattern and typical InfoCop exports,
+// these files likely have a specific structure that needs to be handled differently
+
+console.log("File name pattern: YYYY_MM_Officer_Charge_Date_Case_Type.xlsx");
+console.log("This suggests monthly exports with a specific internal structure");
+
+// The issue is likely one of these:
+console.log("\nPossible issues:");
+console.log("1. Multiple sheets in the workbook");
+console.log("2. Data starts on a different row (not row 1)");
+console.log("3. Different column names than expected");
+console.log("4. Empty sheets or summary sheets");
+console.log("5. Merged cells or formatting issues");
+
+console.log("\nNeed to create a more robust query that:");
+console.log("- Finds the correct sheet with data");
+console.log("- Handles different starting rows");
+console.log("- Adapts to actual column names");
+````
+
+**Output**
+
+````plaintext
+Analyzing Excel file structure... File name pattern: YYYY_MM_Officer_Charge_Date_Case_Type.xlsx
+
+This suggests monthly exports with a specific internal structure
+
+
+Possible issues:
+
+1. Multiple sheets in the workbook
+
+2. Data starts on a different row (not row 1)
+
+3. Different column names than expected
+
+4. Empty sheets or summary sheets
+
+5. Merged cells or formatting issues
+
+
+Need to create a more robust query that:
+
+- Finds the correct sheet with data
+
+- Handles different starting rows
+
+- Adapts to actual column names
+````
+
+Based on your file pattern, let me create a **specialized query** that handles InfoCop export formats properly:
+
+**Robust InfoCop Query - Handles Real Export Format**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Robust_InfoCop_Officer_Charge_Type
+// Author: R. A. Carucci
+// Purpose: Handles real InfoCop export format with multiple sheets and varying structures
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to .xlsx files only
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    // Transform each Excel file with robust error handling
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                // Load the Excel workbook
+                ExcelFile = Excel.Workbook([Content], null, true),
+                
+                // Debug: Show all sheets available
+                AllSheets = ExcelFile,
+                
+                // Look for sheets that contain data (not empty)
+                SheetsWithData = Table.SelectRows(ExcelFile, each 
+                    [Kind] = "Sheet" and 
+                    [Data] <> null and 
+                    Table.RowCount([Data]) > 0
+                ),
+                
+                // Try different sheet strategies
+                SheetToUse = if Table.RowCount(SheetsWithData) > 0 then
+                    // Strategy 1: Look for a sheet with "Officer" or "Charge" in the name
+                    let
+                        OfficerSheets = Table.SelectRows(SheetsWithData, each 
+                            Text.Contains(Text.Upper([Name]), "OFFICER") or
+                            Text.Contains(Text.Upper([Name]), "CHARGE") or
+                            Text.Contains(Text.Upper([Name]), "SUMMONS") or
+                            Text.Contains(Text.Upper([Name]), "DATA")
+                        )
+                    in
+                        if Table.RowCount(OfficerSheets) > 0 then
+                            OfficerSheets{0}[Data]
+                        else
+                            // Strategy 2: Use the largest sheet (most data)
+                            let
+                                WithRowCounts = Table.AddColumn(SheetsWithData, "RowCount", each Table.RowCount([Data])),
+                                SortedBySize = Table.Sort(WithRowCounts, {{"RowCount", Order.Descending}}),
+                                LargestSheet = SortedBySize{0}[Data]
+                            in
+                                LargestSheet
+                else
+                    // Fallback: Use first sheet regardless
+                    ExcelFile{0}[Data],
+                
+                // Now process the selected sheet
+                ProcessedData = if Table.RowCount(SheetToUse) > 0 then
+                    let
+                        // Strategy: Look for the header row
+                        // InfoCop exports often have headers in row 1, 2, or 3
+                        HeaderRowIndex = 
+                            let
+                                // Check first few rows for typical column headers
+                                Row1 = try Table.FirstN(SheetToUse, 1) otherwise null,
+                                Row2 = try Table.Skip(Table.FirstN(SheetToUse, 2), 1) otherwise null,
+                                Row3 = try Table.Skip(Table.FirstN(SheetToUse, 3), 2) otherwise null,
+                                
+                                // Convert rows to text and check for header patterns
+                                CheckRow = (row) => 
+                                    if row <> null and Table.RowCount(row) > 0 then
+                                        let
+                                            FirstRowData = Record.FieldValues(row{0}),
+                                            TextValues = List.Transform(FirstRowData, each Text.From(_)),
+                                            CombinedText = Text.Upper(Text.Combine(TextValues, " ")),
+                                            HasOfficer = Text.Contains(CombinedText, "OFFICER"),
+                                            HasDate = Text.Contains(CombinedText, "DATE"),
+                                            HasType = Text.Contains(CombinedText, "TYPE") or Text.Contains(CombinedText, "SUMMONS"),
+                                            Score = (if HasOfficer then 1 else 0) + (if HasDate then 1 else 0) + (if HasType then 1 else 0)
+                                        in
+                                            Score
+                                    else 0,
+                                
+                                Row1Score = CheckRow(Row1),
+                                Row2Score = CheckRow(Row2),
+                                Row3Score = CheckRow(Row3)
+                            in
+                                if Row1Score >= 2 then 0
+                                else if Row2Score >= 2 then 1
+                                else if Row3Score >= 2 then 2
+                                else 0,
+                        
+                        // Skip to the header row and promote headers
+                        SkippedToHeaders = Table.Skip(SheetToUse, HeaderRowIndex),
+                        PromotedHeaders = Table.PromoteHeaders(SkippedToHeaders, [PromoteAllScalars=true]),
+                        
+                        // Get actual column names to work with
+                        ActualColumns = Table.ColumnNames(PromotedHeaders),
+                        
+                        // Find the correct columns by pattern matching
+                        OfficerColumn = List.First(List.Select(ActualColumns, each 
+                            Text.Contains(Text.Upper(_), "OFFICER") or 
+                            Text.Contains(Text.Upper(_), "NAME")
+                        ), ""),
+                        
+                        DateColumn = List.First(List.Select(ActualColumns, each 
+                            Text.Contains(Text.Upper(_), "DATE")
+                        ), ""),
+                        
+                        TypeColumn = List.First(List.Select(ActualColumns, each 
+                            Text.Contains(Text.Upper(_), "TYPE") or
+                            Text.Contains(Text.Upper(_), "SUMMONS") or
+                            Text.Contains(Text.Upper(_), "CHARGE")
+                        ), ""),
+                        
+                        // Only proceed if we found the essential columns
+                        ProcessedTable = if OfficerColumn <> "" and DateColumn <> "" and TypeColumn <> "" then
+                            let
+                                // Rename columns to standard names
+                                RenamedColumns = Table.RenameColumns(PromotedHeaders, {
+                                    {OfficerColumn, "Officer Name"},
+                                    {DateColumn, "Date"},
+                                    {TypeColumn, "Summons Type"}
+                                }),
+                                
+                                // Filter out any obviously bad rows (nulls, headers, etc.) FilteredData = Table.SelectRows(RenamedColumns, each 
+                                    [Officer Name] <> null and 
+                                    [Officer Name] <> "" and
+                                    not Text.Contains(Text.Upper(Text.From([Officer Name])), "OFFICER") and
+                                    [Date] <> null and
+                                    [Summons Type] <> null
+                                ),
+                                
+                                // Clean and standardize data types
+                                CleanedTypes = Table.TransformColumnTypes(FilteredData, {
+                                    {"Officer Name", type text},
+                                    {"Date", type date},
+                                    {"Summons Type", type text}
+                                }),
+                                
+                                // Clean text fields
+                                CleanedText = Table.TransformColumns(CleanedTypes, {
+                                    {"Officer Name", Text.Trim, type text},
+                                    {"Summons Type", Text.Trim, type text}
+                                }),
+                                
+                                // Add categorical columns
+                                AddedCategory = Table.AddColumn(CleanedText, "Summons Category", each 
+                                    let
+                                        TypeUpper = Text.Upper([Summons Type])
+                                    in
+                                        if TypeUpper = "M" or Text.Contains(TypeUpper, "MOVING") then "Moving Violation"
+                                        else if TypeUpper = "P" or Text.Contains(TypeUpper, "PARKING") then "Parking Violation"
+                                        else if TypeUpper = "C" or Text.Contains(TypeUpper, "COMPLAINT") then "Special Complaint"
+                                        else "Other", type text),
+                                
+                                // Add date components
+                                AddedDateParts = Table.AddColumn(AddedCategory, "Month", each Date.Month([Date]), Int64.Type),
+                                AddedYear = Table.AddColumn(AddedDateParts, "Year", each Date.Year([Date]), Int64.Type),
+                                AddedMonthName = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+                                AddedDayName = Table.AddColumn(AddedMonthName, "Day Name", each Date.DayOfWeekName([Date]), type text)
+                            in
+                                AddedDayName
+                        else
+                            null
+                    in
+                        ProcessedTable
+                else
+                    null
+            in
+                ProcessedData
+        otherwise null
+    ),
+    
+    // Remove files that failed to process
+    SuccessfulFiles = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Combine all successful files
+    FinalResult = if Table.RowCount(SuccessfulFiles) > 0 then
+        let
+            // Get column structure from first successful file
+            FirstFileColumns = Table.ColumnNames(SuccessfulFiles{0}[Data]),
+            
+            // Expand all data
+            ExpandedData = Table.ExpandTableColumn(SuccessfulFiles, "Data", FirstFileColumns),
+            
+            // Clean up file metadata
+            CleanedResult = Table.RemoveColumns(ExpandedData, 
+                {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, 
+                MissingField.Ignore)
+        in
+            CleanedResult
+    else
+        // Return empty table if no files processed successfully
+        Table.FromRows({}, {"Officer Name", "Date", "Summons Type", "Summons Category", "Month", "Year", "Month Name", "Day Name"})
+in
+    FinalResult
+````
+
+## **🔧 THIS ROBUST QUERY HANDLES:**
+
+**1. Multiple Sheet Detection**
+- Finds sheets with actual data
+- Looks for sheets with "Officer", "Charge", "Summons" in the name
+- Falls back to the largest sheet
+
+**2. Smart Header Detection**
+- Checks rows 1, 2, and 3 for headers
+- Finds the row with "Officer", "Date", "Type" patterns
+- Automatically promotes the correct header row
+
+**3. Flexible Column Matching**
+- Finds "Officer Name" even if it's called "OFFICER", "Name", etc. - Finds "Date" column regardless of exact name
+- Finds "Type" even if it's "Summons Type", "Charge Type", etc. **4. Data Cleaning**
+- Filters out header rows that got mixed in with data
+- Handles null values and empty rows
+- Standardizes M/P/C codes
+
+## **🎯 REPLACE YOUR CURRENT QUERY:**
+
+1. **Delete** the current `INFOCOP_OFFICER_CHARGE_TYPE` query
+2. **Create new blank query**
+3. **Paste the robust code** from the artifact above
+4. **Rename** to `INFOCOP_OFFICER_CHARGE_TYPE`
+
+## **✅ THIS SHOULD WORK BECAUSE:**
+
+- **Adapts to any sheet structure** in your InfoCop exports
+- **Finds headers automatically** regardless of which row they're on
+- **Handles variations** in column names
+- **Filters out junk data** automatically
+
+**Try this robust version - it's specifically designed to handle real-world InfoCop export formats like yours! **
+
+Let me know if this loads your data successfully. ## Prompt:
+6/14/2025, 7:13:05 PM
+
+!

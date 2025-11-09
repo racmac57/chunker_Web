@@ -1,0 +1,533 @@
+DATA QUALITY & VALIDATION REQUIREMENTS\n\n### **Pre-Processing Validation**\n\n**Create:** `00_validate_raw_data.py`\n\n```python\ndef validate_raw_od_data(od_file_path):\n    \"\"\"\n    Validate OD_Map data before processing\n    \"\"\"\n    df = pd.read_excel(od_file_path)\n    \n    validation_report = {\n        'total_records': len(df),\n        'date_range': (df['Incident_Date'].min(), df['Incident_Date'].max()),\n        'null_coordinates': df[['Longitude', 'Latitude']].isnull().sum().to_dict(),\n        'null_case_numbers': df['Case_Number'].isnull().sum(),\n        'duplicate_case_numbers': df['Case_Number'].duplicated().sum(),\n        'missing_critical_fields': {}\n    }\n    \n    # Critical field checks\n    critical_fields = ['Case_Number', 'Incident_Date', 'Longitude', 'Latitude', 'Fatality_Status']\n    for field in critical_fields:\n        if field in df.columns:\n            null_count = df[field].isnull().sum()\n            if null_count > 0:\n                validation_report['missing_critical_fields'][field] = null_count\n    \n    # Date range validation\n    expected_start = pd.to_datetime('2022-01-01')\n    expected_end = pd.to_datetime('2025-10-31')\n    actual_start = pd.to_datetime(df['Incident_Date'].min())\n    actual_end = pd.to_datetime(df['Incident_Date'].max())\n    \n    validation_report['date_range_valid'] = (\n        actual_start >= expected_start and \n        actual_end <= expected_end\n    )\n    \n    # Flag issues\n    issues = []\n    if validation_report['null_coordinates']['Longitude'] > 0:\n        issues.append(f\"⚠️ {validation_report['null_coordinates']['Longitude']} records missing coordinates\")\n    if validation_report['duplicate_case_numbers'] > 0:\n        issues.append(f\"⚠️ {validation_report['duplicate_case_numbers']} duplicate case numbers\")\n    if not validation_report['date_range_valid']:\n        issues.append(f\"⚠️ Date range mismatch: {actual_start} to {actual_end}\")\n    \n    validation_report['issues'] = issues\n    validation_report['status'] = 'PASS' if len(issues) == 0 else 'FAIL'\n    \n    return validation_report\n```\n\n**Output:** `01_Raw_Data\\Data_Validation_Report.json`\n\n---\n\n### **RMS/CAD Match Rate Tracking**\n\n```python\ndef track_match_rates(od_df, rms_df, cad_df):\n    \"\"\"\n    Document match success rates for transparency\n    \"\"\"\n    # RMS matching\n    rms_matches = od_df['Case_Number'].isin(rms_df['Case_Number']).sum()\n    rms_match_rate = (rms_matches / len(od_df)) * 100\n    \n    # CAD matching (may need fuzzy logic)\n    cad_matches = od_df['CAD_Match_Found'].sum()\n    cad_match_rate = (cad_matches / len(od_df)) * 100\n    \n    match_report = {\n        'od_total_records': len(od_df),\n        'rms_matches': rms_matches,\n        'rms_match_rate': round(rms_match_rate, 1),\n        'rms_no_match': len(od_df) - rms_matches,\n        'cad_matches': cad_matches,\n        'cad_match_rate': round(cad_match_rate, 1),\n        'cad_no_match': len(od_df) - cad_matches\n    }\n    \n    # Log for transparency\n    logging.info(f\"RMS Match Rate: {rms_match_rate:.1f}% ({rms_matches}/{len(od_df)})\")\n    logging.info(f\"CAD Match Rate: {cad_match_rate:.1f}% ({cad_matches}/{len(od_df)})\")\n    \n    # Warning if match rate too low\n    if rms_match_rate < 70:\n        logging.warning(f\"⚠️ RMS match rate below 70% - narrative analysis may be incomplete\")\n    \n    return match_report\n```\n\n**Include in Executive Summary:**\n> \"Data Integration: [X]% of overdose incidents successfully matched with RMS \n> case narratives. [X]% matched with CAD response data. Unmatched cases analyzed \n> using available incident location data only.\"\n\n---\n\n## 18. ERROR HANDLING & ROBUSTNESS\n\n### **OneDrive Sync Issues**\n\n```python\nimport time\nfrom pathlib import Path\n\ndef safe_file_read(file_path, max_retries=3, retry_delay=2):\n    \"\"\"\n    Handle OneDrive file lock issues\n    \"\"\"\n    for attempt in range(max_retries):\n        try:\n            if file_path.endswith('.xlsx'):\n                df = pd.read_excel(file_path)\n            elif file_path.endswith('.xls'):\n                df = pd.read_excel(file_path, engine='xlrd')\n            elif file_path.endswith('.csv'):\n                df = pd.read_csv(file_path, encoding='utf-8', on_bad_lines='skip')\n            \n            logging.info(f\"✅ Successfully read: {Path(file_path).name}\")\n            return df\n            \n        except PermissionError:\n            if attempt < max_retries - 1:\n                logging.warning(f\"⚠️ File locked, retrying in {retry_delay}s... (Attempt {attempt+1}/{max_retries})\")\n                time.sleep(retry_delay)\n            else:\n                logging.error(f\"❌ Failed to read file after {max_retries} attempts: {file_path}\")\n                raise\n        except Exception as e:\n            logging.error(f\"❌ Error reading {file_path}: {str(e)}\")\n            raise\n```\n\n---\n\n### **Graceful Degradation**\n\n```python\ndef process_with_fallback(od_df, rms_files, cad_files):\n    \"\"\"\n    If RMS/CAD integration fails, continue with basic analysis\n    \"\"\"\n    try:\n        # Attempt full RMS integration\n        od_enhanced = integrate_rms_data(od_df, rms_files)\n        logging.info(\"✅ RMS integration successful\")\n    except Exception as e:\n        logging.warning(f\"⚠️ RMS integration failed: {str(e)}\")\n        logging.info(\"→ Continuing with location-based classification only\")\n        od_enhanced = od_df.copy()\n        od_enhanced['RMS_Match_Found'] = False\n        od_enhanced['Location_Type_Primary'] = classify_location_from_address(od_df)\n    \n    try:\n        # Attempt CAD integration\n        od_enhanced = integrate_cad_data(od_enhanced, cad_files)\n        logging.info(\"✅ CAD integration successful\")\n    except Exception as e:\n        logging.warning(f\"⚠️ CAD integration failed: {str(e)}\")\n        logging.info(\"→ Continuing without response time data\")\n        od_enhanced['CAD_Match_Found'] = False\n    \n    return od_enhanced\n\ndef classify_location_from_address(df):\n    \"\"\"\n    Fallback: Classify location type from address field only\n    \"\"\"\n    def simple_classify(address):\n        address_lower = str(address).lower()\n        \n        if any(kw in address_lower for kw in ['st', 'ave', 'blvd', 'rd', 'street', 'avenue']):\n            return 'Public_Street'\n        elif any(kw in address_lower for kw in ['apt', 'apartment', 'unit']):\n            return 'Residence'\n        elif any(kw in address_lower for kw in ['park', 'lot']):\n            return 'Public_Space'\n        else:\n            return 'Unknown'\n    \n    return df['Location'].apply(simple_classify)\n```\n\n---\n\n## 19. PERFORMANCE OPTIMIZATION\n\n### **For Large Datasets**\n\n```python\n# Process RMS files in chunks\ndef integrate_rms_in_chunks(od_df, rms_files, chunksize=10000):\n    \"\"\"\n    Memory-efficient RMS processing for large files\n    \"\"\"\n    rms_combined = []\n    \n    for rms_file in rms_files:\n        logging.info(f\"Processing: {Path(rms_file).name}\")\n        \n        # Read in chunks\n        for chunk in pd.read_excel(rms_file, chunksize=chunksize):\n            # Filter to only OD case numbers (faster)\n            relevant_cases = chunk[chunk['Case_Number'].isin(od_df['Case_Number'])]\n            if len(relevant_cases) > 0:\n                rms_combined.append(relevant_cases)\n        \n        logging.info(f\"  → Found {sum(len(c) for c in rms_combined)} matching records\")\n    \n    return pd.concat(rms_combined, ignore_index=True) if rms_combined else pd.DataFrame()\n```\n\n---\n\n### **Parallel Processing for Keyword Analysis**\n\n```python\nfrom concurrent.futures import ThreadPoolExecutor\nimport multiprocessing\n\ndef analyze_narratives_parallel(df, max_workers=None):\n    \"\"\"\n    Parallel keyword extraction from narratives\n    \"\"\"\n    if max_workers is None:\n        max_workers = multiprocessing.cpu_count() - 1\n    \n    def analyze_single_narrative(row):\n        narrative = str(row.get('RMS_Narrative', ''))\n        \n        return {\n            'Case_Number': row['Case_Number'],\n            'Location_Type': extract_location_type(narrative),\n            'Narcan_Source': extract_narcan_source(narrative),\n            'Vehicle_Involved': check_vehicle_involvement(narrative),\n            'Homeless_Indicators': check_homeless_indicators(narrative),\n            'Repeat_Location': check_repeat_location(narrative)\n        }\n    \n    with ThreadPoolExecutor(max_workers=max_workers) as executor:\n        results = list(executor.map(\n            analyze_single_narrative, \n            [row for _, row in df.iterrows()]\n        ))\n    \n    results_df = pd.DataFrame(results)\n    return df.merge(results_df, on='Case_Number', how='left')\n```\n\n---\n\n## 20. FINAL SCRIPT CHECKLIST\n\n**Scripts to Create/Update:**\n\n### **New Scripts (Create):**\n- [ ] `00_validate_raw_data.py` - Pre-flight data checks\n- [ ] `01_integrate_rms_narratives.py` - RMS cross-reference & keyword extraction\n- [ ] `02_integrate_cad_responses.py` - CAD response time analysis\n- [ ] `03_calculate_location_weights.py` - Kiosk priority weighting\n- [ ] `04_analyze_temporal_patterns.py` - Hour/day pattern analysis\n- [ ] `05_analyze_vehicle_incidents.py` - Vehicle-specific analysis\n- [ ] `06_calculate_coverage_optimization.py` - Kiosk placement optimization\n- [ ] `09_generate_executive_summary.py` - Auto-generate Word document\n- [ ] `10_create_presentation_deck.py` - Auto-generate PowerPoint\n- [ ] `11_validate_full_pipeline.py` - Comprehensive QC\n- [ ] `12_package_deliverables.py` - Zip final deliverables\n\n### **Update Existing Scripts:**\n- [ ] `od_data_cleanup.py` - Update for new data path, add RMS/CAD integration\n- [ ] `organize_project_files.py` - Add CAD/RMS subdirectories\n- [ ] `01_arcpy_setup_geodatabase.py` - Add new feature classes (weighted, annual)\n- [ ] `00_arcpy_create_project.py` - Update APRX with new layers\n- [ ] `04_arcpy_export_maps.py` - Expand to 5 annual maps + combined\n- [ ] `verify_project_status.py` - Update validation for new outputs\n\n### **Orchestration Scripts:**\n- [ ] `RUN_FULL_PIPELINE.ps1` - Update for new script sequence\n- [ ] `RUN_ALL_ANALYSIS.bat` - Update for new script sequence\n\n---\n\n## 21. USAGE INSTRUCTIONS FOR CLAUDE CODE\n\n**Step 1: Initial Assessment**\n```bash\n# Run this first to understand current project state\ncd \"C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\SSOCC\\Requests\\2025\\CSB\\CDS_Overdose_25_086469\\cds_overdose_10_2022_10_2025\"\n\n# List all existing scripts\nls 07_Scripts\\*.py\n\n# Check current data files\nls 01_Raw_Data\\**\\*\n```\n\n**Step 2: Validation**\n```bash\n# Validate raw OD data\npython 07_Scripts\\00_validate_raw_data.py\n```\n\n**Step 3: Data Enhancement**\n```bash\n# Run RMS integration\npython 07_Scripts\\01_integrate_rms_narratives.py\n\n# Run CAD integration\npython 07_Scripts\\02_integrate_cad_responses.py\n\n# Calculate weights\npython 07_Scripts\\03_calculate_location_weights.py\n```\n\n**Step 4: Temporal Slicing**\n```bash\n# Create annual datasets\npython 07_Scripts\\05_create_temporal_slices.py\n```\n\n**Step 5: Spatial Analysis (ArcGIS Pro Environment)**\n```bash\n# Open ArcGIS Pro Python window and run:\nexec(open(r'07_Scripts\\06_setup_geodatabase.py').read())\nexec(open(r'07_Scripts\\07_generate_density_analysis.py').read())\nexec(open(r'07_Scripts\\08_export_maps.py').read())\n```\n\n**Step 6: Reporting**\n```bash\n# Generate executive summary\npython 07_Scripts\\09_generate_executive_summary.py\n\n# Generate presentation\npython 07_Scripts\\10_create_presentation_deck.py\n```\n\n**Step 7: Validation & Packaging**\n```bash\n# Final validation\npython 07_Scripts\\11_validate_full_pipeline.py\n\n# Package deliverables\npython 07_Scripts\\12_package_deliverables.py\n```\n\n**OR Run Full Pipeline:**\n```powershell\n# PowerShell orchestration (runs all steps)\n.\\RUN_FULL_PIPELINE.ps1\n```\n\n---\n\n## 22. SUCCESS METRICS\n\n**Pipeline is successful if:**\n\n✅ **Data Integrity:**\n- All incidents from Jan 2022 - Oct 2025 accounted for\n- Zero data loss during RMS/CAD integration\n- ≥80% RMS match rate for narrative analysis\n- All coordinates valid (no null X/Y)\n\n✅ **Analysis Quality:**\n- Location weighting applied to 100% of incidents\n- Temporal slices created (2022, 2023, 2024, 2025, Combined)\n- Kernel density uses weighted field\n- Fatal/non-fatal symbology correct\n\n✅ **Map Outputs:**\n- 6 maps exported (5 annual + 1 combined)\n- Primary map: Non-fatal heat (weighted) + fatal stars overlay\n- Top 5 kiosk sites clearly marked and numbered\n- All layouts professional quality (300 DPI)",
+  "version_uuid": "e8505da0-b4b9-48f4-8726-110596a85f40"
+}
+````
+
+---
+
+# Summary: Complete Claude Code Prompt
+
+I've created a **comprehensive Claude Code prompt** that addresses all your requirements. Here's what it includes:
+
+## 🎯 Key Features
+
+### **1. Updated Data Paths**
+- New OD data: `01_Raw_Data\OD_Map\22_01_25_10_OD_Map.xls`
+- CAD data: `01_Raw_Data\CAD\` (2022-2025)
+- RMS data: `01_Raw_Data\RMS\` (2022-2025)
+
+### **2. RMS/CAD Integration**
+- Cross-reference Case Numbers to extract narratives
+- Keyword analysis for location classification
+- Vehicle involvement detection
+- Naloxone administration source tracking
+- Response time analysis from CAD
+
+### **3. Location Weighting System**
+- **3.0x weight:** Public streets, vehicles (highest priority)
+- **2.0-2.5x:** Public spaces, shelters
+- **1.0x:** Private residences
+- **0.5x:** Residences with existing Narcan access
+
+### **4. Temporal Analysis**
+- Annual datasets: 2022, 2023, 2024, 2025
+- 5 heat maps + 1 combined map
+- Hotspot migration analysis
+- Trend identification
+
+### **5. Map Strategy**
+✅ **Primary Map:** Weighted non-fatal heat map + fatal star overlay
+✅ **Temporal Series:** 4 annual maps showing progression
+✅ **Comprehensive:** Location type, coverage analysis maps
+
+### **6. Blind Spots Addressed**
+- Implementation constraints (property ownership, security)
+- Socioeconomic overlay (if census data available)
+- Data limitations documentation
+- Match rate transparency
+
+### **7. Deliverables**
+- Auto-generated executive summary (Word)
+- Presentation deck (PowerPoint)
+- Site recommendations table
+- Validation reports
+- Complete package for City Manager
+
+---
+
+## 📊 Direct Answers to Your Questions
+
+**1. Should you get full 2022 data? **
+✅ **YES** - Already addressed in prompt (Jan 2022 - Oct 2025)
+
+**2. Scripts for survival bias? **
+❌ **NO** - Document limitation, don't adjust analysis
+
+**3. RMS/CAD cross-reference? **
+✅ **YES** - Full integration scripts included in prompt
+
+**4. Implementation & socioeconomic blind spots? **
+✅ **YES** - Scripts for feasibility assessment and census overlay
+
+---
+
+## 🚀 Next Steps
+
+### **To Use This Prompt with Claude Code:**
+
+1. **Copy the entire artifact content** (the Claude Code prompt)
+
+2. **Paste into Claude Code** and run:
+   ```bash
+   claude-code
+   ```
+
+3. **Claude Code will:**
+   - Scan your project directory
+   - Analyze existing scripts
+   - Create new scripts for RMS/CAD integration
+   - Update existing scripts for new data paths
+   - Generate all analysis scripts
+   - Create map export scripts
+   - Build executive summary generator
+   - Validate entire pipeline
+
+4. **Review outputs** and run pipeline:
+   ```powershell
+   .\RUN_FULL_PIPELINE.ps1
+   ```
+
+---
+
+## 🔑 Key Strategic Points for City Manager
+
+**Your Talking Points:**
+
+1. **"We analyzed 46 months of data - January 2022 through October 2025"**
+
+2. **"Cross-referenced with full case narratives to identify public vs. private location overdoses"**
+
+3. **"Public location incidents weighted 3x because those individuals lack home access to harm reduction supplies"**
+
+4. **"5 recommended kiosk sites provide coverage to X% of highest-priority incidents"**
+
+5. **"Analysis shows [stable/emerging] hotspot patterns - kiosks target persistent problem areas"**
+
+6. **"Post-installation monitoring built into methodology for ongoing effectiveness assessment"**
+
+---
+
+**The prompt is complete and ready to use. Would you like me to clarify any specific section, or are you ready to run it with Claude Code? **
+
+
+
+## Prompt:
+10/6/2025, 8:10:05 PM
+
+don't I activate Claude Code by entering the Command Prompt cd C:\Users\carucci_r\OneDrive - City of Hackensack\SSOCC\Requests\2025\CSB\CDS_Overdose_25_086469\cds_overdose_10_2022_10_2025 then adding npx @anthropic-ai/claude-code after the directory is loaded? Also Version 2 of the Claude Code Prompt begins just before step 16. Do I combine version 1 and 2 into a single prompt? ## Response:
+10/6/2025, 8:12:32 PM
+
+# Correct Claude Code Activation & Prompt Consolidation
+
+---
+
+## ✅ **YES - You're Absolutely Right on Both Points! **
+
+---
+
+## 1. **Correct Claude Code Activation Process**
+
+**Your method is exactly right:**
+
+```bash
+# Step 1: Navigate to project directory
+cd C:\Users\carucci_r\OneDrive - City of Hackensack\SSOCC\Requests\2025\CSB\CDS_Overdose_25_086469\cds_overdose_10_2022_10_2025
+
+# Step 2: Launch Claude Code
+npx @anthropic-ai/claude-code
+```
+
+**Then paste the complete prompt when Claude Code asks what you want to do. **
+
+---
+
+## 2. **YES - Combine Both Versions into Single Prompt**
+
+You need **ONE COMPLETE PROMPT** that includes:
+- **Version 1:** Sections 1-15 (from beginning through script checklist)
+- **Version 2:** Sections 16-22 (analytical questions through success metrics)
+
+---
+
+## 📋 **Complete Unified Claude Code Prompt**
+
+**COMPLETE Claude Code Prompt - CDS Overdose Analysis**
+
+````markdown
+# Claude Code: CDS Overdose Analysis Pipeline - Complete Enhancement
+
+## PROJECT CONTEXT
+
+**Mission:** Enhance overdose data analysis pipeline to support Narcan vending machine placement decisions for Hackensack City Manager Thomas Freeman. **Updated Dataset:** January 2022 - October 2025 (46 months, 3 complete calendar years + partial 2025)
+
+**Key Enhancement:** Cross-reference overdose incidents with RMS narratives and CAD response data to extract location context, vehicle involvement, and response patterns. ---
+
+## PROJECT DIRECTORY STRUCTURE
+
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\SSOCC\Requests\2025\CSB\CDS_Overdose_25_086469\cds_overdose_10_2022_10_2025\
+
+├── 01_Raw_Data\
+│   ├── OD_Map\
+│   │   └── 22_01_25_10_OD_Map.xls          # PRIMARY: Jan 2022 - Oct 2025 overdose incidents
+│   ├── CAD\                                 # CAD response data (2022-2025)
+│   │   ├── 2022_CAD_ALL.xlsx
+│   │   ├── 2023_CAD_ALL.xlsx
+│   │   ├── 2024_CAD_ALL.xlsx
+│   │   └── 25_01_10_All_CAD.xlsx           # Jan-Oct 2025
+│   └── RMS\                                 # RMS case narratives & details (2022-2025)
+│       ├── 2022_ALL_RMS.xlsx
+│       ├── 2023_ALL_RMS.xlsx
+│       ├── 2024_ALL_RMS.xlsx
+│       └── 2025_01_10_All_RMS.xlsx         # Jan-Oct 2025
+│
+├── 02_Cleaned_Data\                         # Output: Enhanced datasets
+├── 03_GIS\                                  # Geodatabase and APRX
+├── 04_Maps\exports\                         # Map deliverables
+├── 07_Scripts\                              # Python/ArcPy scripts
+└── 10_Deliverables\                         # Final package for City Manager
+```
+
+---
+
+## PRIMARY OBJECTIVES
+
+### 1. DATA INTEGRATION & ENHANCEMENT
+
+#### **Phase 1: Load & Validate Core Overdose Data**
+- Read: `01_Raw_Data\OD_Map\22_01_25_10_OD_Map.xls`
+- Validate date range: January 2022 - October 2025
+- Verify all records have Case Number, X/Y coordinates, incident date
+- Output: `OD_Core_Validated.csv` with data quality report
+
+#### **Phase 2: RMS Cross-Reference**
+**Goal:** Extract detailed narrative context for each overdose incident
+
+**RMS Data Sources:**
+- `01_Raw_Data\RMS\2022_ALL_RMS.xlsx`
+- `01_Raw_Data\RMS\2023_ALL_RMS.xlsx`
+- `01_Raw_Data\RMS\2024_ALL_RMS.xlsx`
+- `01_Raw_Data\RMS\2025_01_10_All_RMS.xlsx`
+
+**Matching Logic:**
+- Join on: OD `Case Number` = RMS `Case Number`
+- Extract fields:
+  - `Narrative` (full text for keyword analysis)
+  - `Registration 1, Make1, Model1, Reg State 1`
+  - `Registration 2, Make2, Model2, Reg State 2`
+  - Any address/location fields in RMS
+
+**Narrative Analysis - Extract:**
+
+1. **Location Type Classification:**
+```python
+LOCATION_PATTERNS = {
+    'public_street': [
+        r'\b(street|sidewalk|road|avenue|alley|curb|roadway)\b',
+        r'\b(intersection|crosswalk|parking lot)\b'
+    ],
+    'vehicle': [
+        r'\b(vehicle|car|auto|van|truck|suv|sedan)\b',
+        r'\b(parked|driving|passenger|driver)\b',
+        r'\b(motor vehicle|mv)\b'
+    ],
+    'public_space': [
+        r'\b(park|plaza|bus stop|train station|transit)\b',
+        r'\b(public|commercial|business|store|restaurant)\b'
+    ],
+    'residence': [
+        r'\b(home|house|apartment|residence|dwelling|unit)\b',
+        r'\b(bedroom|bathroom|living room|kitchen)\b',
+        r'\b(private property|residential)\b'
+    ],
+    'shelter_hotel': [
+        r'\b(hotel|motel|shelter|rooming house|halfway house)\b'
+    ]
+}
+```
+
+2. **Naloxone Administration Context:**
+```python
+NARCAN_PATTERNS = {
+    'pd_administered': [
+        r'\b(officer|PD|police|patrolman|detective)\s+administered',
+        r'\b(I|we|officer)\s+administered\s+(narcan|naloxone)',
+        r'\b(deployed|used|gave)\s+(narcan|naloxone)'
+    ],
+    'ems_administered': [
+        r'\b(EMS|EMT|paramedic|ambulance)\s+administered',
+        r'\b(HUMC|hospital|medic)\s+administered'
+    ],
+    'bystander_administered': [
+        r'\b(bystander|friend|family|witness|civilian)\s+administered',
+        r'\b(prior to (our|police) arrival)',
+        r'\b(already administered|previously given)'
+    ],
+    'none_administered': [
+        r'\b(no narcan|narcan not|without narcan)\b',
+        r'\b(before narcan|prior to narcan)\b'
+    ]
+}
+```
+
+3. **Response Indicators:**
+```python
+RESPONSE_PATTERNS = {
+    'homeless_indicators': [
+        r'\b(homeless|transient|no fixed address|NFA)\b',
+        r'\b(sleeping (on|in) street|living (on|in) street)\b'
+    ],
+    'repeat_location': [
+        r'\b(known location|frequent|repeat|again at this location)\b',
+        r'\b(same address|prior OD at)\b'
+    ],
+    'fatal_indicators': [
+        r'\b(DOA|dead on arrival|pronounced|deceased|fatality)\b',
+        r'\b(CPR|resuscitation|unresponsive)\b'
+    ]
+}
+```
+
+**Output Fields Added:**
+- `RMS_Match_Found` (Boolean)
+- `RMS_Narrative` (Full text)
+- `Location_Type_Primary` (Categorized: Public_Street, Vehicle, Residence, Public_Space, Shelter_Hotel, Unknown)
+- `Location_Type_Confidence` (High/Medium/Low based on keyword match strength)
+- `Vehicle_Involved` (Boolean)
+- `Vehicle_Details` (Combined Make1/Model1/Registration1)
+- `Narcan_Source` (PD, EMS, Bystander, None, Unknown)
+- `Homeless_Indicators_Present` (Boolean)
+- `Repeat_Location_Flag` (Boolean)
+
+#### **Phase 3: CAD Cross-Reference**
+**Goal:** Add response time and dispatch context
+
+**CAD Data Sources:**
+- `01_Raw_Data\CAD\2022_CAD_ALL.xlsx`
+- `01_Raw_Data\CAD\2023_CAD_ALL.xlsx`
+- `01_Raw_Data\CAD\2024_CAD_ALL.xlsx`
+- `01_Raw_Data\CAD\25_01_10_All_CAD.xlsx`
+
+**Matching Logic:**
+- Option 1: Match on Case Number (if CAD has it)
+- Option 2: Fuzzy match on Date/Time/Location (within 15 min window, same block)
+
+**Extract from CAD:**
+- Dispatch time
+- First unit arrival time
+- Call type/priority
+- Units dispatched (count)
+- Response time (arrival - dispatch)
+
+**Output Fields Added:**
+- `CAD_Match_Found` (Boolean)
+- `CAD_Call_Type` (Original dispatch code)
+- `CAD_Response_Time_Minutes` (Float)
+- `CAD_Units_Dispatched` (Integer)
+- `CAD_Priority` (High/Med/Low if available)
+
+---
+
+### 2. LOCATION WEIGHTING SYSTEM
+
+**Create weighted scoring for kiosk placement priority:**
+
+```python
+def calculate_location_weight(row):
+    """
+    Assign weight multiplier based on location type and context. Weight Logic:
+    - 3.0x: Public street/vehicle locations (no home resources)
+    - 2.0x: Public spaces, shelters, hotels
+    - 1.5x: Residences with homeless indicators
+    - 1.0x: Private residences (baseline)
+    - 0.5x: Residences with bystander Narcan (already has supplies)
+    """
+    
+    base_weight = 1.0
+    
+    # High priority: Public locations
+    if row['Location_Type_Primary'] in ['Public_Street', 'Vehicle']:
+        base_weight = 3.0
+    elif row['Location_Type_Primary'] == 'Public_Space':
+        base_weight = 2.5
+    elif row['Location_Type_Primary'] == 'Shelter_Hotel':
+        base_weight = 2.0
+    elif row['Location_Type_Primary'] == 'Residence':
+        # Residence with homeless indicators
+        if row['Homeless_Indicators_Present']:
+            base_weight = 1.5
+        # Residence with existing Narcan supply (bystander used it)
+        elif row['Narcan_Source'] == 'Bystander':
+            base_weight = 0.5
+        else:
+            base_weight = 1.0
+    
+    # Boost for repeat locations (persistent hotspot)
+    if row['Repeat_Location_Flag']:
+        base_weight *= 1.2
+    
+    # Boost for non-fatal (successful intervention = viable user population)
+    if row['Fatality_Status'] == 'Non-Fatal':
+        base_weight *= 1.1
+    
+    return round(base_weight, 2)
+```
+
+**Output Field:**
+- `Kiosk_Priority_Weight` (Float: 0.5 - 4.0)
+
+---
+
+### 3. TEMPORAL SLICING
+
+**Create separate datasets for annual analysis:**
+
+**Output Files:**
+- `02_Cleaned_Data\OD_2022_Full.csv` (Jan-Dec 2022)
+- `02_Cleaned_Data\OD_2023_Full.csv` (Jan-Dec 2023)
+- `02_Cleaned_Data\OD_2024_Full.csv` (Jan-Dec 2024)
+- `02_Cleaned_Data\OD_2025_Partial.csv` (Jan-Oct 2025)
+- `02_Cleaned_Data\OD_All_Enhanced.csv` (Complete enhanced dataset)
+
+**Statistics File:**
+- `02_Cleaned_Data\OD_Summary_Statistics_ByYear.csv`
+
+**Required Stats:**
+```
+Year | Total_Incidents | Fatal | Non_Fatal | Public_Location_Pct | Avg_Weight | Top_Location_Type
+2022 | [N]             | [N]   | [N]       | [%]                 | [X.XX]     | [Type]
+2023 | [N]             | [N]   | [N]       | [%]                 | [X.XX]     | [Type]
+2024 | [N]             | [N]   | [N]       | [%]                 | [X.XX]     | [Type]
+2025 | [N]             | [N]   | [N]       | [%]                 | [X.XX]     | [Type]
+ALL  | [N]             | [N]   | [N]       | [%]                 | [X.XX]     | [Type]
+```
+
+---
+
+### 4. GEODATABASE CREATION
+
+**Update ArcPy scripts to create:**
+
+#### **Feature Classes in `03_GIS\project.gdb`:**
+
+1. **OD_All_Incidents_Enhanced**
+   - All incidents with full enhanced attributes
+   - Symbology: Graduated by Kiosk_Priority_Weight
+
+2. **OD_2022, OD_2023, OD_2024, OD_2025**
+   - Annual temporal slices
+   - Symbology: Year-specific color coding
+
+3. **OD_NonFatal_Weighted**
+   - Non-fatal only, for primary heat map
+   - Use Kiosk_Priority_Weight for kernel density
+
+4. **OD_Fatal_Points**
+   - Fatal incidents only
+   - Symbology: Orange star overlay
+
+5. **OD_Public_Locations_Only**
+   - Filter: Location_Type_Primary in ['Public_Street', 'Vehicle', 'Public_Space']
+   - Highest priority for kiosk placement
+
+6. **OD_Hotspot_Zones** (Polygon)
+   - Kernel density raster → reclassified → polygon
+   - Top 20% density areas
+   - Include incident count per polygon
+
+#### **Kernel Density Parameters:**
+```python
+# For weighted density analysis
+arcpy.sa.KernelDensity(
+    in_features="OD_NonFatal_Weighted",
+    population_field="Kiosk_Priority_Weight",  # Use weighted field
+    cell_size=50,  # 50 feet (high resolution)
+    search_radius=500,  # 500 feet (walkable distance)
+    area_unit_scale_factor="SQUARE_FEET"
+)
+```
+
+---
+
+### 5. MAP GENERATION
+
+**Create map series in `04_Maps\exports\`:**
+
+#### **A. Primary Decision Map (11x17 Landscape)**
+**File:** `OD_Kiosk_Placement_Analysis_2022_2025.pdf`
+
+**Layers:**
+1. Base: Weighted heat map (non-fatal, location-weighted)
+2. Overlay: Fatal incidents (orange stars, size 18pt)
+3. Annotation: Top 5 recommended kiosk sites (numbered blue pins)
+4. Context: City boundary, major roads
+
+**Legend:**
+- "High Priority Zones (Public Locations, Weighted 3x)"
+- "Non-Fatal Overdoses: Heat map density"
+- "Fatal Overdoses: ⭐ (N=X)"
+- "Recommended Kiosk Sites: ① ② ③ ④ ⑤"
+
+#### **B. Temporal Series (Small Multiples, 11x17 Portrait)**
+**File:** `OD_Temporal_Progression_2022_2025.pdf`
+
+**Layout:** 2x2 grid showing:
+- Top-left: 2022 heat map
+- Top-right: 2023 heat map
+- Bottom-left: 2024 heat map
+- Bottom-right: 2025 heat map
+
+**Title:** "Overdose Incident Trends: 2022-2025"
+**Subtitle:** "Identifying Persistent vs. Emerging Hotspots"
+
+#### **C. Location Type Analysis Map**
+**File:** `OD_Location_Type_Distribution.pdf`
+
+**Symbology:** Unique values on Location_Type_Primary
+- Public_Street: Red circles
+- Vehicle: Orange diamonds
+- Public_Space: Yellow squares
+- Residence: Light blue triangles
+- Shelter_Hotel: Purple stars
+
+**Pie Chart Insert:** % breakdown by location type
+
+#### **D. Web/Thumbnail Versions**
+- All maps export to PNG: 300 DPI (print), 150 DPI (web), 96 DPI (thumbnail)
+
+---
+
+### 6. EXECUTIVE SUMMARY AUTO-GENERATION
+
+**Create:** `generate_executive_summary.py`
+
+**Output:** `10_Deliverables\CDS_Overdose_Executive_Summary.docx`
+
+**Template Structure:**
+
+```markdown
+# NARCAN VENDING MACHINE SITE SELECTION ANALYSIS
+## Hackensack Police Department - Analytical Services Unit
+**Analyst:** P.O. R. A. Carucci  
+**Date:** [Auto-generated]  
+**Data Period:** January 2022 - October 2025
+
+---
+
+### EXECUTIVE SUMMARY
+
+The Hackensack Police Department analyzed [N] overdose incidents over 46 months 
+(January 2022 - October 2025) to identify optimal locations for Narcan vending 
+machine placement as part of opioid settlement harm reduction initiatives. **Key Finding:** [X]% of overdoses occur in public locations where individuals 
+lack access to home-based harm reduction supplies. Location-weighted analysis 
+identifies [N] priority zones covering [X]% of high-need incidents.

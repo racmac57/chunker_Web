@@ -1,0 +1,567 @@
+I can see from your screenshot that MAY_2025_SUMMARY_CORRECTED is working and showing good data:
+- Total Summons: 3487
+- Parking Summons: 83  
+- Moving Violations: 3060
+- Special Complaints: 344
+- Active Officers: 1
+
+Here are the three clean codes you requested:
+
+## **1. INFOCOP_OFFICER_CHARGE_TYPE:**
+
+**INFOCOP_OFFICER_CHARGE_TYPE - Clean Code**
+
+````m
+// 2025-06-15-17-55-00 (EST)
+// Police_Analytics/INFOCOP_OFFICER_CHARGE_TYPE_Clean
+// Author: R. A. Carucci
+// Purpose: Parse InfoCop hierarchical data where officer, location, and statutes are all in Column A
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to .xlsx files only
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    // Transform each Excel file
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                FirstSheet = ExcelFile{0}[Data],
+                
+                // Skip headers and Grand Total row
+                DataFromRow7 = Table.Skip(FirstSheet, 6),
+                
+                // Add index for processing
+                AddIndex = Table.AddIndexColumn(DataFromRow7, "Index", 0, 1),
+                
+                // Identify row types based on Column1 content patterns
+                AddRowType = Table.AddColumn(AddIndex, "Row_Type", each
+                    let
+                        Col1Text = Text.Upper(Text.From([Column1]))
+                    in
+                        if Text.StartsWith(Col1Text, "PEO ") or 
+                           Text.StartsWith(Col1Text, "SGT ") or 
+                           Text.StartsWith(Col1Text, "LT ") or
+                           Text.StartsWith(Col1Text, "DET ") or
+                           Text.StartsWith(Col1Text, "OFFICER ") then "OFFICER"
+                        else if (Text.Contains(Col1Text, " ST") or 
+                                Text.Contains(Col1Text, " AVE") or 
+                                Text.Contains(Col1Text, " RD") or 
+                                Text.Contains(Col1Text, " PL") or 
+                                Text.Contains(Col1Text, " BLVD")) and
+                                not Text.Contains(Col1Text, ":") then "LOCATION"
+                        else if Text.Contains(Col1Text, ":") and 
+                               (Text.Contains(Col1Text, "170-") or 
+                                Text.Contains(Col1Text, "39:4-") or
+                                Text.Contains(Col1Text, "PARKING") or
+                                Text.Contains(Col1Text, "VIOLATION")) then "STATUTE"
+                        else if Text.Contains(Col1Text, "GRAND TOTAL") then "SKIP"
+                        else "UNKNOWN", type text),
+                
+                // Filter out unwanted rows
+                FilterValidRows = Table.SelectRows(AddRowType, each [Row_Type] <> "SKIP" and [Row_Type] <> "UNKNOWN"),
+                
+                // Create Officer column that fills down
+                AddOfficerFillDown = Table.AddColumn(FilterValidRows, "Officer_Clean", each
+                    if [Row_Type] = "OFFICER" then Text.Trim(Text.From([Column1])) else null, type nullable text),
+                
+                // Fill down officer names
+                FillDownOfficer = Table.FillDown(AddOfficerFillDown, {"Officer_Clean"}),
+                
+                // Create Location column that fills down within officer groups
+                AddLocationFillDown = Table.AddColumn(FillDownOfficer, "Location_Clean", each
+                    if [Row_Type] = "LOCATION" then Text.Trim(Text.From([Column1])) else null, type nullable text),
+                
+                // Fill down locations
+                FillDownLocation = Table.FillDown(AddLocationFillDown, {"Location_Clean"}),
+                
+                // Filter for statute rows only
+                FilterStatutes = Table.SelectRows(FillDownLocation, each [Row_Type] = "STATUTE"),
+                
+                // Parse statute information
+                ParseStatutes = Table.AddColumn(FilterStatutes, "Statute_Code", each
+                    try 
+                        let
+                            StatuteText = Text.From([Column1]),
+                            ColonPos = Text.PositionOf(StatuteText, ":"),
+                            Code = if ColonPos >= 0 then Text.Start(StatuteText, ColonPos) else StatuteText
+                        in
+                            Text.Trim(Code)
+                    otherwise null, type nullable text),
+                
+                ParseDescription = Table.AddColumn(ParseStatutes, "Statute_Description", each
+                    try 
+                        let
+                            StatuteText = Text.From([Column1]),
+                            ColonPos = Text.PositionOf(StatuteText, ":"),
+                            Description = if ColonPos >= 0 then Text.Middle(StatuteText, ColonPos + 1) else ""
+                        in
+                            Text.Trim(Description)
+                    otherwise null, type nullable text),
+                
+                // Get citation counts from Column4 (if available)
+                AddCitationCount = Table.AddColumn(ParseDescription, "Citation_Count", each
+                    try 
+                        if [Column4] <> null then Number.From([Column4]) else 0
+                    otherwise 0, Int64.Type),
+                
+                // Determine citation type based on statute code
+                AddCitationType = Table.AddColumn(AddCitationCount, "Citation_Type", each
+                    let
+                        StatuteUpper = Text.Upper(Text.From([Statute_Code])),
+                        DescUpper = Text.Upper(Text.From([Statute_Description]))
+                    in
+                        if Text.StartsWith(StatuteUpper, "170-") and 
+                           (Text.Contains(DescUpper, "PARKING") or 
+                            Text.Contains(DescUpper, "METER") or
+                            Text.Contains(DescUpper, "LOADING")) then "Parking"
+                        else if Text.StartsWith(StatuteUpper, "39:4-") then "Moving"
+                        else if Text.Contains(DescUpper, "COMPLAINT") then "Special Complaint"
+                        else "Other", type text),
+                
+                // Clean up officer names
+                CleanOfficerNames = Table.AddColumn(AddCitationType, "Officer_Name", each
+                    let
+                        RawName = [Officer_Clean],
+                        // Remove common prefixes
+                        CleanedName = Text.Replace(Text.Replace(Text.Replace(RawName, "PEO ", ""), "SGT ", ""), "LT ", ""),
+                        ProperName = Text.Proper(Text.Trim(CleanedName))
+                    in
+                        ProperName, type text),
+                
+                // Select final columns
+                FinalColumns = Table.SelectColumns(CleanOfficerNames, {
+                    "Officer_Name", "Location_Clean", "Statute_Code", "Statute_Description", 
+                    "Citation_Count", "Citation_Type"
+                }),
+                
+                // Rename for clarity
+                RenamedColumns = Table.RenameColumns(FinalColumns, {
+                    {"Location_Clean", "Location"},
+                    {"Statute_Code", "Violation_Code"},
+                    {"Statute_Description", "Violation_Description"}
+                }),
+                
+                // Filter out any remaining null values
+                FilterValidData = Table.SelectRows(RenamedColumns, each 
+                    [Officer_Name] <> null and 
+                    [Location] <> null and 
+                    [Violation_Code] <> null)
+            in
+                FilterValidData
+        otherwise null
+    ),
+    
+    // Remove failed files
+    SuccessfulFiles = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Combine all successful files
+    FinalResult = if Table.RowCount(SuccessfulFiles) > 0 then
+        let
+            FirstFileColumns = Table.ColumnNames(SuccessfulFiles{0}[Data]),
+            ExpandedData = Table.ExpandTableColumn(SuccessfulFiles, "Data", FirstFileColumns),
+            CleanedResult = Table.RemoveColumns(ExpandedData, 
+                {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, 
+                MissingField.Ignore)
+        in
+            CleanedResult
+    else
+        Table.FromRows({}, {"Officer_Name", "Location", "Violation_Code", "Violation_Description", "Citation_Count", "Citation_Type"})
+in
+    FinalResult
+````
+
+## **2. INFOCOP_OFFICER_STATUTE:**
+
+**INFOCOP_OFFICER_STATUTE - Clean Code**
+
+````m
+// 2025-06-15-17-56-00 (EST)
+// Police_Analytics/INFOCOP_OFFICER_STATUTE_Clean
+// Author: R. A. Carucci
+// Purpose: Parse InfoCop officer/street/statute hierarchical data for violation analysis
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Street_Statute"),
+    
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                FirstSheet = ExcelFile{0}[Data],
+                
+                // Skip the first 7 rows to get to the actual data
+                DataFromRow8 = Table.Skip(FirstSheet, 7),
+                
+                // Add index for tracking
+                AddIndex = Table.AddIndexColumn(DataFromRow8, "Row_Index", 1, 1),
+                
+                // Add columns to see the raw content
+                AddCol1Text = Table.AddColumn(AddIndex, "Col1_Text", each 
+                    if [Column1] <> null then Text.From([Column1]) else "NULL", type text),
+                
+                AddCol2Text = Table.AddColumn(AddCol1Text, "Col2_Text", each 
+                    if [Column2] <> null then Text.From([Column2]) else "NULL", type text),
+                
+                AddCol3Text = Table.AddColumn(AddCol2Text, "Col3_Text", each 
+                    if [Column3] <> null then Text.From([Column3]) else "NULL", type text),
+                
+                // Row type detection for officer/street/statute hierarchy
+                AddRowType = Table.AddColumn(AddCol3Text, "Row_Type", each
+                    let
+                        Col1 = [Col1_Text],
+                        Col1Upper = Text.Upper(Col1)
+                    in
+                        if Text.StartsWith(Col1, "PEO ") or Text.StartsWith(Col1, "SGT ") or Text.StartsWith(Col1, "LT ") then "OFFICER"
+                        else if Text.Contains(Col1Upper, " ST") and not Text.Contains(Col1, ":") and not Text.Contains(Col1Upper, "GRAND TOTAL") then "STREET"
+                        else if Text.Contains(Col1, ":") and (Text.Contains(Col1Upper, "170-") or Text.Contains(Col1Upper, "39:4-") or Text.Contains(Col1Upper, "39:3-")) then "STATUTE"
+                        else if Text.Contains(Col1Upper, "GRAND TOTAL") then "SKIP"
+                        else "OTHER", type text),
+                
+                // Create officer tracking
+                AddOfficer = Table.AddColumn(AddRowType, "Current_Officer", each
+                    if [Row_Type] = "OFFICER" then [Col1_Text] else null, type nullable text),
+                
+                // Fill down officers
+                FillOfficer = Table.FillDown(AddOfficer, {"Current_Officer"}),
+                
+                // Create street tracking  
+                AddStreet = Table.AddColumn(FillOfficer, "Current_Street", each
+                    if [Row_Type] = "STREET" then [Col1_Text] else null, type nullable text),
+                
+                // Fill down streets
+                FillStreet = Table.FillDown(AddStreet, {"Current_Street"}),
+                
+                // Only keep statute rows and extract data
+                FilterStatuteRows = Table.SelectRows(FillStreet, each [Row_Type] = "STATUTE"),
+                
+                // Parse statute code and description
+                AddStatuteCode = Table.AddColumn(FilterStatuteRows, "Statute_Code", each
+                    try 
+                        let
+                            StatuteText = [Col1_Text],
+                            ColonPos = Text.PositionOf(StatuteText, ":"),
+                            Code = if ColonPos >= 0 then Text.Start(StatuteText, ColonPos) else StatuteText
+                        in
+                            Text.Trim(Code)
+                    otherwise null, type nullable text),
+                
+                AddStatuteDesc = Table.AddColumn(AddStatuteCode, "Statute_Description", each
+                    try 
+                        let
+                            StatuteText = [Col1_Text],
+                            ColonPos = Text.PositionOf(StatuteText, ":"),
+                            Description = if ColonPos >= 0 then Text.Middle(StatuteText, ColonPos + 1) else ""
+                        in
+                            Text.Trim(Description)
+                    otherwise null, type nullable text),
+                
+                // Get citation counts from numeric columns
+                AddCitationCount = Table.AddColumn(AddStatuteDesc, "Citation_Count", each
+                    try 
+                        // Try Column3 first, then Column4, then Column5
+                        let
+                            Count3 = try Number.From([Column3]) otherwise 0,
+                            Count4 = try Number.From([Column4]) otherwise 0,
+                            Count5 = try Number.From([Column5]) otherwise 0,
+                            MaxCount = List.Max({Count3, Count4, Count5})
+                        in
+                            if MaxCount > 0 then MaxCount else 1
+                    otherwise 1, Int64.Type),
+                
+                // Classify statute types with enhanced logic
+                AddStatuteType = Table.AddColumn(AddCitationCount, "Statute_Type", each
+                    let
+                        Code = Text.Upper([Statute_Code]),
+                        Desc = Text.Upper([Statute_Description])
+                    in
+                        if Text.StartsWith(Code, "39:4-") then "Moving Violation"
+                        else if Text.StartsWith(Code, "39:8-") then "Parking Violation"
+                        else if Text.StartsWith(Code, "39:3-") then "Equipment/Registration"
+                        else if Text.StartsWith(Code, "170-") and Text.Contains(Desc, "PARKING") then "City Parking"
+                        else if Text.StartsWith(Code, "170-") then "City Ordinance"
+                        else if Text.Contains(Desc, "SPEED") then "Speed Violation"
+                        else if Text.Contains(Desc, "PARKING") or Text.Contains(Desc, "METER") then "Parking Violation"
+                        else if Text.Contains(Desc, "MOVING") or Text.Contains(Desc, "TRAFFIC") then "Moving Violation"
+                        else "Other", type text),
+                
+                // Add violation severity classification
+                AddSeverity = Table.AddColumn(AddStatuteType, "Violation_Severity", each
+                    let
+                        Type = [Statute_Type],
+                        Code = Text.Upper([Statute_Code]),
+                        Desc = Text.Upper([Statute_Description])
+                    in
+                        if Text.Contains(Desc, "SPEED") or Text.Contains(Desc, "RECKLESS") then "High"
+                        else if Type = "Moving Violation" then "Medium"
+                        else if Type = "Equipment/Registration" then "Medium"
+                        else if Type = "Parking Violation" or Type = "City Parking" then "Low"
+                        else "Low", type text),
+                
+                // Clean officer name
+                AddCleanOfficer = Table.AddColumn(AddSeverity, "Officer_Clean", each
+                    if [Current_Officer] <> null then 
+                        let
+                            CleanName = Text.Replace(Text.Replace(Text.Replace([Current_Officer], "PEO ", ""), "SGT ", ""), "LT ", "")
+                        in
+                            Text.Proper(Text.Trim(CleanName))
+                    else null, type nullable text),
+                
+                // Clean street name
+                AddCleanStreet = Table.AddColumn(AddCleanOfficer, "Street_Clean", each
+                    if [Current_Street] <> null then 
+                        let
+                            CleanStreet = Text.Replace(Text.Replace([Current_Street], " ST", " STREET"), " AVE", " AVENUE")
+                        in
+                            Text.Proper(Text.Trim(CleanStreet))
+                    else null, type nullable text),
+                
+                // Filter out invalid data
+                FilterValidData = Table.SelectRows(AddCleanStreet, each 
+                    [Officer_Clean] <> null and 
+                    [Current_Street] <> null and 
+                    [Statute_Code] <> null and
+                    [Citation_Count] > 0
+                ),
+                
+                // Select final columns
+                SelectColumns = Table.SelectColumns(FilterValidData, {
+                    "Officer_Clean", "Street_Clean", "Statute_Code", "Statute_Description", 
+                    "Citation_Count", "Statute_Type", "Violation_Severity"
+                }),
+                
+                // Rename for clarity
+                RenamedColumns = Table.RenameColumns(SelectColumns, {
+                    {"Officer_Clean", "Officer_Name"},
+                    {"Street_Clean", "Street"},
+                    {"Statute_Code", "Statute"},
+                    {"Statute_Description", "Violation_Description"},
+                    {"Statute_Type", "Violation_Type"}
+                })
+            in
+                RenamedColumns
+        otherwise null
+    ),
+    
+    // Remove failed files
+    FilteredTransforms = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Combine all successful files
+    FinalResult = if Table.RowCount(FilteredTransforms) > 0 then
+        let
+            FirstFileColumns = Table.ColumnNames(FilteredTransforms{0}[Data]),
+            ExpandedData = Table.ExpandTableColumn(FilteredTransforms, "Data", FirstFileColumns),
+            CleanedColumns = Table.RemoveColumns(ExpandedData, 
+                {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, 
+                MissingField.Ignore)
+        in
+            CleanedColumns
+    else
+        Table.FromRows({}, {"Officer_Name", "Street", "Statute", "Violation_Description", "Citation_Count", "Violation_Type", "Violation_Severity"})
+in
+    FinalResult
+````
+
+## **3. MASTER_SUMMONS_INTEGRATION_MAY_2025:**
+
+**MASTER_SUMMONS_INTEGRATION_MAY_2025 - Clean Code**
+
+````m
+// 2025-06-15-17-57-00 (EST)
+// Police_Analytics/MASTER_SUMMONS_INTEGRATION_MAY_2025_Clean
+// Author: R. A. Carucci
+// Purpose: Integrate all summons data sources for comprehensive May 2025 analysis
+
+let
+    // Load base InfoCop officer street data for May 2025
+    InfoCopData = Table.SelectRows(INFOCOP_OFFICER_STREET, each [Month] = 5 and [Year] = 2025),
+    
+    // Load court data for May 2025
+    CourtData = Table.SelectRows(SUMMONS_COURT_MASTER, each [Month] = 5 and [Year] = 2025),
+    
+    // Load assignment data
+    AssignmentData = SUMMONS_ASSIGNED_SHIFT,
+    
+    // Step 1: Clean officer names in InfoCop data for better matching
+    InfoCopCleaned = Table.AddColumn(InfoCopData, "Officer_Name_Clean", each
+        let
+            RawName = [Officer_Clean],
+            Step1 = Text.Replace(RawName, "PEO ", ""),
+            Step2 = Text.Replace(Step1, "SGT ", ""),
+            Step3 = Text.Replace(Step2, "LT ", ""),
+            Step4 = Text.Replace(Step3, "DET ", ""),
+            Final = Text.Proper(Text.Trim(Step4))
+        in
+            Final, type text),
+    
+    // Step 2: Aggregate InfoCop data by officer
+    InfoCopSummary = Table.Group(InfoCopCleaned, {"Officer_Name_Clean"}, {
+        {"Total_Citations_InfoCop", each List.Sum([Total_Citations]), type number},
+        {"Moving_Citations_Total", each List.Sum([Moving_Citations]), type number},
+        {"Parking_Citations_Total", each List.Sum([Parking_Citations]), type number},
+        {"Complaint_Citations_Total", each List.Sum([Complaint_Citations]), type number},
+        {"Days_Active", each Table.RowCount(Table.Distinct(_, {"Parsed_Date"})), Int64.Type},
+        {"Streets_Worked", each Table.RowCount(Table.Distinct(_, {"Street_Name"})), Int64.Type},
+        {"First_Citation_Date", each List.Min([Parsed_Date]), type date},
+        {"Last_Citation_Date", each List.Max([Parsed_Date]), type date}
+    }),
+    
+    // Step 3: Clean officer names in court data
+    CourtCleaned = Table.AddColumn(CourtData, "Officer_Name_Clean", each
+        Text.Proper(Text.Trim([Officer Name])), type text),
+    
+    // Step 4: Aggregate court data by officer
+    CourtSummary = Table.Group(CourtCleaned, {"Officer_Name_Clean"}, {
+        {"Total_Tickets_Court", each Table.RowCount(_), Int64.Type},
+        {"Total_Assessed_Amount", each List.Sum([Assessed Amount]), Currency.Type},
+        {"Total_Fine_Amount", each List.Sum([Fine Amount]), Currency.Type},
+        {"Total_Paid_Amount", each List.Sum([Total Paid Amount]), Currency.Type},
+        {"Net_Revenue", each List.Sum([Net Revenue]), Currency.Type},
+        {"Collection_Rate", each 
+            let
+                TotalAssessed = List.Sum([Assessed Amount]),
+                TotalPaid = List.Sum([Total Paid Amount])
+            in
+                if TotalAssessed > 0 then (TotalPaid / TotalAssessed) * 100 else 0, type number}
+    }),
+    
+    // Step 5: Clean assignment data for matching
+    AssignmentCleaned = Table.AddColumn(AssignmentData, "Officer_Name_Clean", each
+        Text.Proper(Text.Trim([PATROL_MEMBER])), type text),
+    
+    // Step 6: Merge InfoCop with Court data
+    InfoCopCourtMerge = Table.NestedJoin(InfoCopSummary, {"Officer_Name_Clean"}, 
+                                        CourtSummary, {"Officer_Name_Clean"}, 
+                                        "CourtInfo", JoinKind.LeftOuter),
+    
+    // Step 7: Expand court data
+    ExpandedCourt = Table.ExpandTableColumn(InfoCopCourtMerge, "CourtInfo", 
+        {"Total_Tickets_Court", "Total_Assessed_Amount", "Total_Fine_Amount", 
+         "Total_Paid_Amount", "Net_Revenue", "Collection_Rate"}),
+    
+    // Step 8: Merge with assignment data
+    FullMerge = Table.NestedJoin(ExpandedCourt, {"Officer_Name_Clean"}, 
+                                AssignmentCleaned, {"Officer_Name_Clean"}, 
+                                "AssignmentInfo", JoinKind.LeftOuter),
+    
+    // Step 9: Expand assignment data
+    ExpandedAssignment = Table.ExpandTableColumn(FullMerge, "AssignmentInfo", 
+        {"ASSIGNMENT", "RANK", "BADGE#", "Platoon"}),
+    
+    // Step 10: Replace null values and calculate derived metrics
+    CleanedNulls = Table.ReplaceValue(ExpandedAssignment, null, 0, Replacer.ReplaceValue, 
+        {"Total_Tickets_Court", "Total_Assessed_Amount", "Total_Fine_Amount", 
+         "Total_Paid_Amount", "Net_Revenue", "Collection_Rate"}),
+    
+    // Step 11: Add performance indicators
+    AddedPerformance = Table.AddColumn(CleanedNulls, "Performance_Level", each
+        if [Total_Citations_InfoCop] >= 100 then "High Performer"
+        else if [Total_Citations_InfoCop] >= 50 then "Above Average"
+        else if [Total_Citations_InfoCop] >= 25 then "Average"
+        else if [Total_Citations_InfoCop] >= 10 then "Below Average"
+        else "Low Activity", type text),
+    
+    // Step 12: Add revenue per citation
+    AddedRevenueMetrics = Table.AddColumn(AddedPerformance, "Revenue_Per_Citation", each
+        if [Total_Citations_InfoCop] > 0 then [Net_Revenue] / [Total_Citations_InfoCop] else 0, Currency.Type),
+    
+    // Step 13: Add data quality flag
+    AddedDataQuality = Table.AddColumn(AddedRevenueMetrics, "Data_Quality", each
+        let
+            HasInfoCop = [Total_Citations_InfoCop] > 0,
+            HasCourt = [Total_Tickets_Court] > 0,
+            HasAssignment = [ASSIGNMENT] <> null
+        in
+            if HasInfoCop and HasCourt and HasAssignment then "Complete"
+            else if HasInfoCop and HasCourt then "Missing Assignment"
+            else if HasInfoCop then "Missing Court Data"
+            else "Incomplete", type text),
+    
+    // Step 14: Filter for officers with activity
+    FilteredActive = Table.SelectRows(AddedDataQuality, each [Total_Citations_InfoCop] > 0),
+    
+    // Step 15: Sort by performance
+    SortedByPerformance = Table.Sort(FilteredActive, {{"Total_Citations_InfoCop", Order.Descending}})
+in
+    SortedByPerformance
+````
+
+## **REPLACEMENT ORDER:**
+
+1. **INFOCOP_OFFICER_CHARGE_TYPE** → Hierarchical data with violations by location
+2. **INFOCOP_OFFICER_STATUTE** → Street/statute breakdown with violation types  
+3. **MASTER_SUMMONS_INTEGRATION_MAY_2025** → Complete integration with performance metrics
+
+## **WHAT THESE GIVE YOU:**
+
+### **INFOCOP_OFFICER_CHARGE_TYPE:**
+- Officer + Location + Specific violations
+- Citation counts by violation type
+- Hierarchical parsing of complex InfoCop structure
+
+### **INFOCOP_OFFICER_STATUTE:**
+- Officer + Street + Statute details
+- Violation severity classification
+- Enhanced violation type categorization
+
+### **MASTER_SUMMONS_INTEGRATION_MAY_2025:**
+- Complete officer performance analysis
+- InfoCop + Court + Assignment integration
+- Revenue per citation metrics
+- Data quality indicators
+- Performance level classifications
+
+**Replace these one at a time and test each before moving to the next! **
+
+
+
+## Prompt:
+6/15/2025, 3:53:59 AM
+
+> File: paste.txt
+
+i repaced the code to the queries mentioned prior to the three I just messaged about. I closed and loaded nd got this
+
+
+
+## Response:
+6/15/2025, 3:54:46 AM
+
+The problem is still there! The `arrest_geographic_processing` references are STILL in your queries even after you replaced the code. This suggests there are **hidden references** or **dependencies** we missed. ## **NUCLEAR OPTION - START COMPLETELY FRESH:**
+
+**Fresh Power BI Start - Zero Dependencies**
+
+````markdown
+# // 2025-06-15-18-00-00 (EST)
+# Police_Analytics/Fresh_Power_BI_Start
+# Author: R. A. Carucci
+# Purpose: Complete fresh start to eliminate all arrest_geographic_processing dependencies
+
+## 🚨 **CURRENT SITUATION**
+- **Every single query** still references `arrest_geographic_processing`
+- **Even after code replacement**, the dependencies persist
+- **Hidden references** are causing cascading failures
+
+## ⚡ **IMMEDIATE SOLUTION: FRESH FILE**
+
+### **Step 1: Create Brand New Power BI File**
+1. **File → New**
+2. **Save As → "Summons_Dashboard_Clean.pbix"**
+3. **Start completely fresh**
+
+### **Step 2: Import ONLY Working Queries (One by One)**
+
+#### **A. Start with INFOCOP_OFFICER_STREET:**
+1. **Get Data → Blank Query**
+2. **Name it:** `INFOCOP_OFFICER_STREET`
+3.

@@ -1,0 +1,100 @@
+Tech: Python, pandas, openpyxl, tkinter, Excel/CSV, Markdown
+AI: Grok 3 (xAI)
+Chat Name: Hackensack_PD_Personnel_Merger_20250620
+SUMMARY_TOKEN_END
+
+---
+
+### Code Snippets with Headers
+
+#### CODE_20250620_001: assignment_master_merger.py
+```python
+# 🕒 2025-06-20 13:34:00
+# Hackensack_PD/assignment_master_merger.py
+# Author: R. A. Carucci
+# Purpose: Merge ASSIGNMENT_MASTER and poss_employee, create court-ready CSV files with name conflict resolution
+# Code ID: CODE_20250620_001
+
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog
+import os
+from datetime import datetime
+
+# File selection
+root = tk.Tk()
+root.withdraw()
+print("Select ASSIGNMENT_MASTER.xlsx")
+assignment_file = filedialog.askopenfilename()
+print("Select poss_employee.xlsx")
+poss_file = filedialog.askopenfilename()
+output_folder = filedialog.askdirectory()
+
+# Load data
+print("Loading ASSIGNMENT_MASTER data...")
+assignment_df = pd.read_excel(assignment_file)
+print("Loading poss_employee data...")
+poss_df = pd.read_excel(poss_file)
+
+# Merge logic (simplified for brevity)
+merged_df = pd.merge(assignment_df, poss_df, how='left', left_on='BADGE_NUMBER', right_on='Badge')
+merged_df['STANDARDIZED_NAME'] = merged_df.apply(
+    lambda row: f"{row['FIRST_NAME'][0]}. {row['LAST_NAME']} #{row['BADGE_NUMBER']:04d}", axis=1
+)
+
+# Output files
+timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+merged_df.to_csv(os.path.join(output_folder, f"ASSIGNMENT_MASTER_MERGED_{timestamp}.csv"), index=False)
+CODE_20250620_002: enhanced_personnel_merger.py
+python
+# 🕒 2025-06-20 13:34:00
+# Hackensack_PD/enhanced_personnel_merger.py
+# Author: R. A. Carucci
+# Purpose: Enhanced merger with maiden/married name tracking for ATS integration
+# Code ID: CODE_20250620_002
+
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog
+import os
+from datetime import datetime
+
+# File selection
+root = tk.Tk()
+root.withdraw()
+print("Select ASSIGNMENT_MASTER.xlsx")
+assignment_file = filedialog.askopenfilename()
+print("Select poss_employee.xlsx")
+poss_file = filedialog.askopenfilename()
+output_folder = filedialog.askdirectory()
+
+# Load data
+print("Loading ASSIGNMENT_MASTER data...")
+assignment_df = pd.read_excel(assignment_file)
+print("Loading poss_employee data...")
+poss_df = pd.read_excel(poss_file)
+
+# Name variation tracking
+name_variations = {
+    'Carucci, Dana': {'maiden': 'Carucci', 'marriage_1': 'Herrmann', 'marriage_2': 'Koenig', 'badge': 846},
+    'Rivera, Wanda': {'maiden': 'Rivera', 'marriage_1': 'Rivera-Riedweg', 'badge': 161},
+    'Buono, Karina': {'maiden': 'Vallejo', 'badge': 517}
+}
+merged_df = pd.merge(assignment_df, poss_df, how='left', left_on='BADGE_NUMBER', right_on='Badge')
+merged_df['ALL_KNOWN_NAMES'] = merged_df.apply(
+    lambda row: '|'.join([f"{row['LAST_NAME']}, {row['FIRST_NAME']}"] + 
+                         [name_variations.get(f"{row['LAST_NAME']}, {row['FIRST_NAME']}", {}).get(k, '') 
+                          for k in ['maiden', 'marriage_1', 'marriage_2'] if name_variations.get(f"{row['LAST_NAME']}, {row['FIRST_NAME']}", {}).get(k)]), 
+    axis=1
+)
+
+# Output files
+timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+merged_df.to_csv(os.path.join(output_folder, f"Personnel_Complete_With_Names_{timestamp}.csv"), index=False)
+merged_df[['CURRENT_LAST_NAME', 'FIRST_NAME', 'BADGE_NUMBER', 'ALL_KNOWN_NAMES']].to_csv(
+    os.path.join(output_folder, f"Court_Submission_Enhanced_{timestamp}.csv"), index=False
+)
+lookup_table = merged_df[['ALL_KNOWN_NAMES', 'STANDARDIZED_NAME', 'BADGE_NUMBER']].copy()
+lookup_table.to_csv(os.path.join(output_folder, f"ATS_Name_Lookup_Table_{timestamp}.csv"), index=False)
+Additional Recommendations
+Versioning: Add version numbers to output files (e.g., v1.0 for initial, v1.1 for updates). Insight Tags: Tag scripts with "Name Normalization", "Data Merging", "Court Integration" for quick retrieval. Testing Script: Create a separate script to test ATS name matching using sample exports. Documentation Expansion: Add detailed user guide for running the merger script in the department’s environment. Let me know if you need further refinements, additional files, or assistance with testing the outputs!

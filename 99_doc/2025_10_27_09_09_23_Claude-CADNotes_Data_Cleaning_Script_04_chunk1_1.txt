@@ -1,0 +1,656 @@
+# CADNotes Data Cleaning Script_04
+
+**Created:** 2025/7/23 21:15:26  
+**Updated:** 2025/7/24 17:53:15  
+**Exported:** 2025/10/27 9:05:51  
+**Link:** [https://claude.ai/chat/7f637d05-f3c3-4028-8a9f-0b51cf8a32f9](https://claude.ai/chat/7f637d05-f3c3-4028-8a9f-0b51cf8a32f9)  
+
+## Prompt:
+7/23/2025, 9:15:27 PM
+
+> File: paste.txt
+
+EXAMPLE: CURRENTLY:  - klosk_J - 3/25/2025 12:06:34 PM in front of store - klosk_J - 3/25/2025 12:06:34 PM Drone deployed. Provided overwatch. - weber_r - 3/25/2025 12:12:47 PM  take the first irritation of "- klosk_J - " clean and normsalize to Klosk_J that will be username take the first irritation of  the timestamp "3/25/2025 12:06:34 PM" make ikt the timestamp formmated as 03/25/2025 12:06:34 remove all other instances of user name and time stamp "- klosk_J - 3/25/2025 12:06:34 PM " clean, trim and proper case remaining text and make that CSADNotes_Cleaned
+
+review the attached m code
+
+
+
+## Response:
+7/23/2025, 9:17:24 PM
+
+I'll analyze your M Code for CADNotes processing and provide an improved solution based on your specific requirements. **project_knowledge_search**
+
+*Request*
+
+````javascript
+{
+  "query": "CAD RMS data processing filtering crime types Power BI M Code"
+}
+````
+
+*Response*
+
+````plaintext
+enhanced_rms_implementation_guide.md
+**Export SCRPA data** to `RMS_Data_Processing\01_Raw_Exports\`
+2. **Run Python script** to process all files
+3. **Power BI refresh** automatically picks up latest clean data
+4. **Focus on dashboards** instead of data transformation
+
+### **Monthly Reporting:**
+1. **Process full month** of SCRPA exports
+2. **Generate enhanced dataset** with all transformations
+3. **Power BI connects** to clean, analysis-ready data
+4. **Create reports** using pre-calculated fields
+
+---
+
+## 🎯 **Expected Results**
+
+### **Processing Performance:**
+- **Speed**: 5-10x faster than M Code transformations
+- **Reliability**: Handles 2024/2025 data variations automatically
+- **Consistency**: Same logic applied across all files
+
+### **Data Quality:**
+- **Crime Categories**: Your exact pattern matching preserved
+- **Time Calculations**: Proper handling of edge cases
+- **Address Blocks**: Enhanced CAD approach working
+- **Date Components**: All derived fields calculated
+
+### **Power BI Benefits:**
+- **Simplified Queries**: Load clean data, no complex transformations
+- **Faster Refresh**: Pre-processed data loads quickly
+- **Better Performance**: Focus resources on visualization
+- **Easier Maintenance**: Change logic in Python, not M Code
+
+---
+
+## 🚨 **Quick Troubleshooting**
+
+### **Issue: Script Fails to Find SCRPA Files**
+`​`​`bash
+# Check if SCRPA directory exists
+dir "C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA_RMS"
+
+# Or specify custom path
+python enhanced_rms_processor_scrpa.py --mode directory --input "custom\path\to\scrpa\files"
+`​`​`
+
+### **Issue: Missing Columns in Output**
+- **Check input file structure** - script adapts to variations
+- **Review log file** - `enhanced_rms_processing.log` shows details
+- **Verify column names** - script handles common variations
+
+### **Issue: Power BI Can't Find Files**
+`​`​`m
+// Use try-otherwise for error handling
+Source = try Csv.Document(File.Contents("path\to\enhanced_file.csv")) 
+         otherwise #table({"Error"}, {{"File not found"}})
+`​`​`
+
+---
+
+## 📞 **Next Steps**
+
+### **Priority 1: Test Processing**
+1. **Place sample SCRPA file** in `01_Raw_Exports\`
+2. **Run enhanced processor** on single file
+3. **Verify output** matches your M Code expectations
+4. **Check all derived columns** are created correctly
+
+### **Priority 2: Update Power BI**
+1. **Replace complex M Code** with simple template
+2. **Test data refresh** with enhanced CSV
+3. **Verify visualizations** work with new column names
+4. **Update any references** to IncDate/IncTime → Incident_Date/Incident_Time
+
+### **Priority 3: Production Deployment**
+1. **Process full SCRPA dataset** 
+2. **Validate against existing reports**
+3. **Set up automated processing** (Task Scheduler)
+4. **Document new workflow** for team
+
+**This enhanced processor gives you the exact functionality of your M Code with much better performance and reliability! **
+````
+
+````plaintext
+CAD vs RMS Data Structure Solutions.txt
+? ""), "SEE REPORT"))
+    else
+        AddCrimeCategory
+in
+    FinalFiltered
+
+// CAD Child Queries (Reference ALL_CRIMES_CAD)
+// Motor Vehicle Theft - CAD
+let
+    Source = ALL_CRIMES_CAD, // Reference CAD master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Motor Vehicle Theft")
+in
+    Filtered
+
+// Burglary Auto - CAD  
+let
+    Source = ALL_CRIMES_CAD,
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Burglary Auto")
+in
+    Filtered
+
+// =============================================================================
+// RMS EXPORT PROCESSING (Multiple "Incident Type_X" Columns - REQUIRES UNPIVOTING)
+// =============================================================================
+
+// ALL_CRIMES_RMS Query (Master for RMS exports)  
+let
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\_LawSoft_EXPORT\RMS\latest_rms_export.xlsx"), null, true),
+    Data = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    ChangedType = Table.TransformColumnTypes(PromotedHeaders,{}, "en-US"),
+    
+    FilteredRows = Table.SelectRows(ChangedType, each ([Case Number] <> "25-057654")),
+    
+    // RMS has multiple incident columns - UNPIVOT REQUIRED
+    // Note: Column names have SPACES not underscores: "Incident Type_1", "Incident Type_2", "Incident Type_3"
+    IncidentColumns = {"Incident Type_1", "Incident Type_2", "Incident Type_3"},
+    KeepColumns = Table.ColumnNames(FilteredRows),
+    IdColumns = List.Difference(KeepColumns, IncidentColumns),
+    
+    // Verify incident columns exist before unpivoting
+    ExistingIncidentCols = List.Intersect({IncidentColumns, Table.ColumnNames(FilteredRows)}),
+    
+    Unpivoted = if List.IsEmpty(ExistingIncidentCols) then 
+        error "No RMS incident type columns found. Expected: Incident Type_1, Incident Type_2, Incident Type_3"
+    else
+        Table.UnpivotOtherColumns(FilteredRows, IdColumns, "IncidentColumn", "IncidentType"),
+    
+    // Remove null/empty incident types
+    CleanedIncidents = Table.SelectRows(Unpivoted, each [IncidentType] <> null and [IncidentType] <> ""),
+    
+    // Add case-insensitive crime categorization
+    AddCrimeCategory = Table.AddColumn(CleanedIncidents, "Crime_Category", each
+        let
+            UpperIncident = Text.Upper([IncidentType] ? ? "") ````
+
+````plaintext
+enhanced_rms_implementation_guide.md
+# 🚀 **Enhanced RMS Implementation Guide**
+
+*// 🕒 2025-07-20-20-35-00*  
+*// Project: RMS_Data_Processing/enhanced_implementation_guide.md*  
+*// Author: R. A. Carucci*  
+*// Purpose: Step-by-step guide to implement enhanced SCRPA RMS processing*
+
+---
+
+## 🎯 **What This Enhanced Processor Does**
+
+### **Matches Your M Code Exactly:**
+- ✅ **Incident_Date & Incident_Time** (renamed from IncDate/IncTime as requested)
+- ✅ **StartOfHour, TimeOfDay, Enhanced_TimeOfDay** (exact M Code logic)
+- ✅ **Block calculation** (enhanced CAD approach from your M Code)
+- ✅ **ALL_INCIDENTS** (combines IncidentType1, 2, 3)
+- ✅ **Crime_Category** (your exact pattern matching logic)
+- ✅ **Period categorization** (7-Day, 28-Day, YTD, Historical)
+- ✅ **Date components** (Year, Month, Day Name, etc.) - ✅ **Vehicle field capitalization** (Registration, Make, Model)
+- ✅ **Incident type cleaning** (removes statute codes)
+- ✅ **2024 data issue handling** (Excel dates, time formats, etc.) ### **Outputs Clean Data For Power BI:**
+- **CSV**: Simple import, all transformations done
+- **Excel**: Multiple sheets with summary
+- **Filtered**: Excludes "Other" category like your M Code
+
+---
+
+## ⚡ **Quick Start (5 Minutes)**
+
+### **Step 1: Run Enhanced Processor**
+`​`​`bash
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts"
+
+# Process all SCRPA files in directory
+python enhanced_rms_processor_scrpa.py --mode directory
+
+# OR process single file
+python enhanced_rms_processor_scrpa.py --mode single --input "path\to\scrpa_file.xlsx"
+`​`​`
+
+### **Step 2: Check Output**
+`​`​`bash
+# Enhanced files created in:
+dir "RMS_Data_Processing\04_Final_Output"
+
+# Look for files like:
+# enhanced_scrpa_rms_20250720_203000.csv
+# enhanced_scrpa_rms_20250720_203000.xlsx
+# enhanced_scrpa_rms_20250720_203000_filtered.xlsx
+`​`​`
+
+### **Step 3: Update Power BI**
+Replace your complex 150-line M Code with the simple 50-line template:
+`​`​`m
+// Simple load of pre-processed data
+Source = Csv.Document(File.Contents("...\enhanced_scrpa_rms_LATEST.csv"))
+`​`​`
+
+---
+
+## 📊 **Column Mapping: M Code → Python Output**
+
+| **Your M Code Column** | **Python Output Column** | **Description** |
+|------------------------|---------------------------|-----------------|
+|
+````
+
+````plaintext
+CAD vs RMS Data Structure Solutions.txt
+// 🕒 2025-07-23-06-00-00
+// SCRPA_Time_v2/CAD_vs_RMS_MCode_Solutions
+// Author: R. A. Carucci
+// Purpose: Separate M Code solutions for CAD (single Incident column) vs RMS (multiple Incident Type columns)
+
+// =============================================================================
+// CAD EXPORT PROCESSING (Single "Incident" Column - NO UNPIVOTING NEEDED)
+// =============================================================================
+
+// ALL_CRIMES_CAD Query (Master for CAD exports)
+let
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\_LawSoft_EXPORT\CAD\latest_cad_export.xlsx"), null, true),
+    Data = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    ChangedType = Table.TransformColumnTypes(PromotedHeaders,{}, "en-US"),
+    
+    // Remove excluded case
+    FilteredRows = Table.SelectRows(ChangedType, each ([Case Number] <> "25-057654")),
+    
+    // NO UNPIVOTING - CAD has single "Incident" column
+    // Add case-insensitive crime categorization directly
+    AddCrimeCategory = Table.AddColumn(FilteredRows, "Crime_Category", each
+        let
+            UpperIncident = Text.Upper([Incident] ? ? "") in
+            if Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") or Text.Contains(UpperIncident, "AUTO THEFT") or Text.Contains(UpperIncident, "MV THEFT") then "Motor Vehicle Theft"
+            else if Text.Contains(UpperIncident, "BURGLARY") and (Text.Contains(UpperIncident, "AUTO") or Text.Contains(UpperIncident, "VEHICLE")) then "Burglary Auto"
+            else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "COMMERCIAL") then "Burglary Commercial"
+            else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "RESIDENCE") then "Burglary Residence"
+            else if Text.Contains(UpperIncident, "ROBBERY") then "Robbery"
+            else if Text.Contains(UpperIncident, "SEXUAL") then "Sexual Offenses"
+            else "Other"
+    ),
+    
+    // Add disposition filtering if column exists
+    FinalFiltered = if Table.HasColumns(AddCrimeCategory, "Disposition") then
+        Table.SelectRows(AddCrimeCategory, each Text.Contains(Text.Upper([Disposition] ? ? ````
+
+````plaintext
+simplified_mcode_template.txt
+FinalResult = #"Filtered Quality Records"
+in
+    FinalResult
+
+/*
+===========================================
+COMPARISON: BEFORE vs AFTER PYTHON PREPROCESSING
+===========================================
+
+BEFORE (Your Current Complex M Code):
+- 150+ lines of complex transformation logic
+- Multiple nested functions for date/time parsing
+- Complex crime categorization with pattern matching  
+- Address block calculations
+- Time-of-day categorizations
+- Multiple error handling scenarios
+- Excel serial date conversions
+- Narrative text cleaning
+- Vehicle field capitalizations
+- Statute code removals
+
+AFTER (This Simplified M Code):
+- ~50 lines of simple data loading
+- Just basic type conversions
+- Optional quality filtering
+- All complex logic handled by Python
+
+===========================================
+BENEFITS OF PYTHON PREPROCESSING:
+===========================================
+
+✅ PERFORMANCE: Python processes data faster than M Code
+✅ RELIABILITY: Consistent processing, handles 2024/2025 variations
+✅ MAINTAINABILITY: Complex logic in one place (Python script)
+✅ DEBUGGING: Easier to troubleshoot Python vs M Code
+✅ REUSABILITY: Same Python logic works for multiple Power BI reports
+✅ VERSION CONTROL: Python scripts easier to version and document
+✅ TESTING: Can unit test Python transformations
+✅ SCHEDULING: Can automate Python processing with Task Scheduler
+
+===========================================
+WORKFLOW:
+===========================================
+
+1. Run Python script: python enhanced_rms_processor_scrpa.py --mode directory
+2. Python creates: enhanced_scrpa_rms_YYYYMMDD_HHMMSS.csv
+3. Power BI loads: Latest CSV with all transformations complete
+4. ````
+
+````plaintext
+Fixed M Code Queries for SCRPA Power BI.txt
+// 🕒 2025-07-23-06-00-00
+// SCRPA_Time_v2/PowerBI_MCode_Fixed_Queries
+// Author: R. A. Carucci
+// Purpose: Fixed M Code queries with case-insensitive filtering and proper unpivot handling
+
+// =============================================================================
+// MAIN ALL_CRIMES QUERY (Master - Reference this in all child queries)
+// =============================================================================
+let
+    // Load from your CAD export file
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\_LawSoft_EXPORT\CAD\latest_cad_export.xlsx"), null, true),
+    Data = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    ChangedType = Table.TransformColumnTypes(PromotedHeaders,{}, "en-US"),
+    
+    // Remove excluded case (as per your current logic)
+    FilteredRows = Table.SelectRows(ChangedType, each ([Case Number] <> "25-057654")),
+    
+    // Unpivot incident types - adjust column names based on your actual data
+    IncidentColumns = {"Incident_Type_1", "Incident_Type_2", "Incident_Type_3"}, // Adjust these names
+    KeepColumns = Table.ColumnNames(FilteredRows),
+    IdColumns = List.Difference(KeepColumns, IncidentColumns),
+    
+    Unpivoted = Table.UnpivotOtherColumns(FilteredRows, IdColumns, "IncidentColumn", "IncidentType"),
+    
+    // Remove null/empty incident types
+    CleanedIncidents = Table.SelectRows(Unpivoted, each [IncidentType] <> null and [IncidentType] <> ""),
+    
+    // Add case-insensitive crime categorization
+    AddCrimeCategory = Table.AddColumn(CleanedIncidents, "Crime_Category", each
+        let
+            UpperIncident = Text.Upper([IncidentType])
+        in
+            if Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") or Text.Contains(UpperIncident, "AUTO THEFT") or Text.Contains(UpperIncident, "MV THEFT") then "Motor Vehicle Theft"
+            else if Text.Contains(UpperIncident, "BURGLARY") and (Text.Contains(UpperIncident, "AUTO") or Text.Contains(UpperIncident, "VEHICLE")) then "Burglary Auto"
+            else if Text.Contains(UpperIncident, "BURGLARY - COMMERCIAL") then "Burglary Commercial"
+            else if Text.Contains(UpperIncident, "BURGLARY - RESIDENCE") then "Burglary Residence"
+            else if Text.Contains(UpperIncident, "ROBBERY") then "Robbery"
+            else if Text.Contains(UpperIncident, "SEXUAL") then "Sexual Offenses"
+            else "Other"
+    ),
+    
+    // Add disposition filtering (if Disposition column exists)
+    FinalFiltered = if Table.HasColumns(AddCrimeCategory, "Disposition") then
+        Table.SelectRows(AddCrimeCategory, each Text.Contains(Text.Upper([Disposition] ? ? ````
+
+````plaintext
+enhanced_rms_implementation_guide.md
+`IncDate` | `Incident_Date` | ✅ Renamed as requested |
+| `IncTime` | `Incident_Time` | ✅ Renamed as requested |
+| `StartOfHour` | `StartOfHour` | ✅ Same logic |
+| `TimeOfDay` | `TimeOfDay` | ✅ Exact same categories |
+| `Block` | `Block` | ✅ Enhanced CAD approach |
+| `AllIncidents` | `ALL_INCIDENTS` | ✅ Same concatenation |
+| `Crime_Category` | `Crime_Category` | ✅ Your exact pattern matching |
+| `Period` | `Period` | ✅ 7-Day/28-Day/YTD logic |
+| `Enhanced_TimeOfDay` | `Enhanced_TimeOfDay` | ✅ Parenthetical format |
+
+---
+
+## 🔧 **Handling Your 2024 Data Issues**
+
+The enhanced processor specifically addresses the 2024 data issues you identified:
+
+### **✅ Excel Serial Dates**
+`​`​`python
+# Converts Excel serial numbers to proper dates
+if pd.api.types.is_numeric_dtype(df[col]):
+    df[col] = pd.to_datetime(df[col], unit='D', origin='1899-12-30', errors='coerce')
+`​`​`
+
+### **✅ Variable Time Formats**
+`​`​`python
+# Handles H:MM, HH:MM, HH:MM:SS formats
+def get_incident_time(row):
+    try:
+        return pd.to_datetime(row['IncidentTime']).time()
+    except:
+        return None
+`​`​`
+
+### **✅ String Fields as Numbers**
+`​`​`python
+# Preserves leading zeros, handles NaN
+for col in ['Registration 1', 'Registration 2', 'Make1', 'Make2']:
+    df[col] = df[col].astype(str).str.strip().replace({'nan': ''})
+`​`​`
+
+### **✅ Narrative Cleanup**
+`​`​`python
+# Collapses whitespace and newlines
+df['Narrative'] = df['Narrative'].str.replace(r'\s+', ' ', regex=True).str.strip()
+`​`​`
+
+---
+
+## 📁 **File Structure Created**
+
+`​`​`
+02_ETL_Scripts/
+├── RMS_Data_Processing/
+│   ├── 01_Raw_Exports/              ← Put SCRPA files here
+│   ├── 04_Final_Output/             ← Enhanced files output here
+│   │   ├── enhanced_scrpa_rms_20250720_203000.csv
+│   │   ├── enhanced_scrpa_rms_20250720_203000.xlsx
+│   │   └── enhanced_scrpa_rms_20250720_203000_filtered.xlsx
+│   └── enhanced_rms_processor_scrpa.py
+`​`​`
+
+---
+
+## 💡 **Power BI Integration Benefits**
+
+### **Before (Complex M Code):**
+- ❌ **150+ lines** of transformation logic
+- ❌ **Slow refresh** due to complex calculations
+- ❌ **Error-prone** date/time parsing
+- ❌ **Hard to debug** nested transformations
+- ❌ **Version control** difficult with M Code
+
+### **After (Python Preprocessing):**
+- ✅ **50 lines** of simple data loading
+- ✅ **Fast refresh** - just load clean CSV
+- ✅ **Reliable** - Python handles edge cases
+- ✅ **Easy debugging** - Python logging
+- ✅ **Version control** - Python scripts in Git
+
+---
+
+## 🔄 **Recommended Workflow**
+
+### **Daily/Weekly Processing:**
+1. **Export SCRPA data** to `RMS_Data_Processing\01_Raw_Exports\`
+2. **Run Python script** to process all files
+3. **Power BI refresh** automatically picks up latest clean data
+4. **Focus on dashboards** instead of data transformation
+
+### **Monthly Reporting:**
+1. **Process full month** of SCRPA exports
+2. **Generate enhanced dataset** with all transformations
+3. **Power BI connects** to clean, analysis-ready data
+4. ````
+
+````plaintext
+CAD vs RMS Data Structure Solutions.txt
+? ""), "SEE REPORT"))
+    else
+        AddCrimeCategory
+in
+    FinalFiltered
+
+// RMS Child Queries (Reference ALL_CRIMES_RMS)
+// Motor Vehicle Theft - RMS
+let
+    Source = ALL_CRIMES_RMS, // Reference RMS master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Motor Vehicle Theft")
+in
+    Filtered
+
+// =============================================================================
+// UNIFIED APPROACH (Handles Both CAD and RMS in Single Query)
+// =============================================================================
+
+// ALL_CRIMES_UNIFIED Query (Detects data structure automatically)
+let
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\_LawSoft_EXPORT\current_export.xlsx"), null, true),
+    Data = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    ChangedType = Table.TransformColumnTypes(PromotedHeaders,{}, "en-US"),
+    
+    FilteredRows = Table.SelectRows(ChangedType, each ([Case Number] <> "25-057654")),
+    
+    // Detect data structure
+    HasSingleIncident = Table.HasColumns(FilteredRows, "Incident"),
+    HasMultipleIncidents = Table.HasColumns(FilteredRows, "Incident Type_1"),
+    
+    ProcessedData = 
+        if HasSingleIncident then
+            // CAD Processing (no unpivoting)
+            Table.AddColumn(FilteredRows, "IncidentType", each [Incident])
+        else if HasMultipleIncidents then
+            // RMS Processing (with unpivoting)
+            let
+                IncidentColumns = {"Incident Type_1", "Incident Type_2", "Incident Type_3"},
+                IdColumns = List.Difference(Table.ColumnNames(FilteredRows), IncidentColumns),
+                Unpivoted = Table.UnpivotOtherColumns(FilteredRows, IdColumns, "IncidentColumn", "IncidentType"),
+                CleanedIncidents = Table.SelectRows(Unpivoted, each [IncidentType] <> null and [IncidentType] <> "")
+            in
+                CleanedIncidents
+        else
+            error "Unable to detect incident column structure. Expected either 'Incident' (CAD) or 'Incident Type_1/2/3' (RMS)",
+    
+    // Apply uniform crime categorization
+    AddCrimeCategory = Table.AddColumn(ProcessedData, "Crime_Category", each
+        let
+            UpperIncident = Text.Upper([IncidentType] ? ? "") ````
+
+Looking at your M Code and your specific requirement for CADNotes processing, I can see several issues with the current approach. Let me create an improved solution. **Enhanced CADNotes Processing M Code**
+
+````powerquery-m
+// 🕒 2025-07-23-16-00-00
+// Project: SCRPA_Time_v2/Enhanced_CADNotes_Processing
+// Author: R. A. Carucci
+// Purpose: Improved CADNotes processing with first occurrence extraction and comprehensive cleanup
+
+let
+    // ✅ Load both datasets
+    SourceRMS = ALL_CRIMES,
+    SourceCAD = CAD_DATA,
+    
+    // ✅ RENAME conflicting columns BEFORE joining
+    RMSRenamed = Table.RenameColumns(SourceRMS, {
+        {"Grid", "RMS_Grid"},
+        {"Zone", "RMS_Zone"},
+        {"Officer of Record", "RMS_Officer"},
+        {"Block", "RMS_Block"}
+    }, MissingField.Ignore),
+    
+    CADRenamed = Table.RenameColumns(SourceCAD, {
+        {"Grid", "CAD_Grid"},
+        {"PDZone", "CAD_Zone"},
+        {"Officer", "CAD_Officer"},
+        {"Block", "CAD_Block"},
+        {"Disposition", "CAD_Disposition"},
+        {"Response Type", "CAD_Response_Type"}
+    }, MissingField.Ignore),
+    
+    // ✅ LEFT JOIN with renamed columns
+    JoinedData = Table.Join(
+        RMSRenamed, {"Case Number"},
+        CADRenamed, {"ReportNumberNew"},
+        JoinKind.LeftOuter
+    ),
+    
+    // ✅ Add CAD data availability flag
+    WithCADFlag = Table.AddColumn(JoinedData, "Has_CAD_Data", each
+        if [ReportNumberNew] <> null then "Yes" else "No", type text),
+    
+    // ✅ EXTRACT FIRST USERNAME from CADNotes
+    WithCADNotesUsername = Table.AddColumn(WithCADFlag, "CADNotes_Username", each
+        let
+            rawNotes = [CADNotes] ? ? "" in
+            if rawNotes = "" then null
+            else
+                let
+                    // Find first occurrence of pattern "- username_name -"
+                    firstDashPos = Text.PositionOf(rawNotes, "- "),
+                    
+                    result = if firstDashPos >= 0 then
+                        let
+                            afterFirstDash = Text.Range(rawNotes, firstDashPos + 2),
+                            secondDashPos = Text.PositionOf(afterFirstDash, " -"),
+                            username = if secondDashPos >= 0 then
+                                Text.Range(afterFirstDash, 0, secondDashPos)
+                            else afterFirstDash
+                        in
+                            // Clean and format username: "klosk_J" → "Klosk_J"
+                            if Text.Contains(username, "_") then
+                                let
+                                    parts = Text.Split(username, "_"),
+                                    capitalizedParts = List.Transform(parts, each Text.Proper(_))
+                                in
+                                    Text.Combine(capitalizedParts, "_")
+                            else Text.Proper(username)
+                    else null
+                in
+                    result, type text),
+    
+    // ✅ EXTRACT FIRST TIMESTAMP from CADNotes with proper formatting
+    WithCADNotesTimestamp = Table.AddColumn(WithCADNotesUsername, "CADNotes_Timestamp", each
+        let
+            rawNotes = [CADNotes] ? ? "" in
+            if rawNotes = "" then null
+            else
+                let
+                    // Find pattern after first "- username -" 
+                    firstDashPos = Text.PositionOf(rawNotes, "- "),
+                    
+                    result = if firstDashPos >= 0 then
+                        let
+                            afterFirstDash = Text.Range(rawNotes, firstDashPos + 2),
+                            secondDashPos = Text.PositionOf(afterFirstDash, " - "),
+                            
+                            timestampSection = if secondDashPos >= 0 then
+                                Text.Range(afterFirstDash, secondDashPos + 3)
+                            else "",
+                            
+                            // Extract timestamp until next " -" or end
+                            nextDashPos = Text.PositionOf(timestampSection, " -"),
+                            timestampRaw = if nextDashPos >= 0 then
+                                Text.Range(timestampSection, 0, nextDashPos)
+                            else timestampSection,
+                            
+                            // Clean timestamp and format as MM/dd/yyyy HH:mm:ss
+                            cleanTimestamp = Text.Trim(timestampRaw),
+                            
+                            // Parse and reformat: "3/25/2025 12:06:34 PM" → "03/25/2025 12:06:34"
+                            parsedDateTime = try DateTime.FromText(cleanTimestamp) otherwise null,
+                            
+                            formattedTimestamp = if parsedDateTime <> null then
+                                let
+                                    month = Text.PadStart(Text.From(Date.Month(DateTime.Date(parsedDateTime))), 2, "0"),
+                                    day = Text.PadStart(Text.From(Date.Day(DateTime.Date(parsedDateTime))), 2, "0"),
+                                    year = Text.From(Date.Year(DateTime.Date(parsedDateTime))),
+                                    hour = Text.PadStart(Text.From(Time.Hour(DateTime.Time(parsedDateTime))), 2, "0"),
+                                    minute = Text.PadStart(Text.From(Time.Minute(DateTime.Time(parsedDateTime))), 2, "0"),
+                                    second = Text.PadStart(Text.From(Time.Second(DateTime.Time(parsedDateTime))), 2, "0")
+                                in
+                                    month & "/" & day & "/" & year & " " & hour & ":" & minute & ":" & second
+                            else cleanTimestamp
+                        in
+                            formattedTimestamp
+                    else null
+                in
+                    result, type text),
+    
+    // ✅ COMPREHENSIVE CADNotes_Cleaned - Remove ALL username/timestamp patterns
+    WithEnhancedCADNotes = Table.AddColumn(WithCADNotesTimestamp, "CADNotes_Cleaned", each
+        let
+            rawNotes = [CADNotes] ? ? ""

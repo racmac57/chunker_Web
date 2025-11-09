@@ -1,0 +1,78 @@
+# 🚦 Traffic Bureau Monthly Summary - Power BI
+**Author:** R. A. Carucci  
+**Updated:** 2025-06-17 09:50  
+**Purpose:** Generate charts and summaries of monthly traffic enforcement, summonses, accidents, hit-and-runs, and violations for department-wide reporting. ---
+
+## 🔎 Scope of Analysis
+
+- **Data Sources:**  
+  Excel exports from Traffic, MV Accident logs, and Summons databases
+
+- **Tracked Metrics:**  
+  - Motor Vehicle Accidents (total & hit-and-run)
+  - Parking Summonses
+  - Traffic Summonses
+  - Ordinance Violations
+  - Moving/Non-Moving Violations
+  - Total Enforcement Actions
+
+---
+
+## 🔧 Query Structure Overview
+
+Each unit (e.g., Accident_Data, Summons_Data) follows the general pattern:
+
+```powerquery
+let
+    // Load source workbook
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Traffic\Traffic_Summary.xlsx"), null, true),
+
+    // Pull from named sheet or table
+    AccidentTable = Source{[Item="MV_Accidents", Kind="Table"]}[Data],
+
+    // Promote headers
+    Promoted = Table.PromoteHeaders(AccidentTable, [PromoteAllScalars=true]),
+
+    // Ensure types
+    Typed = Table.TransformColumnTypes(Promoted, {
+        {"Date", type date},
+        {"Type", type text},
+        {"Injury", type logical},
+        {"HitAndRun", type logical}
+    }),
+
+    // Filter by current reporting month
+    ThisMonth = Table.SelectRows(Typed, each Date.Month([Date]) = Date.Month(DateTime.LocalNow()) and Date.Year([Date]) = Date.Year(DateTime.LocalNow())),
+
+    // Add month/year tags
+    AddTags = Table.AddColumn(ThisMonth, "ReportingMonth", each Date.MonthName([Date]), type text)
+in
+    AddTags
+```
+
+---
+
+## 📈 Report Summary Output
+
+You can create a consolidated Power BI page containing:
+
+- Monthly line chart showing total crashes vs. issued summonses
+- Bar chart for summonses by violation type (e.g., speeding, expired reg)
+- KPIs:
+  - Total MV Accidents
+  - Hit-and-Run % of accidents
+  - Top 3 summons violation categories
+  - Total enforcement actions (monthly trend)
+
+---
+
+## 🧠 Recommendations
+
+- ✅ Use `Date` fields for filtering by month/year dynamically
+- ✅ Centralize code table lookups (e.g., `Violation Code`, `Summons Type`) for consistent naming
+- ✅ Embed charts in PowerPoint reports or export as PNG for sharing with command staff
+- ✅ Use `DataRefreshTime` if building dashboard refresh logs
+
+---
+
+Would you like a merged report summary workbook template with slicers for violations, platoon, and enforcement type?

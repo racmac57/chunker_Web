@@ -1,0 +1,590 @@
+\- ?" and "?"\. Specify whether this should be done in Transform Sample File CAD, CAD\_T4, or Joined\_CAD\_RMS\. 4\. \*\*Joined\_CAD\_RMS: RMS\_Block\*\*
+\- Incorrect for some records \(e\.g\., CAD\_ReportNumberNew "25\-041260": CAD\_FullAddress2 is "121 Sussex Street, Hackensack, NJ, 07601", CAD\_Block is "Sussex St, 100 Block", but RMS\_Block is "St, 100 Block"\)\. Correct RMS\_Block\.// Compute Response time \(Time Out \- Time Dispatched\)
+\#"Inserted Time Subtraction1" = Table\.AddColumn\(\#"Reordered Columns", "ResponseTime", each \[Time Out\] \- \[Time Dispatched\], type duration\),
+But these are only present in the CAD\_T4 sheet, and you never converted them to minutes or added them to the Joined\_CAD\_RMS query as numeric fields \(CAD\_ResponseTimeMin, CAD\_TimeOnSceneMin\)\.let
+ Source = Folder\.Files\("C:\\Users\\carucci\_r\\OneDrive \- City of Hackensack\\Documents\\Projects\\T4\_New\\Lawsoft\_Exports\\CAD\_T4"\),
+ Filtered = Table\.SelectRows\(Source, each \[Attributes\]?\[Hidden\]? \<\> true\),
+ FirstFile = Filtered\{0\},
+ 
+ ExcelWorkbook = Excel\.Workbook\(FirstFile\[Content\], null, true\),
+ CADSheet = ExcelWorkbook\{\[Item="Sheet1", Kind="Sheet"\]\}\[Data\],
+ PromoteHeaders = Table\.PromoteHeaders\(CADSheet, \[PromoteAllScalars=true\]\),
+ CleanColumnNames = Table\.TransformColumnNames\(PromoteHeaders, each Text\.Trim\(\_\)\),
+ 
+ FixCADNotes = if List\.Contains\(Table\.ColumnNames\(CleanColumnNames\), "CADNotes"\) then
+     Table\.TransformColumns\(CleanColumnNames, \{
+         \{"CADNotes", each
+             let
+                 cleaned = try Text\.Trim\(\_\) otherwise null,
+                 noLineFeeds = if cleaned \<\> null then Text\.Replace\(cleaned, Character\.FromNumber\(10\), " "\) else null,
+                 step1 = if noLineFeeds \<\> null then Text\.Replace\(noLineFeeds, "? \- ? \- ? ", ""\) else null,
+                 step2 = if step1 \<\> null then Text\.Replace\(step1, "? \- ? \- ? ? \- ? \- ? ", ""\) else null
+             in step2, type text\}
+     \}\)
+     else CleanColumnNames,
+ // Fix types with proper duration handling
+ FixTypes = Table\.TransformColumns\(FixCADNotes, \{
+     \{"Time of Call", each try DateTime\.From\(\_\) otherwise null\},
+     \{"Time Dispatched", each try DateTime\.From\(\_\) otherwise null\},
+     \{"Time Out", each try DateTime\.From\(\_\) otherwise null\},
+     \{"Time In", each try DateTime\.From\(\_\) otherwise null\},
+     \{"Time Response", each try Duration\.From\(\_\) otherwise null\},
+     \{"Time Spent", each try Duration\.From\(\_\) otherwise null\}
+ \}\)
+in
+ FixTypes
+
+
+
+### *Claude:*
+
+Perfect! Let me add those steps to your query. Here's the complete updated query with the new response time calculation steps:
+
+```powerquery
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\Lawsoft_Exports\CAD_T4"),
+    Filtered = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    FirstFile = Filtered{0},
+    
+    ExcelWorkbook = Excel.Workbook(FirstFile[Content], null, true),
+    CADSheet = ExcelWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromoteHeaders = Table.PromoteHeaders(CADSheet, [PromoteAllScalars=true]),
+    CleanColumnNames = Table.TransformColumnNames(PromoteHeaders, each Text.Trim(_)),
+    
+    FixCADNotes = if List.Contains(Table.ColumnNames(CleanColumnNames), "CADNotes") then
+        Table.TransformColumns(CleanColumnNames, {
+            {"CADNotes", each
+                let
+                    cleaned = try Text.Trim(_) otherwise null,
+                    noLineFeeds = if cleaned <> null then Text.Replace(cleaned, Character.FromNumber(10), " ") else null,
+                    step1 = if noLineFeeds <> null then Text.Replace(noLineFeeds, "? - ? - ? ", "") else null,
+                    step2 = if step1 <> null then Text.Replace(step1, "? - ? - ? ? - ? - ? ", "") else null
+                in step2, type text}
+        })
+        else CleanColumnNames,
+        
+    // Fix types with proper duration handling
+    FixTypes = Table.TransformColumns(FixCADNotes, {
+        {"Time of Call", each try DateTime.From(_) otherwise null},
+        {"Time Dispatched", each try DateTime.From(_) otherwise null},
+        {"Time Out", each try DateTime.From(_) otherwise null},
+        {"Time In", each try DateTime.From(_) otherwise null},
+        {"Time Response", each try Duration.From(_) otherwise null},
+        {"Time Spent", each try Duration.From(_) otherwise null}
+    }),
+
+    // Step: Calculate Response Time (duration)
+    Add_ResponseTime = Table.AddColumn(FixTypes, "CAD_ResponseTime", each 
+        try [Time Out] - [Time Dispatched] otherwise null, type duration),
+        
+    // Step: Convert to minutes
+    Add_ResponseTimeMin = Table.AddColumn(Add_ResponseTime, "CAD_ResponseTimeMin", each 
+        try Duration.TotalMinutes([CAD_ResponseTime]) otherwise null, type number),
+        
+    // Step: Flag negatives
+    Flag_Negative = Table.AddColumn(Add_ResponseTimeMin, "NegativeResponseTimeFlag", each 
+        try ([CAD_ResponseTimeMin] < 0) otherwise false, type logical),
+        
+    // Step: Fix invalid times
+    Add_Corrected = Table.AddColumn(Flag_Negative, "CorrectedResponseTime", each 
+        if [NegativeResponseTimeFlag] then null else [CAD_ResponseTimeMin], type number),
+        
+    // Step: Categorize Response
+    Add_ResponseCategory = Table.AddColumn(Add_Corrected, "ResponseTimeCategory", each
+        if [CorrectedResponseTime] = null then null
+        else if [CorrectedResponseTime] = 0 then "0"
+        else if [CorrectedResponseTime] <= (5/60) then "1-5 seconds"
+        else if [CorrectedResponseTime] < 5 then "1-4:59 minutes"
+        else ">= 5 mins", type text)
+in
+    Add_ResponseCategory
+```
+
+**Key changes made:**
+- Added `try...otherwise null` for safer duration calculations
+- Added `try...otherwise false` for the negative flag to handle null values
+- All new columns: `CAD_ResponseTime`, `CAD_ResponseTimeMin`, `NegativeResponseTimeFlag`, `CorrectedResponseTime`, `ResponseTimeCategory`
+
+**Test this and let me know:**
+1. Does it work without errors? 2. Do you see the new response time columns? 3. Are the categories being assigned correctly? Once this works, we can add similar steps for "Time on Call" calculations! ### *User:*
+
+this is for CAD\_T4? ### *Claude:*
+
+You're right to clarify! We have two different contexts here:
+
+## Current Context: Single File Test
+The query I just gave you is for **testing with a single file** from your CAD_T4 folder to debug why the `fxTransformCAD` function is failing. ## What We Need To Do Next:
+
+### Step 1: First complete the single file test
+Test the query I just provided to make sure all the response time calculations work on one file. ### Step 2: Update the fxTransformCAD function
+Once the single file test works, we need to add these same steps to your **fxTransformCAD function** (the one that starts with `(source as binary) as table =>`). ### Step 3: Fix CAD_T4 to use all files
+Then restore your **CAD_T4 query** to process all files in the folder using the updated fxTransformCAD function. **So to answer your question:**
+- The query I just provided is a **test query** for one file
+- The response time steps need to be added to **fxTransformCAD function**
+- **CAD_T4** will then use the updated function on all files
+
+**Should I:**
+1. Wait for you to test the single file version first, OR
+2. Show you how to add these steps to the fxTransformCAD function right now? Which would you prefer? ### *User:*
+
+CorrectedResponseTime is decimal number and its has several places after decimal
+CAD\_ResponseTimeMin is decimal number and its has several places after decimal
+CADNotes clean and trim
+Time Response are all null
+Time Spent are all null
+Time of Call are set to any type
+Time In are set to any type
+Time Out are set to any type
+Time Dispatched are set to any type
+
+are you extracting badge number in another query? same for block and TimeOfDay? is it better to have a main query with all field? ### *Claude:*
+
+You're absolutely right! We need to complete the full transformation in one place. The current test query is missing many steps from the original `fxTransformCAD` function. Let me create the **complete single file test query** with all the transformations:
+
+```powerquery
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\Lawsoft_Exports\CAD_T4"),
+    Filtered = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    FirstFile = Filtered{0},
+    
+    ExcelWorkbook = Excel.Workbook(FirstFile[Content], null, true),
+    CADSheet = ExcelWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromoteHeaders = Table.PromoteHeaders(CADSheet, [PromoteAllScalars=true]),
+    CleanColumnNames = Table.TransformColumnNames(PromoteHeaders, each Text.Trim(_)),
+    
+    // Clean CADNotes with super trim logic
+    FixCADNotes = if List.Contains(Table.ColumnNames(CleanColumnNames), "CADNotes") then
+        Table.TransformColumns(CleanColumnNames, {
+            {"CADNotes", each
+                let
+                    cleaned = try Text.Trim(_) otherwise null,
+                    noLineFeeds = if cleaned <> null then Text.Replace(cleaned, Character.FromNumber(10), " ") else null,
+                    step1 = if noLineFeeds <> null then Text.Replace(noLineFeeds, "? - ? - ? ", "") else null,
+                    step2 = if step1 <> null then Text.Replace(step1, "? - ? - ? ? - ? - ? ", "") else null
+                in step2, type text}
+        })
+        else CleanColumnNames,
+
+    // Set known types
+    FixTypes = Table.TransformColumnTypes(FixCADNotes, {
+        {"Time of Call", type datetime},
+        {"Time Dispatched", type datetime},
+        {"Time Out", type datetime},
+        {"Time In", type datetime},
+        {"Time Response", type text},
+        {"Time Spent", type text}
+    }, MissingField.Ignore),
+
+    // Extract Badge Number
+    AddBadgeNumber = Table.AddColumn(FixTypes, "BadgeNumber", each 
+        try Text.Select(Text.AfterDelimiter([Officer], " ", {1, RelativePosition.FromEnd}), {"0".."9"}) 
+        otherwise null, type text),
+
+    // Clean Officer Name
+    CleanOfficer = Table.TransformColumns(AddBadgeNumber, {
+        {"Officer", each 
+            try Text.Proper(Text.Trim(Text.Replace(Text.Replace(_, "P.O. ", ""), "Sgt. ", ""))) 
+            otherwise null, type text}
+    }),
+
+    // Clean address fields
+    CleanAddress = Table.TransformColumns(CleanOfficer, {
+        {"FullAddress2", each try Text.BeforeDelimiter(_, ",") otherwise _, type text}
+    }),
+    AddStreetNumber = Table.AddColumn(CleanAddress, "StreetNumber", each 
+        try Number.FromText(Text.BeforeDelimiter([FullAddress2], " ")) otherwise null, type number),
+    AddLocation = Table.AddColumn(AddStreetNumber, "Location", each 
+        try Text.Trim(Text.AfterDelimiter([FullAddress2], " ")) otherwise null, type text),
+
+    // Add Block field
+    AddBlock = Table.AddColumn(AddLocation, "Block", each 
+        let 
+            sn = [StreetNumber], 
+            loc = [Location]
+        in 
+            if sn <> null then loc & ", " & Text.From(Number.IntegerDivide(sn, 100) * 100) & " Block" 
+            else loc & ", Unknown Block", type text),
+
+    // Calculate Response Time (duration) - UPDATED
+    Add_ResponseTime = Table.AddColumn(AddBlock, "CAD_ResponseTime", each 
+        try [Time Out] - [Time Dispatched] otherwise null, type duration),
+        
+    // Convert to minutes - ROUNDED
+    Add_ResponseTimeMin = Table.AddColumn(Add_ResponseTime, "CAD_ResponseTimeMin", each 
+        try Number.Round(Duration.TotalMinutes([CAD_ResponseTime]), 2) otherwise null, type number),
+
+    // Calculate Time on Call
+    Add_TimeOnCall = Table.AddColumn(Add_ResponseTimeMin, "CAD_TimeOnCall", each 
+        try [Time In] - [Time Out] otherwise null, type duration),
+        
+    // Convert to minutes - ROUNDED
+    Add_TimeOnCallMin = Table.AddColumn(Add_TimeOnCall, "CAD_TimeOnSceneMin", each 
+        try Number.Round(Duration.TotalMinutes([CAD_TimeOnCall]), 2) otherwise null, type number),
+        
+    // Flag negatives
+    Flag_Negative = Table.AddColumn(Add_TimeOnCallMin, "NegativeResponseTimeFlag", each 
+        try ([CAD_ResponseTimeMin] < 0) otherwise false, type logical),
+        
+    // Fix invalid times
+    Add_Corrected = Table.AddColumn(Flag_Negative, "CorrectedResponseTime", each 
+        if [NegativeResponseTimeFlag] then null 
+        else Number.Round([CAD_ResponseTimeMin], 2), type number),
+        
+    // Categorize Response
+    Add_ResponseCategory = Table.AddColumn(Add_Corrected, "ResponseTimeCategory", each
+        if [CorrectedResponseTime] = null then null
+        else if [CorrectedResponseTime] = 0 then "0"
+        else if [CorrectedResponseTime] <= (5/60) then "1-5 seconds"
+        else if [CorrectedResponseTime] < 5 then "1-4:59 minutes"
+        else ">= 5 mins", type text),
+
+    // Categorize on scene time
+    AddTimeOnCallCategory = Table.AddColumn(Add_ResponseCategory, "TimeOnCallCategory", each 
+        if [CAD_TimeOnSceneMin] = null then null
+        else if [CAD_TimeOnSceneMin] = 0 then "0"
+        else if [CAD_TimeOnSceneMin] <= 3 then "1 second–3 minutes"
+        else if [CAD_TimeOnSceneMin] >= 300 then ">5 hours"
+        else null, type text),
+
+    // Add time-of-day bins
+    AddTimeOfDay = Table.AddColumn(AddTimeOnCallCategory, "TimeOfDay", each 
+        let t = try Time.From([Time of Call]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)", type text),
+
+    // Derive Platoon from time
+    AddPlatoon = Table.AddColumn(AddTimeOfDay, "Platoon", each 
+        let timeHour = try Time.Hour(Time.From([Time of Call])) otherwise null
+        in if timeHour = null then null
+           else if timeHour >= 6 and timeHour < 18 then "A" else "B", type text)
+
+in
+    AddPlatoon
+```
+
+**Key improvements:**
+- ✅ **Rounded decimals**: `Number.Round(Duration.TotalMinutes([CAD_ResponseTime]), 2)`
+- ✅ **All transformations in one place**: Badge, Block, TimeOfDay, Platoon
+- ✅ **Proper datetime types**: Set with `MissingField.Ignore`
+- ✅ **Complete CADNotes cleaning**
+- ✅ **Time on Call calculations**
+
+**Test this complete version and tell me what you see! **
+
+
+
+### *User:*
+
+in FixTypes:
+Expression\.Error: We cannot convert the value 1 to type Text\. Details:
+ Value=1
+ Type=\[Type\]
+
+
+
+### *Claude:*
+
+The same error is happening because some of your "Time Response" and "Time Spent" columns contain numbers instead of text. Let's fix this by being more flexible with the type conversion:
+
+```powerquery
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\Lawsoft_Exports\CAD_T4"),
+    Filtered = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    FirstFile = Filtered{0},
+    
+    ExcelWorkbook = Excel.Workbook(FirstFile[Content], null, true),
+    CADSheet = ExcelWorkbook{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromoteHeaders = Table.PromoteHeaders(CADSheet, [PromoteAllScalars=true]),
+    CleanColumnNames = Table.TransformColumnNames(PromoteHeaders, each Text.Trim(_)),
+    
+    // Clean CADNotes with super trim logic
+    FixCADNotes = if List.Contains(Table.ColumnNames(CleanColumnNames), "CADNotes") then
+        Table.TransformColumns(CleanColumnNames, {
+            {"CADNotes", each
+                let
+                    cleaned = try Text.Trim(_) otherwise null,
+                    noLineFeeds = if cleaned <> null then Text.Replace(cleaned, Character.FromNumber(10), " ") else null,
+                    step1 = if noLineFeeds <> null then Text.Replace(noLineFeeds, "? - ? - ? ", "") else null,
+                    step2 = if step1 <> null then Text.Replace(step1, "? - ? - ? ? - ? - ? ", "") else null
+                in step2, type text}
+        })
+        else CleanColumnNames,
+
+    // Set known types - FIXED VERSION
+    FixTypes = Table.TransformColumns(FixCADNotes, {
+        {"Time of Call", each try DateTime.From(_) otherwise null},
+        {"Time Dispatched", each try DateTime.From(_) otherwise null},
+        {"Time Out", each try DateTime.From(_) otherwise null},
+        {"Time In", each try DateTime.From(_) otherwise null},
+        {"Time Response", each try Text.From(_) otherwise null},
+        {"Time Spent", each try Text.From(_) otherwise null}
+    }),
+
+    // Extract Badge Number
+    AddBadgeNumber = Table.AddColumn(FixTypes, "BadgeNumber", each 
+        try Text.Select(Text.AfterDelimiter([Officer], " ", {1, RelativePosition.FromEnd}), {"0".."9"}) 
+        otherwise null, type text),
+
+    // Clean Officer Name
+    CleanOfficer = Table.TransformColumns(AddBadgeNumber, {
+        {"Officer", each 
+            try Text.Proper(Text.Trim(Text.Replace(Text.Replace(_, "P.O. ", ""), "Sgt. ", ""))) 
+            otherwise null, type text}
+    }),
+
+    // Clean address fields
+    CleanAddress = Table.TransformColumns(CleanOfficer, {
+        {"FullAddress2", each try Text.BeforeDelimiter(_, ",") otherwise _, type text}
+    }),
+    AddStreetNumber = Table.AddColumn(CleanAddress, "StreetNumber", each 
+        try Number.FromText(Text.BeforeDelimiter([FullAddress2], " ")) otherwise null, type number),
+    AddLocation = Table.AddColumn(AddStreetNumber, "Location", each 
+        try Text.Trim(Text.AfterDelimiter([FullAddress2], " ")) otherwise null, type text),
+
+    // Add Block field
+    AddBlock = Table.AddColumn(AddLocation, "Block", each 
+        let 
+            sn = [StreetNumber], 
+            loc = [Location]
+        in 
+            if sn <> null then loc & ", " & Text.From(Number.IntegerDivide(sn, 100) * 100) & " Block" 
+            else loc & ", Unknown Block", type text),
+
+    // Calculate Response Time (duration)
+    Add_ResponseTime = Table.AddColumn(AddBlock, "CAD_ResponseTime", each 
+        try [Time Out] - [Time Dispatched] otherwise null, type duration),
+        
+    // Convert to minutes - ROUNDED
+    Add_ResponseTimeMin = Table.AddColumn(Add_ResponseTime, "CAD_ResponseTimeMin", each 
+        try Number.Round(Duration.TotalMinutes([CAD_ResponseTime]), 2) otherwise null, type number),
+
+    // Calculate Time on Call
+    Add_TimeOnCall = Table.AddColumn(Add_ResponseTimeMin, "CAD_TimeOnCall", each 
+        try [Time In] - [Time Out] otherwise null, type duration),
+        
+    // Convert to minutes - ROUNDED
+    Add_TimeOnCallMin = Table.AddColumn(Add_TimeOnCall, "CAD_TimeOnSceneMin", each 
+        try Number.Round(Duration.TotalMinutes([CAD_TimeOnCall]), 2) otherwise null, type number),
+        
+    // Flag negatives
+    Flag_Negative = Table.AddColumn(Add_TimeOnCallMin, "NegativeResponseTimeFlag", each 
+        try ([CAD_ResponseTimeMin] < 0) otherwise false, type logical),
+        
+    // Fix invalid times
+    Add_Corrected = Table.AddColumn(Flag_Negative, "CorrectedResponseTime", each 
+        if [NegativeResponseTimeFlag] then null 
+        else Number.Round([CAD_ResponseTimeMin], 2), type number),
+        
+    // Categorize Response
+    Add_ResponseCategory = Table.AddColumn(Add_Corrected, "ResponseTimeCategory", each
+        if [CorrectedResponseTime] = null then null
+        else if [CorrectedResponseTime] = 0 then "0"
+        else if [CorrectedResponseTime] <= (5/60) then "1-5 seconds"
+        else if [CorrectedResponseTime] < 5 then "1-4:59 minutes"
+        else ">= 5 mins", type text),
+
+    // Categorize on scene time
+    AddTimeOnCallCategory = Table.AddColumn(Add_ResponseCategory, "TimeOnCallCategory", each 
+        if [CAD_TimeOnSceneMin] = null then null
+        else if [CAD_TimeOnSceneMin] = 0 then "0"
+        else if [CAD_TimeOnSceneMin] <= 3 then "1 second–3 minutes"
+        else if [CAD_TimeOnSceneMin] >= 300 then ">5 hours"
+        else null, type text),
+
+    // Add time-of-day bins
+    AddTimeOfDay = Table.AddColumn(AddTimeOnCallCategory, "TimeOfDay", each 
+        let t = try Time.From([Time of Call]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)", type text),
+
+    // Derive Platoon from time
+    AddPlatoon = Table.AddColumn(AddTimeOfDay, "Platoon", each 
+        let timeHour = try Time.Hour(Time.From([Time of Call])) otherwise null
+        in if timeHour = null then null
+           else if timeHour >= 6 and timeHour < 18 then "A" else "B", type text)
+
+in
+    AddPlatoon
+```
+
+**Key change in FixTypes:**
+- Used `each try Text.From(_) otherwise null` instead of `type text`
+- This safely converts numbers to text without errors
+
+**Try this version - it should handle the mixed number/text values properly! **
+
+
+
+### *User:*
+
+did you add Category matching using full Incident
+
+  CapitalizeSquad = Table\.TransformColumns\(TruncateIncidentTypes, \{
+     \{"Squad", Text\.Upper, type text\}
+ \}\),
+ AddPlatoon = Table\.AddColumn\(CapitalizeSquad, "Platoon", each 
+     let s = \[Squad\] in
+         if List\.Contains\(\{"A1","A2","A3","A4"\}, s\) then "A"
+         else if List\.Contains\(\{"B1","B2","B3","B4"\}, s\) then "B"
+         else if List\.Contains\(\{"DET","CSB","H1","HACSOC"\}, s\) then "N/A"
+         else null, type text\),
+ OverrideSquadRecords = Table\.TransformRows\(AddPlatoon, each
+     let
+         record = \_,
+         officer = record\[\#"Officer of Record"\],
+         squad = record\[Squad\],
+         newSquad = if officer = "SPO\. Aster Abueg 817" then "H1" else squad
+     in
+         Record\.TransformFields\(record, \{\{"Squad", each newSquad\}\}\)
+ \),
+ OverrideSquad = Table\.FromRecords\(OverrideSquadRecords\),
+ FlagOfficerNull = Table\.AddColumn\(OverrideSquad, "OfficerNullFlag", each \[\#"Officer of Record"\] = null, type logical\),
+ AddBadgeNumber = Table\.AddColumn\(FlagOfficerNull, "BadgeNumber", each 
+     try Text\.Select\(Text\.AfterDelimiter\(\[\#"Officer of Record"\], " ", \{1, RelativePosition\.FromEnd\}\), \{"0"\.\. "9"\}\) 
+     otherwise null, type text\)
+
+also add
+
+Query:	QA\_Excluded\_Location\_Summary
+M Code:	// QA\_Excluded\_Location\_Summary: Summary count of excluded CAD rows by street name
+let
+ Source = QA\_Excluded\_Locations,
+ ExtractStreet = Table\.AddColumn\(Source, "Excluded\_StreetName", each
+     let
+         loc = Text\.Upper\(\[CAD\_Location\]\),
+         delim = if Text\.Contains\(loc, "&"\) then Text\.Split\(loc, "&"\) else \{loc\},
+         primary = Text\.Trim\(Text\.BeforeDelimiter\(delim\{0\}, ","\)\)
+     in primary, type text\),
+ Grouped = Table\.Group\(ExtractStreet, \{"Excluded\_StreetName"\}, \{\{"Count", each Table\.RowCount\(\_\), Int64\.Type\}\}\),
+ Sorted = Table\.Sort\(Grouped, \{"Count", Order\.Descending\}\)
+in
+ Sorted
+	
+	
+Query:	QA\_Excluded\_Locations
+M Code:	// QA\_Excluded\_Locations: Capture all CAD records excluded by location filter logic
+let
+ // Load and type key columns
+ CAD\_Prefixed = Table\.TransformColumnNames\(CAD\_T4, each if Text\.StartsWith\(\_, "CAD\_"\) then \* else "CAD\*" & \_\),
+ CAD\_Typed = Table\.TransformColumnTypes\(CAD\_Prefixed, \{
+     \{"CAD\_Time of Call", type datetime\},
+     \{"CAD\_Final\_ResponseTime", type duration\},
+     \{"CAD\_Final\_TimeOnCall", type duration\}
+ \}\),
+ // Use existing CAD\_Location and CAD\_StreetNumber
+ WithStreetNumber = CAD\_Typed,
+ // Inverse filter logic — NOT matching the location criteria
+ ExcludedLocations = Table\.SelectRows\(WithStreetNumber, each 
+     let
+         loc = Text\.Upper\(\[CAD\_Location\]\),
+         sn = \[CAD\_StreetNumber\]
+     in not \(
+         Text\.Contains\(loc, "ESSEX STREET & RAILROAD AVENUE"\) or
+         Text\.Contains\(loc, "RAILROAD AVENUE & ESSEX STREET"\) or
+         Text\.Contains\(loc, "ESSEX STREET & NEWMAN AVENUE"\) or
+         Text\.Contains\(loc, "NEWMAN AVENUE & ESSEX STREET"\) or
+         Text\.Contains\(loc, "ESSEX STREET & LEHIGH STREET"\) or
+         Text\.Contains\(loc, "LEHIGH STREET & ESSEX STREET"\) or
+         Text\.Contains\(loc, "SUSSEX STREET & LEHIGH STREET"\) or
+         Text\.Contains\(loc, "LEHIGH STREET & SUSSEX STREET"\) or
+         Text\.Contains\(loc, "SUSSEX STREET & NEWMAN STREET"\) or
+         Text\.Contains\(loc, "NEWMAN STREET & SUSSEX STREET"\) or
+         Text\.Contains\(loc, "SUSSEX STREET & RAILROAD AVENUE"\) or
+         Text\.Contains\(loc, "RAILROAD AVENUE & SUSSEX STREET"\) or
+         Text\.Contains\(loc, "NEWMAN STREET & RUSSELL PLACE"\) or
+         Text\.Contains\(loc, "RUSSELL PLACE & NEWMAN STREET"\) or
+         Text\.Contains\(loc, "NEWMAN STREET & LEE PLACE"\) or
+         Text\.Contains\(loc, "LEE PLACE & NEWMAN STREET"\) or
+         \(
+             \(Text\.Contains\(loc, "ESSEX"\) and sn \>= 184 and sn \<= 240\) or
+             \(Text\.Contains\(loc, "SUSSEX"\) and sn \>= 150 and sn \<= 214\) or
+             \(Text\.Contains\(loc, "NEWMAN"\) and sn \>= 13 and sn \<= 73\) or
+             \(Text\.Contains\(loc, "LEE PLACE"\)\) or
+             \(Text\.Contains\(loc, "RUSSELL PLACE"\)\) or
+             \(Text\.Contains\(loc, "LEHIGH STREET"\)\) or
+             \(Text\.Contains\(loc, "RAILROAD AVENUE"\) and sn \<= 95\)
+         \)
+     \)
+ \)
+in
+ ExcludedLocations
+
+
+
+### *Claude:*
+
+Looking at your updated `fxTransformCAD` function, I can see several key differences and missing elements compared to what we were building. Let me analyze what's there and what needs to be added:
+
+## Current fxTransformCAD Analysis
+
+**✅ What's Already There:**
+- Category matching using full Incident (lines with CallTypeCSV)
+- Basic time calculations
+- TimeOfDay bins
+- Response time categories
+
+**❌ What's Missing:**
+- Squad extraction and Platoon logic you mentioned
+- The QA_Excluded_Location queries
+- Some of the refined duration calculations
+
+## Let me create an updated artifact with all the components:
+
+**Complete fxTransformCAD with Squad/Platoon Logic**
+
+```powerquery
+// fxTransformCAD: Complete transformation with Squad/Platoon logic and Category matching
+(source as binary) as table =>
+let
+    Source = Excel.Workbook(source, null, true),
+    CADSheet = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromoteHeaders = Table.PromoteHeaders(CADSheet, [PromoteAllScalars=true]),
+    CleanColumnNames = Table.TransformColumnNames(PromoteHeaders, each Text.Trim(_)),
+    RemoveExtraColumns = Table.SelectColumns(CleanColumnNames, List.Select(Table.ColumnNames(CleanColumnNames), each not Text.StartsWith(_, "Unnamed"))),
+    
+    // Fix core timestamp columns
+    FixTimeOfCall = Table.TransformColumnTypes(RemoveExtraColumns, {{"Time of Call", type datetime}}),
+    Fix_HowReported = Table.TransformColumnTypes(FixTimeOfCall, {{"How Reported", type text}, {"Incident", type text}}),
+
+    // Badge number and officer name cleaning
+    AddBadgeNumber = Table.AddColumn(Fix_HowReported, "BadgeNumber", each 
+        try Text.Trim(Text.Select(Text.AfterDelimiter([Officer], " ", {1, RelativePosition.FromEnd}), {"0".."9"})) 
+        otherwise null, type text),
+    CleanOfficer = Table.TransformColumns(AddBadgeNumber, {
+        {"Officer", each
+            let raw = try Text.Trim(_) otherwise "",
+                noPrefix = List.Accumulate({"P.O. ", "Sgt. ", "Officer", "Lt."}, raw, (state, prefix) => Text.Replace(state, prefix, "")),
+                normalized = Text.Proper(Text.Trim(noPrefix))
+            in normalized, type text}
+    }),
+
+    // Clean address and extract parts
+    CleanAddress = Table.TransformColumns(CleanOfficer, {
+        {"FullAddress2", each 
+            let base = try Text.BeforeDelimiter(_, ",") otherwise _, 
+                noExtraSpaces = Text.Trim(base) 
+            in noExtraSpaces, type text}
+    }),
+    AddLocation = Table.AddColumn(CleanAddress, "Location", each
+        if [FullAddress2] <> null and Text.Contains([FullAddress2], "&") then
+            Text.Replace(Text.Replace(Text.BeforeDelimiter([FullAddress2], ","), "Street", "St"), "Avenue", "Ave")
+        else if [FullAddress2] <> null then
+            Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter([FullAddress2], " "), ","))
+        else null, type text),
+    AddStreetNumber = Table.AddColumn(AddLocation, "StreetNumber", each 
+        try Number.FromText(Text.BeforeDelimiter([FullAddress2], " ")) otherwise null, type number),
+
+    // Add block string
+    AddBlock = Table.AddColumn(AddStreetNumber, "Block", each
+        let
+            location = [Location] ? ?

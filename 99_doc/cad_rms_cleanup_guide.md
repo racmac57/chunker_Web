@@ -1,0 +1,88 @@
+---
+
+# 🧠 CAD & RMS Data Cleanup Guide v1.1
+
+**Author**: R. A. Carucci  
+**Project**: SCRPA / Hackensack PD  
+**Purpose**: Unified documentation of CAD/RMS data cleanup, transformation, and enrichment logic from prior AI consultations.
+
+---
+
+## 🔍 Conversation Outline
+### ✅ Topics Covered
+- CAD & RMS common field definitions
+- Timestamp normalization and duration logic
+- Vehicle field merging
+- Incident unpivoting vs comma merge logic
+- Statute & ordinance mapping
+- Officer assignment enrichment (Platoon/Squad)
+- Power Query logic for response cycles (7D/28D/YTD)
+- Data validation and formatting cleanup techniques
+
+### 🧠 Final Working Code(s)
+- CODE_20250620_001 – Vehicle merge column
+- CODE_20250620_002 – Incident merge logic
+- CODE_20250620_003 – Incident unpivot method
+- CODE_20250620_004 – Timestamp-based duration calc
+- CODE_20250620_005 – Statute and ordinance joins
+- CODE_20250620_006 – Assignment merge via BadgeNumber
+- CODE_20250620_007 – 7/28/YTD cycle tagging
+
+### 🔍 What Worked
+- Unified all incident columns with `Text.Combine`
+- Unpivoted incident types for multi-incident rows
+- Resolved negative durations using conditional null logic
+- Validated NJ statute/ordinance matching by lookup
+
+### ⚠️ Still Unresolved
+- Fuzzy matching error cases in RMS exports
+- Supplemental report chaining (e.g., `25-01123A` → primary case)
+
+### 🔄 Next Steps
+- Expand to include Officer Activity Logs
+- Integrate with SQL backend for persistent reporting layers
+
+### 🧰 Tools/Tech Used
+- Power Query (M Code), Excel, Python (pandas), ArcGIS Pro (ArcPy), NJSA Reference Tables
+
+### 🧵 Key Decisions
+- Centralized reporting cycle logic from May 7, 2025
+- Always fallback to `TimeIn`/`TimeOut` if `OnScene`/`ClearTime` are null
+
+### 🔗 Related Conversations
+- 2025-05-21: Power Query cycle logic
+- 2025-05-29: CAD column standardization and squad mapping
+- 2025-06-17: Vehicle merging and ordinance matching
+
+---
+
+### 🧠 Session Summary Token
+SUMMARY_TOKEN_START  
+Date: 2025-06-20  
+Context: Full restructure of CAD/RMS cleanup documentation into standardized reference format  
+Progress: Indexed and cleaned all Power Query & Python logic from prior CAD reporting efforts  
+Pending: Supplemental chaining logic; fuzzy match QA  
+Tech: M Code, Python, ArcPy  
+AI: GPT-4o (ChatGPT)  
+Chat Name: cad_rms_cleanup_reference_build  
+SUMMARY_TOKEN_END
+
+---
+
+## 📚 CAD & RMS Data Cleanup Guide
+
+### 🗂️ Table of Contents
+1. [Overview](#overview)
+2. [Common Data Issues Identified](#common-issues)
+3. [CAD/RMS Column Reference](#column-reference)
+4. [Power Query (M Code) Solutions](#power-query)
+5. [Python Cleanup Scripts](#python-scripts)
+6. [Excel Formulas & VBA Utilities](#excel-vba)
+7. [ArcGIS/ArcPy Notes](#arcgis)
+8. [Data Model Standards](#data-model)
+9. [Best Practices](#best-practices)
+
+---
+
+<!-- the rest of your content from earlier remains unchanged -->
+

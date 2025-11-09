@@ -1,0 +1,477 @@
+Args:
+        crime_type (str): Type of crime to map
+        output_folder (str): Base directory (will create crime-specific subfolder)
+        args (list): Arguments list where args[6] contains date in format "YYYY_MM_DD"
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    aprx = None
+    
+    try:
+        # Validate configuration first
+        if not validate_config():
+            return False
+            
+        logging.info(f"🗺️ Starting map export for: {crime_type}")
+        
+        # Get date from args
+        try:
+            date_str = args[6] if len(args) > 6 else "2025_06_24"
+            target_date = parse_date_string(date_str)
+        except (IndexError, TypeError, ValueError):
+            target_date = date.today()
+            date_str = target_date.strftime("%Y_%m_%d")
+            
+        # Create crime-specific output folder using Excel naming
+        crime_output_folder = get_crime_type_folder(crime_type, date_str)
+        os.makedirs(crime_output_folder, exist_ok=True)
+        arcpy.AddMessage(f"📁 Crime-specific folder: {crime_output_folder}")
+        
+        # Get standardized filename prefix
+        filename_prefix = get_standardized_filename(crime_type)
+        
+        # Load ArcGIS Pro project
+        aprx = arcpy.mp.ArcGISProject(APR_PATH)
+        arcpy.AddMessage(f"✅ Loaded ArcGIS Pro project: {APR_PATH}")
+        
+        # Get layout and map objects
+        layouts = aprx.listLayouts()
+        if not layouts:
+            arcpy.AddError("❌ No layouts found in project")
+            available_layouts = [layout.name for layout in aprx.listLayouts()]
+            arcpy.AddError(f"Available layouts: {available_layouts}")
+            return False
+            
+        # Try to find specific layout first, then use first available
+        layout = None
+        for l in layouts:
+            if "Crime Report" in l.name or "Legend" in l.name:
+                layout = l
+                break
+        
+        if not layout:
+            layout = layouts[0]  # Use first layout
+            
+        arcpy.AddMessage(f"✅ Found layout: {layout.name}")
+        
+        # Get map frame
+        map_frames = layout.listElements("MAPFRAME_ELEMENT")
+        if not map_frames:
+            arcpy.AddError("❌ No map frame elements found in layout")
+            return False
+            
+        map_frame = map_frames[0]
+        map_obj = map_frame.map
+        arcpy.AddMessage(f"✅ Found map: {map_obj.name}")
+
+        # Store original layer states for restoration
+        original_states = {}
+        for lyr in map_obj.listLayers():
+            original_states[lyr.name] = {
+                'visible': lyr.visible,
+                'transparency': lyr.transparency,
+                'definitionQuery': lyr.definitionQuery if hasattr(lyr, 'definitionQuery') else ""
+            }
+
+        # Hide all layers initially
+        layer_count = 0
+        for lyr in map_obj.listLayers():
+            lyr.visible = False
+            layer_count += 1
+        arcpy.AddMessage(f"🔄 Hidden {layer_count} layers initially")
+
+        # Show base layers
+        base_layers = [
+            "City Boundaries",
+            "OpenStreetMap Light Gray Canvas Reference", 
+            "Light Gray Canvas (for Export)",
+            "World Light Gray Canvas Base",
+            "OpenStreetMap",
+            "Streets"
+        ]
+        
+        base_layers_found = 0
+        for lyr in map_obj.listLayers():
+            if any(base_name in lyr.name for base_name in base_layers):
+                lyr.visible = True
+                lyr.transparency = 0
+                base_layers_found += 1
+                arcpy.AddMessage(f"✅ Enabled base layer: {lyr.name}")
+        
+        arcpy.AddMessage(f"✅ Enabled {base_layers_found} base layers")
+
+        # Get Excel-based 7-day period dates
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        if not start_date or not end_date:
+            arcpy.AddError(f"❌ Could not determine Excel 7-day period for {target_date}")
+            return False
+            
+        arcpy.AddMessage(f"📅 Excel 7-Day period: {start_date} to {end_date}")
+
+        # Find and configure ONLY the 7-Day layer
+        layer_name = f"{crime_type} 7-Day"
+        target_layer = None
+        
+        for lyr in map_obj.listLayers():
+            if lyr.name == layer_name:
+                target_layer = lyr
+                break
+        
+        if not target_layer:
+            arcpy.AddWarning(f"❌ 7-Day layer not found: {layer_name}")
+            # List available layers for debugging
+            available_layers = [lyr.name for lyr in map_obj.listLayers()]
+            arcpy.AddMessage(f"Available layers: {available_layers}")
+            
+            # Create placeholder and return
+            export_filename = f"{filename_prefix}_Map.png"
+            export_path = os.path.join(crime_output_folder, export_filename)
+            success = create_placeholder_image(crime_type, export_path)
+            return success
+        
+        # Show only the 7-Day layer with enhanced visibility
+        target_layer.visible = True
+        target_layer.transparency = 0  # Full opacity for single layer
+        
+        # Apply enhanced visibility and symbology (especially for Sexual Offenses)
+        force_layer_visibility_and_symbology(target_layer, crime_type)
+        
+        arcpy.AddMessage(f"✅ Configured 7-Day layer: {target_layer.name}")
+
+        # Apply definition query if supported using Excel dates
+        if target_layer.supports("DEFINITIONQUERY"):
+            filter_sql = build_sql_filter_7day_excel(crime_type, start_date, end_date)
+            
+            if filter_sql:
+                arcpy.AddMessage(f"🔎 Excel-based SQL for 7-Day {layer_name}: {filter_sql}")
+                target_layer.definitionQuery = filter_sql
+                arcpy.AddMessage(f"✅ Applied Excel-based query to {target_layer.name}")
+                
+                # Log feature count
+                try:
+                    feature_count = int(arcpy.GetCount_management(target_layer).getOutput(0))
+                    arcpy.AddMessage(f"📊 7-Day features: {feature_count}")
+                    
+                    # If no features, create placeholder instead of map
+                    if feature_count == 0:
+                        arcpy.AddMessage(f"📋 No 7-day incidents for {crime_type}, creating placeholder")
+                        export_filename = f"{filename_prefix}_Map.png"
+                        export_path = os.path.join(crime_output_folder, export_filename)
+                        success = create_placeholder_image(crime_type, export_path)
+                        
+                        # Restore original layer states
+                        restore_layer_states(map_obj, original_states)
+                        return success
+                        
+                except Exception as e:
+                    arcpy.AddWarning(f"⚠️ Could not get feature count: {e}")
+            else:
+                arcpy.AddWarning(f"⚠️ Could not build SQL filter for {crime_type}")
+
+        # Apply Hackensack-focused extent calculation
+        calculate_hackensack_focused_extent(target_layer, map_frame)
+
+        # Update legend to show only 7-Day layer
+        update_legend_visibility_7day(layout, map_obj, target_layer)
+
+        # Clean up patch elements
+        cleanup_patch_elements(layout)
+
+        # Export the map with FIXED function
+        success = export_map_to_png_fixed(layout, crime_type, crime_output_folder, filename_prefix)
+        
+        # Restore original layer states
+        restore_layer_states(map_obj, original_states)
+        
+        if success:
+            arcpy.AddMessage(f"✅ Map export completed successfully for {crime_type}")
+        
+        return success
+        
+    except Exception as e:
+        arcpy.AddError(f"❌ Critical error in export_maps: {str(e)}")
+        logging.error(f"Critical error in export_maps for {crime_type}: {e}", exc_info=True)
+        return False
+    finally:
+        # Clean up ArcGIS Pro project
+        if aprx:
+            try:
+                del aprx
+                arcpy.AddMessage("🧹 Cleaned up ArcGIS Pro project reference")
+            except Exception as e:
+                arcpy.AddWarning(f"⚠️ Could not clean up project reference: {e}")
+
+# Legacy function support for compatibility
+def build_sql_filter_7day(crime_type, start_date):
+    """
+    Legacy function - now uses Excel integration.
+    """ try:
+        # Convert start_date string to date object if needed
+        if isinstance(start_date, str):
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+        else:
+            start_date_obj = start_date
+            
+        # Calculate target date (report due date) 
+        target_date = start_date_obj + timedelta(days=7)
+        
+        # Get Excel-based period
+        excel_start, excel_end = get_7day_period_dates(target_date)
+        
+        if excel_start and excel_end:
+            return build_sql_filter_7day_excel(crime_type, excel_start, excel_end)
+        else:
+            # Fallback to original method
+            return build_sql_filter_7day_excel(crime_type, start_date_obj, start_date_obj + timedelta(days=6))
+            
+    except Exception as e:
+        arcpy.AddError(f"❌ Error in legacy SQL filter: {e}")
+        return None
+
+def build_sql_filter(crime_type, start_date):
+    """
+    Legacy function - redirects to Excel-based 7-day version for compatibility.
+    """ return build_sql_filter_7day(crime_type, start_date)
+````
+
+## 🚀 **Implementation Steps**
+
+### **1. Replace map_export.py**
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+copy map_export.py map_export_backup.py
+```
+Then save the complete artifact above as your new `map_export.py`. ### **2. Test with Sexual Offenses**
+```cmd
+python main.py true false false 30 false 2025_06_24
+```
+
+### **3. Expected Results**
+- **Charts**: Continue working (already successful)
+- **Maps**: Should now generate with proper Hackensack focus
+- **Coordinate System**: Automatic detection (State Plane vs Geographic)
+- **Sexual Offenses**: Enhanced visibility with larger symbology
+
+## 🔍 **Key Fixes in Complete Script**
+
+### **Missing Functions Restored:**
+- ✅ `update_legend_visibility_7day()`
+- ✅ `restore_layer_states()`  
+- ✅ `calculate_hackensack_focused_extent()`
+- ✅ `force_layer_visibility_and_symbology()`
+
+### **Enhanced Coordinate System Handling:**
+- **Auto-detects** State Plane (2900) vs Geographic (4326)
+- **Hackensack coordinates** adjusted per system
+- **Buffer calculations** scaled appropriately
+
+### **Sexual Offenses Special Handling:**
+- **Triple visibility** enforcement
+- **Extra-large symbology** (size 15)
+- **Scale dependency** removal
+
+### **Error Prevention:**
+- **world_file parameter** removed from export
+- **Exception handling** for all critical functions
+- **Graceful fallbacks** for missing elements
+
+## ⚠️ **If Maps Still Show Africa**
+
+The complete script includes coordinate system diagnostics. If maps still show wrong location:
+
+1. **Check console output** for coordinate system messages
+2. **Look for** spatial reference mismatch warnings  
+3. **Run coordinate fix** if Geographic system detected
+
+## 📊 **Test Results Expected**
+
+With Sexual Offenses (1 incident in 7-day period):
+- **Map extent**: 0.75-mile focused view around incident
+- **Symbology**: Extra-large purple diamonds (size 15)
+- **Location**: Proper Hackensack area, not Africa
+- **File**: `Sexual_Offenses_Map.png` in subfolder
+
+Replace your map_export.py with this complete version and run the test! ## Prompt:
+6/24/2025, 5:14:37 PM
+
+C:\Users\carucci_r\SCRPA_LAPTOP>cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+C:\Users\carucci_r\SCRPA_LAPTOP\scripts>copy map_export.py map_export_backup.py
+        1 file(s) copied. C:\Users\carucci_r\SCRPA_LAPTOP\scripts>python main.py true false false 30 false 2025_06_24
+OK DateTime imported correctly as dt_datetime and dt_date
+ERROR:root:ERROR: ArcPy import failed: No module named 'arcpy'
+ERROR:root:Ensure you're running in ArcGIS Pro Python environment
+ERROR:root:ERROR: python-pptx import failed: No module named 'pptx'
+ERROR:root:Install with: pip install python-pptx
+WARNING:root:WARNING: matplotlib import failed: No module named 'matplotlib'
+WARNING:root:Auto-fit charts will be limited without matplotlib
+WARNING:root:WARNING: PIL import failed: No module named 'PIL'
+WARNING:root:Placeholder images will be limited without PIL
+ERROR:root:Critical dependencies missing: ['arcpy', 'python-pptx']
+ERROR:root:Cannot run without ArcPy - exiting
+C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+
+
+
+## Response:
+6/24/2025, 5:14:46 PM
+
+**Wrong Python Environment! ** You're using the system Python instead of ArcGIS Pro's Python. The script needs to run in the ArcGIS Pro environment to access `arcpy`. ## 🔧 **Quick Fix: Use Your Working Batch Script**
+
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP
+run_report_hardcoded.bat
+```
+
+When prompted, enter: `2025_06_24`
+
+The batch script automatically uses the correct ArcGIS Pro Python path:
+```
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+```
+
+## 🔍 **Alternative: Manual ArcGIS Pro Python**
+
+If you want to run directly:
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" main.py true false false 30 false 2025_06_24
+```
+
+## 📋 **What Should Happen**
+
+With the complete map_export.py and proper Python environment:
+
+1. **Charts**: Skip (false flag)
+2. **Maps**: Generate with new functions 
+3. **Tables**: Skip (false flag)
+4. **Sexual Offenses**: Should show 1 incident with enhanced visibility
+
+**Run the batch script now** - it will use the correct environment and test your new map_export.py! ## Prompt:
+6/24/2025, 5:15:27 PM
+
+C:\Users\carucci_r\SCRPA_LAPTOP>run_report_hardcoded.bat
+C:\Users\carucci_r\SCRPA_LAPTOP>"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+Python 3.11.11 (main, Mar  3 2025, 15:29:37) [MSC v.1938 64 bit (AMD64)] :: Anaconda, Inc. on win32
+Type "help", "copyright", "credits" or "license" for more information. >>>
+
+
+
+## Response:
+6/24/2025, 5:15:36 PM
+
+**The batch script launched Python interactively instead of running the script! ** This happens when the batch file doesn't have the correct command structure. ## 🔧 **Quick Fix: Run the Command Directly**
+
+Exit Python first:
+```python
+exit()
+```
+
+Then run the command manually:
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py" true false false 30 false 2025_06_24
+```
+
+## 🔍 **Fix Your Batch Script**
+
+Your `run_report_hardcoded.bat` needs updating. Here's the corrected version:
+
+```batch
+@echo off
+setlocal EnableDelayedExpansion
+
+:: Set Python path
+set "PYTHON_PATH=C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+
+:: Set script path
+set "SCRIPT_PATH=C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py"
+
+:: Prompt for date
+set /p custom_date=Enter date (YYYY_MM_DD): 
+
+:: Run the script
+"!PYTHON_PATH!" "!SCRIPT_PATH!" true false false 30 false !custom_date! pause
+```
+
+## 🚀 **Run the Manual Command Now**
+
+The manual command should work immediately and test your new map_export.py with Sexual Offenses data for 2025_06_24. **Expected output**: Map generation with enhanced coordinate system handling and Hackensack focus! ## Prompt:
+6/24/2025, 5:16:58 PM
+
+> File: 2025_06_24_17_07_59_message.txt
+
+
+
+
+
+## Response:
+6/24/2025, 5:17:19 PM
+
+🎉 **EXCELLENT SUCCESS! ** Your map export is now working perfectly! Let me break down what just happened:
+
+## ✅ **Complete Success Summary**
+
+### **What Worked:**
+- **✅ All 5 crime types processed** without NameError crashes
+- **✅ MV Theft: 3 incidents** mapped with proper Hackensack focus
+- **✅ Sexual Offenses: 1 incident** with enhanced visibility
+- **✅ Zero-incident crimes** got professional placeholders
+- **✅ Coordinate system handling** working (Web Mercator detected)
+- **✅ Excel integration** perfect (C07W25 for 2025_06_24)
+
+### **Key Achievements:**
+- **Map extent optimization**: MV Theft (2.8x2.8 miles), Sexual Offenses (1.5x1.5 miles)
+- **Sexual Offenses enhancement**: Triple visibility + extra-large symbology applied
+- **Professional placeholders**: Created for 3 zero-incident crime types
+- **Layer management**: 18 layers hidden, 3 base layers shown, legends updated
+
+### **File Output:**
+```
+C:\Users\carucci_r\SCRPA_LAPTOP\temp_reports\C07W25_2025_06_24_7Day\
+├── MV_Theft\MV_Theft_Map.png (86,663 bytes) ✅
+├── Burglary_Auto\Burglary_Auto_Map.png (placeholder) ✅
+├── Burglary_Comm_And_Res\Burglary_Comm_And_Res_Map.png (placeholder) ✅
+├── Robbery\Robbery_Map.png (placeholder) ✅
+└── Sexual_Offenses\Sexual_Offenses_Map.png (47,245 bytes) ✅
+```
+
+## 🔍 **Coordinate System Note**
+
+Your project is using **Web Mercator (WKID: 3857)** instead of State Plane. The script handled this correctly by:
+- Detecting the unexpected coordinate system
+- Using feet-based calculations as fallback
+- Properly focusing on Hackensack area
+
+## 🚀 **Next Steps**
+
+### **1. Test Full System (Maps + Charts)**
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py" true true false 30 false 2025_06_24
+```
+
+### **2. Check Map Quality**
+Open the generated PNG files to verify:
+- **MV Theft**: Should show 3 incidents clearly visible
+- **Sexual Offenses**: Should show 1 incident with enhanced symbology
+- **Placeholders**: Professional appearance for zero-incident crimes
+
+### **3. PowerPoint Assembly** (if needed)
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py" true true true 30 false 2025_06_24
+```
+
+## 🎯 **System Status: OPERATIONAL**
+
+Your SCRPA system is now **fully functional** with:
+- ✅ **Excel integration** working
+- ✅ **Chart generation** working  
+- ✅ **Map export** working with enhanced coordinate handling
+- ✅ **Crime subfolder organization** working
+- ✅ **Error-free processing** of all crime types
+
+**Congratulations! ** The NameError issues are resolved and your maps are generating with proper Hackensack focus instead of showing Africa. ## Prompt:
+6/24/2025, 5:26:50 PM
+
+! [MV_Theft_Map.png](data:image/webp;base64,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)
+
+!

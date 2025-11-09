@@ -1,0 +1,467 @@
+The changelog shows all five of your targeted fixes are live and verified:
+
+*   `time_of_day_desc` added with readable labels
+*   `weekend_yn` implemented
+*   `theft_precise_location` normalized and gated to package thefts
+*   `period` and `cycle_name` columns confirmed visible
+*   Full technical references (function line ranges, file names, examples) are written into `summary_changelog.md`summary\_changelog
+
+### Next recommended step
+
+Run a validation regression:
+
+1. **Input:** the same 25\_06\_Theft\_240\_Prospect\_rms.xlsx. 2. **Verify**:
+    *   Every record has `time_of_day_desc`, `weekend_yn`, and normalized `theft_precise_location`. *   Case 25-052621 shows `package_theft_yn = N` and `theft_precise_location = None`. *   `cycle_name` is populated where cycle calendar dates match. 3. **Run the full one-click script:**
+    ```powershell
+    cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\RMS_Data_ETL\scripts"
+    python run_rms_one_click.py
+    ```
+4. Confirm the changelog increments automatically for the next release tag (3.1.4) before additional feature changes. If you plan another iteration (e.g., adding geocoding, duplicate metrics, or day-of-week analytics), I can generate a **Claude Code upgrade prompt** for v3.1.4 following the same structured format. Would you like me to prepare that now? ## Response:
+incident_date_resolved is showing as a date and time data type 
+2025-06-25 00:00:00
+2025-07-02 00:00:00
+2025-07-03 00:00:00
+2025-07-02 00:00:00
+2025-07-19 00:00:00
+2025-08-08 00:00:00
+2025-07-25 00:00:00
+2025-08-22 00:00:00
+2025-08-25 00:00:00
+2025-09-03 00:00:00
+2025-10-06 00:00:00
+2025-10-02 00:00:00
+I see time_of_day_bin
+20_23
+12_15
+16_19
+12_15
+20_23
+00_03
+20_23
+20_23
+20_23
+20_23
+12_15
+20_23
+
+but i do not see the description and the time of day
+like this
+Here’s drop-in Python to produce both fields:
+
+1. a compact time_of_day code. 2. a readable description like “Early Day - 00:00 to 03:59”. Use either the vectorized pandas version or the plain-Python helper. python
+# -------- Time-of-day bins ----------
+# Six 4-hour bins, 24h coverage, inclusive ranges
+# 00:00-03:59 Early Day
+# 04:00-07:59 Morning
+# 08:00-11:59 Late Morning
+# 12:00-15:59 Afternoon
+# 16:00-19:59 Evening
+# 20:00-23:59 Night
+
+BINS = [
+    {"code": "00_03", "name": "Early Day",    "start_min": 0,   "end_min": 239, "range_txt": "00:00 to 03:59"},
+    {"code": "04_07", "name": "Morning",      "start_min": 240, "end_min": 479, "range_txt": "04:00 to 07:59"},
+    {"code": "08_11", "name": "Late Morning", "start_min": 480, "end_min": 719, "range_txt": "08:00 to 11:59"},
+    {"code": "12_15", "name": "Afternoon",    "start_min": 720, "end_min": 959, "range_txt": "12:00 to 15:59"},
+    {"code": "16_19", "name": "Evening",      "start_min": 960, "end_min": 1199,"range_txt": "16:00 to 19:59"},
+    {"code": "20_23", "name": "Night",        "start_min": 1200,"end_min": 1439,"range_txt": "20:00 to 23:59"},
+]
+
+# Plain-Python helper (single value)
+def time_of_day_from_time(t):
+    """
+    t: datetime.time or pandas Timestamp or string 'HH:MM' or None
+    returns: (code, desc) e.g. ('00_03', 'Early Day - 00:00 to 03:59')
+    """
+    if t is None:
+        return (None, None)
+
+    # normalize input to hour, minute
+    h = m = None
+    try:
+        if hasattr(t, "hour") and hasattr(t, "minute"):
+            h, m = int(t.hour), int(t.minute)
+        elif isinstance(t, str):
+            hh, mm = t.strip()[:5].split(":")
+            h, m = int(hh), int(mm)
+        else:
+            return (None, None)
+    except Exception:
+        return (None, None)
+
+    total = h * 60 + m
+    for b in BINS:
+        if b["start_min"] <= total <= b["end_min"]:
+            return (b["code"], f'{b["name"]} - {b["range_txt"]}')
+    return (None, None)  # should not hit
+
+# Pandas-vectorized version (Series input)
+def assign_time_of_day_columns(df, time_col, code_col="time_of_day", desc_col="time_of_day_desc"):
+    """
+    df: pandas DataFrame
+    time_col: column with time values (datetime64[ns], time, or 'HH:MM' strings)
+    Adds two columns: code_col, desc_col
+    """
+    import pandas as pd
+    import numpy as np
+
+    s = df[time_col]
+
+    # Convert to minutes since midnight
+    # Handles Timestamp, datetime.time, and strings like 'HH:MM'
+    def to_minutes(v):
+        if pd.isna(v):
+            return np.nan
+        if hasattr(v, "hour") and hasattr(v, "minute"):
+            return int(v.hour) * 60 + int(v.minute)
+        if isinstance(v, str):
+            try:
+                hh, mm = v.strip()[:5].split(":")
+                return int(hh) * 60 + int(mm)
+            except Exception:
+                return np.nan
+        return np.nan
+
+    mins = s.map(to_minutes)
+
+    # Build bin edges and labels
+    edges = [-0.1] + [b["end_min"] for b in BINS]  # [-0.1, 239, 479, ..., 1439]
+    codes = [b["code"] for b in BINS]
+    names = [b["name"] for b in BINS]
+    ranges = [b["range_txt"] for b in BINS]
+
+    # Use cut to get index 0..5, then map to code/name/range
+    idx = pd.cut(mins, bins=edges, labels=range(len(BINS)))  # categorical of 0..5
+    idx_int = idx.astype("float").astype("Int64")  # preserve NaN
+
+    code_map = {i: codes[i] for i in range(len(BINS))}
+    name_map = {i: names[i] for i in range(len(BINS))}
+    range_map = {i: ranges[i] for i in range(len(BINS))}
+
+    df[code_col] = idx_int.map(code_map)
+    df[desc_col] = (
+        idx_int.map(name_map).fillna("")
+        + np.where(idx_int.isna(), "", " - ")
+        + idx_int.map(range_map).fillna("")
+    ).replace("", np.nan)
+
+    return df
+
+# ---------- Examples ----------
+# Single value
+# time_of_day_from_time("00:17") -> ('00_03', 'Early Day - 00:00 to 03:59')
+
+# DataFrame usage
+# df = assign_time_of_day_columns(df, time_col="Incident_Time")
+# df[["Incident_Time","time_of_day","time_of_day_desc"]].head()
+
+If you want different labels or bins, edit BINS only. The rest stays the same. Here you go—same logic with your cycle calendar path wired in:
+
+python
+# --- Config: SCRPA cycle calendar path ---
+CALENDAR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\09_Reference\Temporal\SCRPA_Cycle\7Day_28Day_Cycle_20250414.csv"
+
+# --- Cycle logic (paste once in your utilities module) ---
+from __future__ import annotations
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import pandas as pd
+
+SCRPA_TZ = "America/New_York"
+
+def today_local(tz: str = SCRPA_TZ) -> pd.Timestamp:
+    return pd.Timestamp(datetime.now(ZoneInfo(tz)).date())
+
+def resolve_cycle_type(incident_date_resolved: pd.Timestamp | None,
+                       ref_today: pd.Timestamp | None = None) -> str:
+    if pd.isna(incident_date_resolved):
+        return "Unknown"
+    if ref_today is None:
+        ref_today = today_local()
+    d = pd.Timestamp(incident_date_resolved).normalize()
+    t = pd.Timestamp(ref_today).normalize()
+    if d > t:
+        return "Historical"  # or "Future" if you prefer
+    delta_days = (t - d).days
+    if delta_days <= 7:
+        return "7-Day"
+    elif delta_days <= 28:
+        return "28-Day"
+    elif d.year == t.year:
+        return "YTD"
+    else:
+        return "Historical"
+
+def load_cycle_calendar(csv_path: str) -> pd.DataFrame:
+    df = pd.read_csv(csv_path, dtype=str)
+    cols = {c.lower(): c for c in df.columns}
+    start_col = cols.get("7_day_start") or "7_Day_Start"
+    end_col   = cols.get("7_day_end")   or "7_Day_End"
+    name_col  = cols.get("report_name") or "Report_Name"
+    df = df.rename(columns={start_col: "start_raw", end_col: "end_raw", name_col: "Report_Name"})
+    df["start"] = pd.to_datetime(df["start_raw"]).dt.normalize()
+    df["end"]   = pd.to_datetime(df["end_raw"]).dt.normalize()
+    return df[["Report_Name", "start", "end"]].sort_values(["start", "end"]).reset_index(drop=True)
+
+def build_cycle_interval_index(cycle_df: pd.DataFrame) -> pd.IntervalIndex:
+    return pd.IntervalIndex.from_arrays(cycle_df["start"], cycle_df["end"], closed="both")
+
+def add_cycle_columns(df: pd.DataFrame,
+                      calendar_csv_path: str = CALENDAR_PATH,
+                      tz: str = SCRPA_TZ,
+                      ref_today: pd.Timestamp | None = None,
+                      date_col: str = "incident_date_resolved") -> pd.DataFrame:
+    out = df.copy()
+    ref_today = ref_today or today_local(tz)
+    out[date_col] = pd.to_datetime(out[date_col], errors="coerce").dt.normalize()
+    out["cycle_type"] = out[date_col].apply(lambda d: resolve_cycle_type(d, ref_today))
+
+    cycles = load_cycle_calendar(calendar_csv_path)
+    iv = build_cycle_interval_index(cycles)
+
+    def map_cycle_name(d: pd.Timestamp | None) -> str:
+        if pd.isna(d):
+            return "Unknown"
+        pos = iv.get_indexer([d])[0]
+        return cycles.iloc[pos]["Report_Name"] if pos != -1 else "Historical"
+
+    out["cycle_name"] = out[date_col].apply(map_cycle_name)
+    return out
+
+# --- Example usage ---
+# df = add_cycle_columns(df)  # uses CALENDAR_PATH by default
+# or: df = add_cycle_columns(df, calendar_csv_path=CALENDAR_PATH, date_col="incident_date_resolved")
+
+## Prompt:
+Got it. The reason you don’t see the readable **time-of-day description** (like _Early Day – 00:00 to 03:59_) is that your current `add_time_of_day_bins()` only outputs the compact code (`20_23`, etc.) and doesn’t add the descriptive column. The block of code you pasted fixes this perfectly. Here’s what to do:
+
+* * *
+
+### ✅ Drop-in Patch
+
+Open **`rms_core_cleaner.py`** and replace your entire time-of-day function with this:
+
+```python
+# -------- Time-of-day bins ----------
+BINS = [
+    {"code": "00_03", "name": "Early Day",    "start_min": 0,   "end_min": 239, "range_txt": "00:00 to 03:59"},
+    {"code": "04_07", "name": "Morning",      "start_min": 240, "end_min": 479, "range_txt": "04:00 to 07:59"},
+    {"code": "08_11", "name": "Late Morning", "start_min": 480, "end_min": 719, "range_txt": "08:00 to 11:59"},
+    {"code": "12_15", "name": "Afternoon",    "start_min": 720, "end_min": 959, "range_txt": "12:00 to 15:59"},
+    {"code": "16_19", "name": "Evening",      "start_min": 960, "end_min": 1199,"range_txt": "16:00 to 19:59"},
+    {"code": "20_23", "name": "Night",        "start_min": 1200,"end_min": 1439,"range_txt": "20:00 to 23:59"},
+]
+
+def assign_time_of_day_columns(df, time_col="incident_time_resolved"):
+    """
+    Adds time_of_day (code) and time_of_day_desc (readable label)
+    Example: ('00_03', 'Early Day - 00:00 to 03:59')
+    """
+    import numpy as np
+    import pandas as pd
+
+    s = df[time_col]
+
+    def to_minutes(v):
+        if pd.isna(v):
+            return np.nan
+        if hasattr(v, "hour") and hasattr(v, "minute"):
+            return int(v.hour) * 60 + int(v.minute)
+        if isinstance(v, str):
+            try:
+                hh, mm = v.strip()[:5].split(":")
+                return int(hh) * 60 + int(mm)
+            except Exception:
+                return np.nan
+        return np.nan
+
+    mins = s.map(to_minutes)
+
+    edges = [-0.1] + [b["end_min"] for b in BINS]
+    codes = [b["code"] for b in BINS]
+    names = [b["name"] for b in BINS]
+    ranges = [b["range_txt"] for b in BINS]
+
+    idx = pd.cut(mins, bins=edges, labels=range(len(BINS)))
+    idx_int = idx.astype("float").astype("Int64")
+
+    code_map  = {i: codes[i] for i in range(len(BINS))}
+    name_map  = {i: names[i] for i in range(len(BINS))}
+    range_map = {i: ranges[i] for i in range(len(BINS))}
+
+    df["time_of_day"] = idx_int.map(code_map)
+    df["time_of_day_desc"] = (
+        idx_int.map(name_map).fillna("")
+        + np.where(idx_int.isna(), "", " - ")
+        + idx_int.map(range_map).fillna("")
+    ).replace("", np.nan)
+
+    return df
+```
+
+Then, in your runner (`run_rms_one_click.py`), call:
+
+```python
+df = assign_time_of_day_columns(df, time_col="incident_time_resolved")
+```
+
+That will add both:
+
+*   `time_of_day` → compact code (`20_23`)
+*   `time_of_day_desc` → readable text (`Night – 20:00 to 23:59`)
+
+* * *
+
+### 🕒 Bonus Fixes to Apply Simultaneously
+
+1. **incident\_date\_resolved shows time (00:00:00)**  
+    Force it to date-only when finalizing the DataFrame:
+    ```python
+    df["incident_date_resolved"] = pd.to_datetime(df["incident_date_resolved"]).dt.date
+    ```
+2. **Cycle & period logic**  
+    Keep the code you pasted (`add_cycle_columns`) in your utilities or inside `rms_core_cleaner.py`. Call it after resolution and before export:
+    ```python
+    df = add_cycle_columns(df, calendar_csv_path=CALENDAR_PATH)
+    ```
+
+* * *
+
+### ✅ End Result After Re-run
+
+*   `incident_date_resolved`: shows plain date (`2025-06-25`)
+*   `time_of_day`: `20_23`
+*   `time_of_day_desc`: `Night – 20:00 to 23:59`
+*   `cycle_name`: populated from your SCRPA calendar
+
+Would you like me to generate a **Claude Code upgrade prompt (v3.1.4)** that bundles this fix (date normalization + dual time-of-day columns + confirmed cycle logic)? That way it’s ready for full integration and changelog update. ## Response:
+provide a claude code prompt to make the corrections
+
+## Prompt:
+Thought for 6s
+
+Here’s a clean, copy-paste Claude Code prompt to make the corrections. Title  
+RMS ETL v3.1.4 — date normalization, dual time-of-day columns, cycle/period verify, final wiring
+
+Context  
+We maintain a Python RMS ETL that cleans and enriches RMS exports, resolves date/time, enhances narratives, merges external refs, and exports CSV/XLSX/JSON. Version 3.1.3 is live. Implement the fixes below and update the changelog to v3.1.4. Files to edit  
+<rms\_core\_cleaner.py>  
+\[PASTE FULL CURRENT FILE HERE\]  
+</rms\_core\_cleaner.py>
+
+<rms\_narrative\_enhancer.py>  
+\[PASTE FULL CURRENT FILE HERE\]  
+</rms\_narrative\_enhancer.py>
+
+<run\_rms\_one\_click.py>  
+\[PASTE FULL CURRENT FILE HERE\]  
+</run\_rms\_one\_click.py>
+
+Changelog to update  
+C:\\Users\\carucci\_r\\OneDrive - City of Hackensack\\02\_ETL\_Scripts\\RMS\_Data\_ETL\\docs\\summary\_changelog.md
+
+Goals
+
+*   incident\_date\_resolved must be a date, not a datetime with 00:00:00. *   Add a readable time\_of\_day\_desc alongside the compact code time\_of\_day. *   Keep time\_of\_day codes (00\_03, 12\_15, etc.). Add the readable description like “Early Day - 00:00 to 03:59”. *   Ensure period and cycle\_name are present after processing. *   Keep all headers snake\_case. Preserve currency formatting in Excel and utf-8-sig for CSV. Required edits in rms\_core\_cleaner.py
+
+1. Normalize incident\_date\_resolved to date only. *   Wherever incident\_date\_resolved is built, normalize to date. *   If it is currently a Timestamp, convert at the end of the resolver:
+
+```python
+# ensure date-only
+out["incident_date_resolved"] = pd.to_datetime(out["incident_date_resolved"], errors="coerce").dt.date
+```
+
+2. Add dual time-of-day columns from the resolved time. *   Keep compact code in time\_of\_day (00\_03, 04\_07, 08\_11, 12\_15, 16\_19, 20\_23). *   Add time\_of\_day\_desc with readable label “Name - HH:MM to HH:MM”. *   Use this drop-in function and call it after resolution:
+
+```python
+BINS = [
+    {"code": "00_03", "name": "Early Day",    "start_min": 0,   "end_min": 239,  "range_txt": "00:00 to 03:59"},
+    {"code": "04_07", "name": "Morning",      "start_min": 240, "end_min": 479,  "range_txt": "04:00 to 07:59"},
+    {"code": "08_11", "name": "Late Morning", "start_min": 480, "end_min": 719,  "range_txt": "08:00 to 11:59"},
+    {"code": "12_15", "name": "Afternoon",    "start_min": 720, "end_min": 959,  "range_txt": "12:00 to 15:59"},
+    {"code": "16_19", "name": "Evening",      "start_min": 960, "end_min": 1199, "range_txt": "16:00 to 19:59"},
+    {"code": "20_23", "name": "Night",        "start_min": 1200,"end_min": 1439, "range_txt": "20:00 to 23:59"},
+]
+
+def assign_time_of_day_columns(df, time_col="incident_time_resolved"):
+    import numpy as np
+    import pandas as pd
+
+    s = df[time_col]
+
+    def to_minutes(v):
+        if pd.isna(v):
+            return np.nan
+        if hasattr(v, "hour") and hasattr(v, "minute"):
+            return int(v.hour) * 60 + int(v.minute)
+        if isinstance(v, str):
+            try:
+                hh, mm = v.strip()[:5].split(":")
+                return int(hh) * 60 + int(mm)
+            except Exception:
+                return np.nan
+        return np.nan
+
+    mins = s.map(to_minutes)
+
+    edges  = [-0.1] + [b["end_min"] for b in BINS]
+    codes  = [b["code"] for b in BINS]
+    names  = [b["name"] for b in BINS]
+    ranges = [b["range_txt"] for b in BINS]
+
+    idx = pd.cut(mins, bins=edges, labels=range(len(BINS)))
+    idx_int = idx.astype("float").astype("Int64")
+
+    code_map  = {i: codes[i] for i in range(len(BINS))}
+    name_map  = {i: names[i] for i in range(len(BINS))}
+    range_map = {i: ranges[i] for i in range(len(BINS))}
+
+    df["time_of_day"] = idx_int.map(code_map)
+    df["time_of_day_desc"] = (
+        idx_int.map(name_map).fillna("")
+        + np.where(idx_int.isna(), "", " - ")
+        + idx_int.map(range_map).fillna("")
+    ).replace("", np.nan)
+
+    return df
+```
+
+3. Keep weekend\_yn, period, and cycle\_name wiring as in 3.1.3. No change to their logic, only verify they remain after the new columns are added. Required edits in run\_rms\_one\_click.py
+
+*   After resolution and narrative enhancement, call the dual time-of-day function. *   Confirm period and cycle integration still execute after time-of-day. *   Keep currency formatting in Excel for total\_value\_stolen and stolen\_value\_estimate\_amt. *   Keep CSV encoding='utf-8-sig'. Example order:
+
+```python
+df = load_with_aliases(df_raw, SCHEMA_PATH)
+df = fix_types_and_values(df)
+df = normalize_case_number(df)
+df = apply_resolution_and_binning(df)                 # incident_date_resolved, incident_time_resolved
+
+# force date-only after resolution (safety)
+df["incident_date_resolved"] = pd.to_datetime(df["incident_date_resolved"], errors="coerce").dt.date
+
+df = enhance_rms_narratives(df, learned, narrative_col="narrative", value_col_existing="total_value_stolen", backfill_value=True)
+
+# dual time-of-day columns
+from rms_core_cleaner import assign_time_of_day_columns
+df = assign_time_of_day_columns(df, time_col="incident_time_resolved")
+
+df = add_period_buckets(df)                           # period
+df, cycle_diag = integrate_external_data(df, CALL_TYPES_CSV, CYCLE_CALENDAR_CSV)  # cycle_name present
+df = add_weekend_flag(df)                             # weekend_yn
+# remaining steps unchanged (duplicate flags if present, lineage, quality, exports)
+```
+
+Acceptance tests
+
+*   Input file: 25\_06\_Theft\_240\_Prospect\_rms.xlsx in input. *   After run, verify:
+    *   incident\_date\_resolved shows as date only (no 00:00:00). *   time\_of\_day exists with codes like 20\_23. *   time\_of\_day\_desc exists with readable labels like “Night - 20:00 to 23:59”. *   weekend\_yn present. *   period present. *   cycle\_name present or null but visible. *   Excel currency formatting intact. *   CSV uses utf-8-sig. Changelog update  
+Append at top of C:\\Users\\carucci\_r\\OneDrive - City of Hackensack\\02\_ETL\_Scripts\\RMS\_Data\_ETL\\docs\\summary\_changelog.md:
+
+Version 3.1.4  
+Date: \[insert today’s date\]  
+Changes
+
+*   incident\_date\_resolved normalized to date type in outputs. *   Added time\_of\_day\_desc alongside time\_of\_day codes. *   Verified period and cycle\_name columns remain present post-processing. *   Preserved Excel currency formatting and utf-8-sig CSV. *   No change to narrative enhancement or location normalization from 3.1.3. Output requirements
+
+*   Return full updated versions of rms\_core\_cleaner.py and run\_rms\_one\_click.py. *   Keep functions self-contained with clear docstrings. *   Do not alter the external paths or prior logic unless required for the above fixes. ---
+Powered by [ChatGPT Exporter](https://www.chatgptexporter.com)

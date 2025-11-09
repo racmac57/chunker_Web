@@ -1,0 +1,737 @@
+exit /b 1
+)
+
+REM ================================
+REM Parse args
+REM Usage:
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat input.html
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+REM ================================
+set "ARG=%~1"
+if "%ARG%"=="" goto :single_default
+if /I "%ARG%"=="ALL" goto :bulk
+
+REM Single file provided as arg
+set "IN_HTML=%ARG%"
+if not exist "%BASE%\%IN_HTML%" (
+  echo [ERROR] Input HTML not found: "%BASE%\%IN_HTML%"
+  exit /b 1
+)
+call :ConvertOne "%BASE%\%IN_HTML%"
+goto :eof
+
+:single_default
+REM Single file - default HTML
+if not exist "%BASE%\%DEFAULT_HTML%" (
+  echo [ERROR] Default HTML not found: "%BASE%\%DEFAULT_HTML%"
+  echo         Provide a file name or place the default in the folder. exit /b 1
+)
+call :ConvertOne "%BASE%\%DEFAULT_HTML%"
+goto :eof
+
+:bulk
+echo [INFO] Bulk mode: converting all *.html in:
+echo        "%BASE%"
+pushd "%BASE%" >nul
+set "COUNT=0"
+for %%F in ("*.html") do (
+  call :ConvertOne "%%~fF"
+  set /a COUNT+=1
+)
+popd >nul
+echo [DONE] Converted !COUNT! HTML file(s). goto :eof
+
+REM ================================
+REM Subroutine: ConvertOne
+REM ================================
+:ConvertOne
+set "IN_FULL=%~1"
+set "OUT_FULL=%IN_FULL:.html=.pdf%"
+set "OUT_FULL=%OUT_FULL:.htm=.pdf%"
+
+REM Convert Windows path to file:// URL (replace backslashes with slashes)
+set "IN_URL=%IN_FULL:\=/%"
+
+echo. echo [CONVERT] 
+echo   IN : %IN_FULL%
+echo   OUT: %OUT_FULL%
+
+REM Notes:
+REM - Landscape is controlled by CSS in the HTML: @page { size: Letter landscape; }
+REM - --print-to-pdf-no-header removes Chrome/Edge header/footer
+REM - --virtual-time-budget helps ensure chart/table rendering completes
+
+"%EDGE%" ^
+  --headless ^
+  --disable-gpu ^
+  --run-all-compositor-stages-before-draw ^
+  --virtual-time-budget=40000 ^
+  --print-to-pdf="%OUT_FULL%" ^
+  --print-to-pdf-no-header ^
+  "file:///%IN_URL%" ^
+  --disable-extensions ^
+  --disable-dev-shm-usage ^
+  --window-size=1920,1080
+
+if exist "%OUT_FULL%" (
+  echo [OK]  Created: %OUT_FULL%
+) else (
+  echo [FAIL] Could not create: %OUT_FULL%
+)
+exit /b 0
+```
+
+### How to use
+
+*   **Default file (your wide HTML):**
+    ```
+    Export_SCRPA_HTML_to_PDF_Landscape.bat
+    ```
+*   **Specific file:**
+    ```
+    Export_SCRPA_HTML_to_PDF_Landscape.bat "SCRPA_Combined_Executive_Summary_MyEdit.html"
+    ```
+*   **Bulk convert all HTML in the folder:**
+    ```
+    Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+    ```
+
+### Quick prompt (for your future HTML exports)
+
+Make sure your HTML has this (already present in your v2 file):
+
+```html
+<style>
+  @page { size: Letter landscape; margin: 0.6in; }
+  .wrap { max-width: 11in; padding: 0.5in; }
+</style>
+```
+
+Want me to add an alternate output name pattern (e.g., appending `_landscape.pdf`) or time-stamped filenames? I can tweak the .bat to do that. ## Prompt:
+the .bat is saved "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\convert_with_edge.cmd"
+"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\convert_with_edge.ps1"
+when I run the .bat the command prompt window closes right away
+
+## Response:
+Thought for 9s
+
+Got you. The window is closing because the batch exits on the first error (like Edge not found, bad path, or missing input) when launched by double-click. Here’s a **more robust .bat** that:
+
+*   Prints clear status messages
+*   Detects Microsoft Edge reliably
+*   Handles default/specific/ALL file modes
+*   **Pauses** at the end so you can see any errors
+
+### Replace your .bat with this
+
+Save over:  
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat`
+
+```bat
+@echo on
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM =========================================================
+REM SCRPA HTML -> PDF (Landscape) Converter
+REM Location: 06_Output
+REM =========================================================
+
+REM ---- Folder containing the HTML/PDF outputs ----
+set "BASE=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+REM ---- Default HTML (your wide landscape version) ----
+set "DEFAULT_HTML=scrpa_combined_exec_summary_landscape_v2.html"
+
+echo [INFO] Working folder: "%BASE%"
+if not exist "%BASE%" (
+  echo [ERROR] BASE folder not found. goto :halt
+)
+
+REM =========================================================
+REM Find Microsoft Edge (Chromium)
+REM =========================================================
+set "EDGE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+if not exist "%EDGE%" set "EDGE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+if not exist "%EDGE%" for %%E in (msedge.exe) do set "EDGE=%%~$PATH:E"
+if not exist "%EDGE%" (
+  echo [WARN] Microsoft Edge not found via standard paths. echo [WARN] Will try fallback helper: convert_with_edge.cmd (if present). set "USE_FALLBACK=1"
+) else (
+  echo [INFO] Edge found: "%EDGE%"
+  set "USE_FALLBACK=0"
+)
+
+REM =========================================================
+REM Parse args
+REM Usage:
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat input.html
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+REM =========================================================
+set "ARG=%~1"
+
+if "%ARG%"=="" (
+  set "IN_HTML=%BASE%\%DEFAULT_HTML%"
+  echo [INFO] No argument provided. Using default: "%IN_HTML%"
+  if not exist "%IN_HTML%" (
+    echo [ERROR] Default HTML not found. Please place "%DEFAULT_HTML%" in:
+    echo         "%BASE%"
+    goto :halt
+  )
+  call :ConvertOne "%IN_HTML%"
+  goto :halt
+)
+
+if /I "%ARG%"=="ALL" (
+  echo [INFO] Bulk mode: converting ALL *.html files in "%BASE%"
+  pushd "%BASE%" >nul
+  set "COUNT=0"
+  for %%F in ("*.html") do (
+    call :ConvertOne "%%~fF"
+    set /a COUNT+=1
+  )
+  popd >nul
+  echo [DONE] Converted !COUNT! HTML file(s). goto :halt
+)
+
+REM One specific file provided
+set "IN_HTML=%ARG%"
+if not exist "%IN_HTML%" (
+  REM If user passed just a file name, try in BASE
+  if exist "%BASE%\%ARG%" (
+    set "IN_HTML=%BASE%\%ARG%"
+  ) else (
+    echo [ERROR] Input HTML not found:
+    echo         "%ARG%"
+    goto :halt
+  )
+)
+call :ConvertOne "%IN_HTML%"
+goto :halt
+
+REM =========================================================
+REM Subroutine: ConvertOne
+REM =========================================================
+:ConvertOne
+set "IN_FULL=%~1"
+
+REM Derive OUTPUT path (same folder, PDF extension)
+set "OUT_FULL=%IN_FULL%"
+set "OUT_FULL=%OUT_FULL:.html=.pdf%"
+set "OUT_FULL=%OUT_FULL:.htm=.pdf%"
+
+echo. echo [CONVERT] 
+echo    IN : %IN_FULL%
+echo   OUT : %OUT_FULL%
+
+if "%USE_FALLBACK%"=="1" (
+  if exist "%BASE%\convert_with_edge.cmd" (
+    echo [INFO] Using fallback helper: convert_with_edge.cmd
+    call "%BASE%\convert_with_edge.cmd" "%IN_FULL%" "%OUT_FULL%"
+    if exist "%OUT_FULL%" (
+      echo [OK]  Created: %OUT_FULL%
+    ) else (
+      echo [FAIL] Fallback helper failed to create: %OUT_FULL%
+    )
+    goto :eof
+  ) else (
+    echo [ERROR] Edge not found and fallback helper not present:
+    echo         "%BASE%\convert_with_edge.cmd"
+    goto :eof
+  )
+)
+
+REM Normal path: use Edge directly in headless mode
+REM Note: Landscape is defined in your HTML via:
+REM   @page { size: Letter landscape; margin: 0.6in; }
+start /wait "" "%EDGE%" ^
+  --headless ^
+  --disable-gpu ^
+  --run-all-compositor-stages-before-draw ^
+  --virtual-time-budget=40000 ^
+  --print-to-pdf="%OUT_FULL%" ^
+  --print-to-pdf-no-header ^
+  "file:///%IN_FULL:\=/%" ^
+  --no-first-run ^
+  --no-default-browser-check ^
+  --disable-extensions ^
+  --disable-dev-shm-usage ^
+  --window-size=1920,1080
+
+if exist "%OUT_FULL%" (
+  echo [OK]  Created: %OUT_FULL%
+) else (
+  echo [FAIL] Could not create: %OUT_FULL%
+)
+goto :eof
+
+REM =========================================================
+REM Finish (keep window open for review)
+REM =========================================================
+:halt
+echo. echo ---------------------------------------------------------
+echo  Done. Review messages above for any errors. echo  Close this window or press any key to exit. echo ---------------------------------------------------------
+pause >nul
+endlocal
+exit /b 0
+```
+
+### Quick checks if it still closes immediately
+
+1. **Run from a Command Prompt** (so you can see output):
+    *   Press `Win+R`, type `cmd`, press Enter. *   Run:
+        ```
+        "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+        ```
+2. Confirm your input HTML is present (e.g., `scrpa_combined_exec_summary_landscape_v2.html`) in `06_Output`. 3. Make sure **Edge** is installed (the script auto-detects it). 4. If Edge isn’t found, the script falls back to your `convert_with_edge.cmd` (already in that folder). Want me to add a timestamp suffix to the output filename (e.g., `_2025-10-20_2305.pdf`) or always append `_landscape.pdf`? I can give you a variant. ## Prompt:
+Microsoft Windows [Version 10.0.26220.6972]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+
+C:\Users\carucci_r>setlocal EnableExtensions EnableDelayedExpansion
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM SCRPA HTML -> PDF (Landscape) Converter
+
+C:\Users\carucci_r>REM Location: 06_Output
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM ---- Folder containing the HTML/PDF outputs ----
+
+C:\Users\carucci_r>set "BASE=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+
+C:\Users\carucci_r>REM ---- Default HTML (your wide landscape version) ----
+
+C:\Users\carucci_r>set "DEFAULT_HTML=scrpa_combined_exec_summary_landscape_v2.html"
+
+C:\Users\carucci_r>echo [INFO] Working folder: "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+[INFO] Working folder: "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+
+C:\Users\carucci_r>if not exist "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output" (
+echo [ERROR] BASE folder not found. goto :halt
+)
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM Find Microsoft Edge (Chromium)
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>set "EDGE=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+
+C:\Users\carucci_r>if not exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" set "EDGE=C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+
+C:\Users\carucci_r>if not exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" for %E in (msedge.exe) do set "EDGE=%~$PATH:E"
+. was unexpected at this time. C:\Users\carucci_r>  echo [WARN] Will try fallback helper: convert_with_edge.cmd (if present). C:\Users\carucci_r>
+
+## Response:
+Thought for 11s
+
+Good catch — that error (`. was unexpected at this time.`) happens because the `for` line used single `%` instead of `%%` inside a batch file. I’ve rewritten the script to be more robust and to avoid that pitfall. It also uses `where msedge.exe` as a backup to find Edge. ### Replace your BAT with this (safe & verbose)
+
+Save over:  
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat`
+
+```bat
+@echo on
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM =========================================================
+REM SCRPA HTML -> PDF (Landscape) Converter
+REM Location: 06_Output
+REM =========================================================
+
+REM ---- Folder containing the HTML/PDF outputs ----
+set "BASE=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+REM ---- Default HTML (your wide landscape version) ----
+set "DEFAULT_HTML=scrpa_combined_exec_summary_landscape_v2.html"
+
+echo [INFO] Working folder: "%BASE%"
+if not exist "%BASE%" (
+  echo [ERROR] BASE folder not found. goto :halt
+)
+
+REM =========================================================
+REM Find Microsoft Edge (Chromium) robustly
+REM =========================================================
+set "EDGE="
+
+REM 1) Standard x86 path
+if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
+  set "EDGE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+)
+REM 2) Standard 64-bit path
+if not defined EDGE if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
+  set "EDGE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+)
+REM 3) PATH lookup (where)
+if not defined EDGE (
+  for /f "delims=" %%E in ('where msedge.exe 2^>nul') do (
+    if not defined EDGE set "EDGE=%%E"
+  )
+)
+
+if not defined EDGE (
+  echo [WARN] Microsoft Edge not found via standard paths or PATH. echo [WARN] Will try fallback helper: convert_with_edge.cmd (if present). set "USE_FALLBACK=1"
+) else (
+  echo [INFO] Edge found: "%EDGE%"
+  set "USE_FALLBACK=0"
+)
+
+REM =========================================================
+REM Parse args
+REM Usage:
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat input.html
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+REM =========================================================
+set "ARG=%~1"
+
+if "%ARG%"=="" (
+  set "IN_HTML=%BASE%\%DEFAULT_HTML%"
+  echo [INFO] No argument provided. Using default: "%IN_HTML%"
+  if not exist "%IN_HTML%" (
+    echo [ERROR] Default HTML not found. Please place "%DEFAULT_HTML%" in:
+    echo         "%BASE%"
+    goto :halt
+  )
+  call :ConvertOne "%IN_HTML%"
+  goto :halt
+)
+
+if /I "%ARG%"=="ALL" (
+  echo [INFO] Bulk mode: converting ALL *.html files in "%BASE%"
+  pushd "%BASE%" >nul
+  set "COUNT=0"
+  for %%F in ("*.html") do (
+    call :ConvertOne "%%~fF"
+    set /a COUNT+=1
+  )
+  popd >nul
+  echo [DONE] Converted !COUNT! HTML file(s). goto :halt
+)
+
+REM One specific file provided
+set "IN_HTML=%ARG%"
+if not exist "%IN_HTML%" (
+  REM If user passed just a file name, try in BASE
+  if exist "%BASE%\%ARG%" (
+    set "IN_HTML=%BASE%\%ARG%"
+  ) else (
+    echo [ERROR] Input HTML not found:
+    echo         "%ARG%"
+    goto :halt
+  )
+)
+call :ConvertOne "%IN_HTML%"
+goto :halt
+
+REM =========================================================
+REM Subroutine: ConvertOne
+REM =========================================================
+:ConvertOne
+set "IN_FULL=%~1"
+
+REM Derive OUTPUT path (same folder, PDF extension)
+set "OUT_FULL=%IN_FULL%"
+set "OUT_FULL=%OUT_FULL:.html=.pdf%"
+set "OUT_FULL=%OUT_FULL:.htm=.pdf%"
+
+echo. echo [CONVERT] 
+echo    IN : %IN_FULL%
+echo   OUT : %OUT_FULL%
+
+if "%USE_FALLBACK%"=="1" (
+  if exist "%BASE%\convert_with_edge.cmd" (
+    echo [INFO] Using fallback helper: convert_with_edge.cmd
+    call "%BASE%\convert_with_edge.cmd" "%IN_FULL%" "%OUT_FULL%"
+    if exist "%OUT_FULL%" (
+      echo [OK]  Created: %OUT_FULL%
+    ) else (
+      echo [FAIL] Fallback helper failed to create: %OUT_FULL%
+    )
+    goto :eof
+  ) else (
+    echo [ERROR] Edge not found and fallback helper not present:
+    echo         "%BASE%\convert_with_edge.cmd"
+    goto :eof
+  )
+)
+
+REM Normal path: use Edge directly in headless mode
+REM Note: Landscape is defined in your HTML via:
+REM   @page { size: Letter landscape; margin: 0.6in; }
+start /wait "" "%EDGE%" ^
+  --headless ^
+  --disable-gpu ^
+  --run-all-compositor-stages-before-draw ^
+  --virtual-time-budget=40000 ^
+  --print-to-pdf="%OUT_FULL%" ^
+  --print-to-pdf-no-header ^
+  "file:///%IN_FULL:\=/%" ^
+  --no-first-run ^
+  --no-default-browser-check ^
+  --disable-extensions ^
+  --disable-dev-shm-usage ^
+  --window-size=1920,1080
+
+if exist "%OUT_FULL%" (
+  echo [OK]  Created: %OUT_FULL%
+) else (
+  echo [FAIL] Could not create: %OUT_FULL%
+)
+goto :eof
+
+REM =========================================================
+REM Finish (keep window open for review)
+REM =========================================================
+:halt
+echo. echo ---------------------------------------------------------
+echo  Done. Review messages above for any errors. echo  Close this window or press any key to exit. echo ---------------------------------------------------------
+pause >nul
+endlocal
+exit /b 0
+```
+
+### Why this fixes your issue
+
+*   Uses `%%E` in `for` loops (required inside .bat files). *   Avoids chaining `if not exist ... for ...` on one line (which can trigger that “.\` was unexpected” error). *   Adds a reliable Edge discovery using `where msedge.exe`. *   Keeps the window open (`pause`) so you can see the exact error if anything else goes wrong. ### Quick test
+
+Run from Command Prompt:
+
+```
+"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+```
+
+If you want to convert a specific file:
+
+```
+...Export_SCRPA_HTML_to_PDF_Landscape.bat "C:\path\to\your_file.html"
+```
+
+Or bulk:
+
+```
+...Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+```
+
+Want me to modify it so outputs append `_landscape.pdf` or a timestamp (e.g., `_2025-10-21_2330.pdf`)? I can drop that in next. ## Prompt:
+Microsoft Windows [Version 10.0.26220.6972]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+
+C:\Users\carucci_r>setlocal EnableExtensions EnableDelayedExpansion
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM SCRPA HTML -> PDF (Landscape) Converter
+
+C:\Users\carucci_r>REM Location: 06_Output
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM ---- Folder containing the HTML/PDF outputs ----
+
+C:\Users\carucci_r>set "BASE=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+
+C:\Users\carucci_r>REM ---- Default HTML (your wide landscape version) ----
+
+C:\Users\carucci_r>set "DEFAULT_HTML=scrpa_combined_exec_summary_landscape_v2.html"
+
+C:\Users\carucci_r>echo [INFO] Working folder: "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+[INFO] Working folder: "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+
+C:\Users\carucci_r>if not exist "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output" (
+echo [ERROR] BASE folder not found. goto :halt
+)
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>REM Find Microsoft Edge (Chromium) robustly
+
+C:\Users\carucci_r>REM =========================================================
+
+C:\Users\carucci_r>set "EDGE="
+
+C:\Users\carucci_r>REM 1) Standard x86 path
+
+C:\Users\carucci_r>if exist "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" (set "EDGE=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" )
+
+C:\Users\carucci_r>REM 2) Standard 64-bit path
+
+C:\Users\carucci_r>if not defined EDGE if exist "C:\Program Files\Microsoft\Edge\Application\msedge.exe" (set "EDGE=C:\Program Files\Microsoft\Edge\Application\msedge.exe" )
+
+C:\Users\carucci_r>REM 3) PATH lookup (where)
+
+C:\Users\carucci_r>if not defined EDGE (for /F "delims=" %E in ('where msedge.exe 2>nul') do (if not defined EDGE set "EDGE=%E" ) )
+. was unexpected at this time. C:\Users\carucci_r>  echo [WARN] Will try fallback helper: convert_with_edge.cmd (if present). C:\Users\carucci_r>
+
+## Response:
+Thought for 16s
+
+Thanks for the console dump—that “`. was unexpected at this time.`” is coming from the `where` lookup inside a parenthesized block. Easiest fix: **remove the PATH lookup entirely** (it’s optional) and rely on the two standard Edge install paths, with a clean fallback to your helper. Please replace your BAT with this simplified, robust version:
+
+### Save over
+
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat`
+
+```bat
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM =========================================================
+REM SCRPA HTML -> PDF (Landscape) Converter
+REM Location: 06_Output
+REM =========================================================
+
+REM ---- Folder containing the HTML/PDF outputs ----
+set "BASE=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+REM ---- Default HTML (your wide landscape version) ----
+set "DEFAULT_HTML=scrpa_combined_exec_summary_landscape_v2.html"
+
+echo [INFO] Working folder: "%BASE%"
+if not exist "%BASE%" (
+  echo [ERROR] BASE folder not found. goto :halt
+)
+
+REM =========================================================
+REM Find Microsoft Edge (Chromium) - standard paths only
+REM =========================================================
+set "EDGE="
+if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" set "EDGE=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
+if not defined EDGE if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" set "EDGE=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"
+
+if not defined EDGE (
+  echo [WARN] Microsoft Edge not found in standard locations. echo [WARN] Will try fallback helper: convert_with_edge.cmd (if present). set "USE_FALLBACK=1"
+) else (
+  echo [INFO] Edge found: "%EDGE%"
+  set "USE_FALLBACK=0"
+)
+
+REM =========================================================
+REM Parse args
+REM Usage:
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat input.html
+REM   Export_SCRPA_HTML_to_PDF_Landscape.bat ALL
+REM =========================================================
+set "ARG=%~1"
+
+if "%ARG%"=="" (
+  set "IN_HTML=%BASE%\%DEFAULT_HTML%"
+  echo [INFO] No argument provided. Using default: "%IN_HTML%"
+  if not exist "%IN_HTML%" (
+    echo [ERROR] Default HTML not found. Please place "%DEFAULT_HTML%" in:
+    echo         "%BASE%"
+    goto :halt
+  )
+  call :ConvertOne "%IN_HTML%"
+  goto :halt
+)
+
+if /I "%ARG%"=="ALL" (
+  echo [INFO] Bulk mode: converting ALL *.html files in "%BASE%"
+  pushd "%BASE%" >nul
+  set "COUNT=0"
+  for %%F in ("*.html") do (
+    call :ConvertOne "%%~fF"
+    set /a COUNT+=1
+  )
+  popd >nul
+  echo [DONE] Converted !COUNT! HTML file(s). goto :halt
+)
+
+REM One specific file provided
+set "IN_HTML=%ARG%"
+if not exist "%IN_HTML%" (
+  REM If user passed just a file name, try in BASE
+  if exist "%BASE%\%ARG%" (
+    set "IN_HTML=%BASE%\%ARG%"
+  ) else (
+    echo [ERROR] Input HTML not found:
+    echo         "%ARG%"
+    goto :halt
+  )
+)
+call :ConvertOne "%IN_HTML%"
+goto :halt
+
+REM =========================================================
+REM Subroutine: ConvertOne
+REM =========================================================
+:ConvertOne
+set "IN_FULL=%~1"
+
+REM Derive OUTPUT path (same folder, PDF extension)
+set "OUT_FULL=%IN_FULL%"
+set "OUT_FULL=%OUT_FULL:.html=.pdf%"
+set "OUT_FULL=%OUT_FULL:.htm=.pdf%"
+
+echo. echo [CONVERT] 
+echo    IN : %IN_FULL%
+echo   OUT : %OUT_FULL%
+
+if "%USE_FALLBACK%"=="1" (
+  if exist "%BASE%\convert_with_edge.cmd" (
+    echo [INFO] Using fallback helper: convert_with_edge.cmd
+    call "%BASE%\convert_with_edge.cmd" "%IN_FULL%" "%OUT_FULL%"
+    if exist "%OUT_FULL%" (
+      echo [OK]  Created: %OUT_FULL%
+    ) else (
+      echo [FAIL] Fallback helper failed to create: %OUT_FULL%
+    )
+    goto :eof
+  ) else (
+    echo [ERROR] Edge not found and fallback helper not present:
+    echo         "%BASE%\convert_with_edge.cmd"
+    goto :eof
+  )
+)
+
+REM Normal path: use Edge directly in headless mode
+REM Note: Landscape is defined in your HTML via:
+REM   @page { size: Letter landscape; margin: 0.6in; }
+start /wait "" "%EDGE%" ^
+  --headless ^
+  --disable-gpu ^
+  --run-all-compositor-stages-before-draw ^
+  --virtual-time-budget=40000 ^
+  --print-to-pdf="%OUT_FULL%" ^
+  --print-to-pdf-no-header ^
+  "file:///%IN_FULL:\=/%" ^
+  --no-first-run ^
+  --no-default-browser-check ^
+  --disable-extensions ^
+  --disable-dev-shm-usage ^
+  --window-size=1920,1080
+
+if exist "%OUT_FULL%" (
+  echo [OK]  Created: %OUT_FULL%
+) else (
+  echo [FAIL] Could not create: %OUT_FULL%
+)
+goto :eof
+
+REM =========================================================
+REM Finish (keep window open for review)
+REM =========================================================
+:halt
+echo. echo ---------------------------------------------------------
+echo  Done. Review messages above for any errors. echo  Close this window or press any key to exit. echo ---------------------------------------------------------
+pause >nul
+endlocal
+exit /b 0
+```
+
+### Run it
+
+Open **Command Prompt** and run:
+
+```
+"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output\Export_SCRPA_HTML_to_PDF_Landscape.bat"
+```
+
+(Or pass a specific HTML filename, or `ALL`.) * * *
+
+If Edge is installed in a **non-standard path**, tell me where it lives and I’ll hard-code it. If you’d prefer to keep the PATH lookup, I can give you a version that safely uses `where` without the parentheses quirk. ---
+Powered by [ChatGPT Exporter](https://www.chatgptexporter.com)

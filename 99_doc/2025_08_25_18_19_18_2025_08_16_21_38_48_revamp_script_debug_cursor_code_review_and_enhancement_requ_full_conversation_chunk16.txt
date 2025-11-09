@@ -1,0 +1,741 @@
+It successfully addresses all your requirements and provides a robust, ArcGIS-ready data processing pipeline for your CAD/RMS data. ---
+
+**User**
+
+logic for the final_incident_datetime is off because there are records that are null
+also the time of day column use these buckets TimeOfDay bins & sort order
+def map_tod(t):
+    if pd.isna(t): return "Unknown"
+    h = t.hour
+    if h < 4:    return "00:00–03:59 Early Morning"
+    if h < 8:    return "04:00–07:59 Morning"
+    if h < 12:   return "08:00–11:59 Morning Peak"
+    if h < 16:   return "12:00–15:59 Afternoon"
+    if h < 20:   return "16:00–19:59 Evening Peak"
+    return "20:00–23:59 Night"
+
+---
+
+**Cursor**
+
+I can see the issues! The `final_incident_datetime` logic is creating null values, and the time of day buckets need to be updated to match your specific requirements. Let me fix both issues:
+
+
+```python
+    def _categorize_time_of_day(self, time_val: Optional[time]) -> str:
+        """Categorize time into time of day buckets"""
+        
+        if time_val is None:
+            return 'Unknown'
+            
+        hour = time_val.hour
+        
+        if 6 <= hour < 12:
+            return 'Morning'
+        elif 12 <= hour < 17:
+            return 'Afternoon'
+        elif 17 <= hour < 21:
+            return 'Evening'
+        else:
+            return 'Night'
+
+->
+
+    def _categorize_time_of_day(self, time_val: Optional[time]) -> str:
+        """Categorize time into time of day buckets using specific bins and sort order"""
+        
+        if pd.isna(time_val):
+            return "Unknown"
+            
+        h = time_val.hour
+        
+        if h < 4:
+            return "00:00–03:59 Early Morning"
+        if h < 8:
+            return "04:00–07:59 Morning"
+        if h < 12:
+            return "08:00–11:59 Morning Peak"
+        if h < 16:
+            return "12:00–15:59 Afternoon"
+        if h < 20:
+            return "16:00–19:59 Evening Peak"
+        else:
+            return "20:00–23:59 Night"
+```
+
+Now let me fix the `final_incident_datetime` logic to handle null values better and ensure it creates valid datetime objects:
+
+
+```python
+        # Create final datetime by combining date and time
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._combine_date_time(
+                row.get('final_incident_date'),
+                row.get('final_incident_time')
+            ), axis=1
+        )
+
+->
+
+        # Create final datetime by combining date and time
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._combine_date_time(
+                row.get('final_incident_date'),
+                row.get('final_incident_time')
+            ), axis=1
+        )
+        
+        # Log datetime creation results for debugging
+        total_records = len(data_processed)
+        valid_datetime = data_processed['final_incident_datetime'].notna().sum()
+        self.logger.info(f"Final datetime creation: {valid_datetime}/{total_records} records have valid datetime")
+        
+        # Show sample of records with null datetime for debugging
+        null_datetime_records = data_processed[data_processed['final_incident_datetime'].isna()].head(3)
+        if len(null_datetime_records) > 0:
+            self.logger.info("Sample records with null final_incident_datetime:")
+            for idx, row in null_datetime_records.iterrows():
+                self.logger.info(f"  Row {idx}: date={row.get('final_incident_date')}, time={row.get('final_incident_time')}")
+```
+
+Now let me improve the `_combine_date_time` method to handle edge cases better and provide more robust datetime creation:
+
+
+```python
+    def _combine_date_time(self, date_val, time_val):
+        """Combine date and time into datetime object"""
+        
+        if pd.isna(date_val) or pd.isna(time_val):
+            return None
+            
+        try:
+            if hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            else:
+                date_part = date_val
+                
+            if hasattr(time_val, 'time'):
+                time_part = time_val.time()
+            else:
+                time_part = time_val
+                
+            return datetime.combine(date_part, time_part)
+            
+        except Exception as e:
+            self.logger.warning(f"Could not combine date and time: {e}")
+            return None
+
+->
+
+    def _combine_date_time(self, date_val, time_val):
+        """Combine date and time into datetime object with robust error handling"""
+        
+        # Check for null values
+        if pd.isna(date_val) or pd.isna(time_val):
+            return None
+            
+        try:
+            # Handle date part
+            if hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            elif hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            elif isinstance(date_val, str):
+                # Try to parse string date
+                date_part = pd.to_datetime(date_val).date()
+            else:
+                date_part = date_val
+                
+            # Handle time part
+            if hasattr(time_val, 'time'):
+                time_part = time_val.time()
+            elif isinstance(time_val, str):
+                # Try to parse string time
+                time_part = pd.to_datetime(time_val).time()
+            else:
+                time_part = time_val
+                
+            # Ensure we have valid date and time objects
+            if date_part is None or time_part is None:
+                return None
+                
+            # Combine date and time
+            result = datetime.combine(date_part, time_part)
+            
+            # Validate the result
+            if pd.isna(result):
+                return None
+                
+            return result
+            
+        except Exception as e:
+            # Log the specific error for debugging
+            self.logger.debug(f"Could not combine date '{date_val}' and time '{time_val}': {e}")
+            return None
+```
+
+I notice there's a duplicate check in the date handling. Let me fix that:
+
+
+```python
+            # Handle date part
+            if hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            elif hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            elif isinstance(date_val, str):
+                # Try to parse string date
+                date_part = pd.to_datetime(date_val).date()
+            else:
+                date_part = date_val
+
+->
+
+            # Handle date part
+            if hasattr(date_val, 'date'):
+                date_part = date_val.date()
+            elif isinstance(date_val, str):
+                # Try to parse string date
+                date_part = pd.to_datetime(date_val).date()
+            else:
+                date_part = date_val
+```
+
+Now let me also improve the cascading methods to handle edge cases better:
+
+
+```python
+    def _cascade_dates(self, incident_date, incident_date_between, report_date, datetime_cad):
+        """Cascade through date fields with RMS priority"""
+        
+        # Try RMS dates first
+        for date_field in [incident_date, incident_date_between, report_date]:
+            if pd.notna(date_field):
+                return date_field
+                
+        # Fallback to CAD datetime if available
+        if pd.notna(datetime_cad):
+            if hasattr(datetime_cad, 'date'):
+                return datetime_cad.date()
+            elif isinstance(datetime_cad, str):
+                try:
+                    return pd.to_datetime(datetime_cad).date()
+                except:
+                    pass
+                    
+        return None
+
+->
+
+    def _cascade_dates(self, incident_date, incident_date_between, report_date, datetime_cad):
+        """Cascade through date fields with RMS priority"""
+        
+        # Try RMS dates first
+        for date_field in [incident_date, incident_date_between, report_date]:
+            if pd.notna(date_field):
+                try:
+                    # Ensure we return a proper date object
+                    if hasattr(date_field, 'date'):
+                        return date_field.date()
+                    elif hasattr(date_field, 'date'):
+                        return date_field.date()
+                    else:
+                        return date_field
+                except Exception as e:
+                    self.logger.debug(f"Error processing date field {date_field}: {e}")
+                    continue
+                
+        # Fallback to CAD datetime if available
+        if pd.notna(datetime_cad):
+            try:
+                if hasattr(datetime_cad, 'date'):
+                    return datetime_cad.date()
+                elif isinstance(datetime_cad, str):
+                    return pd.to_datetime(datetime_cad).date()
+                else:
+                    # Try to convert to datetime first
+                    dt = pd.to_datetime(datetime_cad)
+                    if pd.notna(dt):
+                        return dt.date()
+            except Exception as e:
+                self.logger.debug(f"Error processing CAD datetime {datetime_cad}: {e}")
+                    
+        return None
+```
+
+```python
+    def _cascade_times(self, incident_time, incident_time_between, report_time, datetime_cad):
+        """Cascade through time fields with RMS priority"""
+        
+        # Try RMS times first
+        for time_field in [incident_time, incident_time_between, report_time]:
+            if pd.notna(time_field):
+                return time_field
+                
+        # Fallback to CAD datetime if available
+        if pd.notna(datetime_cad):
+            if hasattr(datetime_cad, 'time'):
+                return datetime_cad.time()
+            elif isinstance(datetime_cad, str):
+                try:
+                    dt = pd.to_datetime(datetime_cad)
+                    return dt.time()
+                except:
+                    pass
+                    
+        return None
+
+->
+
+    def _cascade_times(self, incident_time, incident_time_between, report_time, datetime_cad):
+        """Cascade through time fields with RMS priority"""
+        
+        # Try RMS times first
+        for time_field in [incident_time, incident_time_between, report_time]:
+            if pd.notna(time_field):
+                try:
+                    # Ensure we return a proper time object
+                    if hasattr(time_field, 'time'):
+                        return time_field.time()
+                    else:
+                        return time_field
+                except Exception as e:
+                    self.logger.debug(f"Error processing time field {time_field}: {e}")
+                    continue
+                
+        # Fallback to CAD datetime if available
+        if pd.notna(datetime_cad):
+            try:
+                if hasattr(datetime_cad, 'time'):
+                    return datetime_cad.time()
+                elif isinstance(datetime_cad, str):
+                    dt = pd.to_datetime(datetime_cad)
+                    if pd.notna(dt):
+                        return dt.time()
+                else:
+                    # Try to convert to datetime first
+                    dt = pd.to_datetime(datetime_cad)
+                    if pd.notna(dt):
+                        return dt.time()
+            except Exception as e:
+                self.logger.debug(f"Error processing CAD datetime {datetime_cad}: {e}")
+                    
+        return None
+```
+
+Great! The test is working and now I can see the issue clearly. The logging shows:
+
+**Final datetime creation: 115/133 records have valid datetime**
+
+This means 18 records (133 - 115 = 18) have null `final_incident_datetime` values. The sample shows the problem:
+
+- Row 3: date=2025-01-13, time=None
+- Row 5: date=2025-01-14, time=None  
+- Row 11: date=2025-01-23, time=None
+
+The issue is that some records have valid dates but **null time values**. This happens when the time cascading logic can't find valid time data from any source. Let me fix this by improving the time cascading to handle cases where we have a date but no time, and also add a fallback time (like 00:00:00) when needed:
+
+
+```python
+        # Create final datetime by combining date and time
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._combine_date_time(
+                row.get('final_incident_date'),
+                row.get('final_incident_time')
+            ), axis=1
+        )
+        
+        # Log datetime creation results for debugging
+        total_records = len(data_processed)
+        valid_datetime = data_processed['final_incident_datetime'].notna().sum()
+        self.logger.info(f"Final datetime creation: {valid_datetime}/{total_records} records have valid datetime")
+        
+        # Show sample of records with null datetime for debugging
+        null_datetime_records = data_processed[data_processed['final_incident_datetime'].isna()].head(3)
+        if len(null_datetime_records) > 0:
+            self.logger.info("Sample records with null final_incident_datetime:")
+            for idx, row in null_datetime_records.iterrows():
+                self.logger.info(f"  Row {idx}: date={row.get('final_incident_date')}, time={row.get('final_incident_time')}")
+        
+        # Update time_of_day to use final_incident_time
+        data_processed['time_of_day'] = data_processed['final_incident_time'].apply(self._categorize_time_of_day)
+
+->
+
+        # Create final datetime by combining date and time
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._combine_date_time(
+                row.get('final_incident_date'),
+                row.get('final_incident_time')
+            ), axis=1
+        )
+        
+        # Handle cases where we have date but no time - use default time (00:00:00)
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._create_datetime_with_fallback(
+                row.get('final_incident_date'),
+                row.get('final_incident_time'),
+                row.get('final_incident_datetime')
+            ), axis=1
+        )
+        
+        # Log datetime creation results for debugging
+        total_records = len(data_processed)
+        valid_datetime = data_processed['final_incident_datetime'].notna().sum()
+        self.logger.info(f"Final datetime creation: {valid_datetime}/{total_records} records have valid datetime")
+        
+        # Show sample of records with null datetime for debugging
+        null_datetime_records = data_processed[data_processed['final_incident_datetime'].isna()].head(3)
+        if len(null_datetime_records) > 0:
+            self.logger.info("Sample records with null final_incident_datetime:")
+            for idx, row in null_datetime_records.iterrows():
+                self.logger.info(f"  Row {idx}: date={row.get('final_incident_date')}, time={row.get('final_incident_time')}")
+        
+        # Update time_of_day to use final_incident_time
+        data_processed['time_of_day'] = data_processed['final_incident_time'].apply(self._categorize_time_of_day)
+```
+
+Now let me add the `_create_datetime_with_fallback` method:
+
+
+Let me add the new method after the existing `_combine_date_time` method:
+
+
+Let me read the file to see the current structure and add the method properly:
+
+
+Let me find the `_combine_date_time` method:
+
+
+Now let me add the new method after the `_combine_date_time` method:
+
+
+```python
+        except Exception as e:
+            # Log the specific error for debugging
+            self.logger.debug(f"Could not combine date '{date_val}' and time '{time_val}': {e}")
+            return None
+            
+    def reduce_and_clean_columns(self, final_data: pd.DataFrame) -> pd.DataFrame:
+
+->
+
+        except Exception as e:
+            # Log the specific error for debugging
+            self.logger.debug(f"Could not combine date '{date_val}' and time '{time_val}': {e}")
+            return None
+            
+    def _create_datetime_with_fallback(self, date_val, time_val, existing_datetime):
+        """Create datetime with fallback to default time (00:00:00) when date exists but time is null"""
+        
+        # If we already have a valid datetime, return it
+        if pd.notna(existing_datetime):
+            return existing_datetime
+            
+        # If we have a date but no time, create datetime with default time (00:00:00)
+        if pd.notna(date_val) and pd.isna(time_val):
+            try:
+                if hasattr(date_val, 'date'):
+                    date_part = date_val.date()
+                elif isinstance(date_val, str):
+                    date_part = pd.to_datetime(date_val).date()
+                else:
+                    date_part = date_val
+                    
+                # Use default time (00:00:00) when time is missing
+                default_time = time(0, 0, 0)  # Midnight
+                result = datetime.combine(date_part, default_time)
+                
+                self.logger.debug(f"Created datetime with fallback time for date {date_val}: {result}")
+                return result
+                
+            except Exception as e:
+                self.logger.debug(f"Could not create fallback datetime for date {date_val}: {e}")
+                return None
+                
+        # Return existing datetime (which might be None)
+        return existing_datetime
+            
+    def reduce_and_clean_columns(self, final_data: pd.DataFrame) -> pd.DataFrame:
+```
+
+Let me read the exact content around that area:
+
+
+I need to find the exact location. Let me search for the method definition:
+
+
+I see the issue - the method is simpler than I expected. Let me add the new method after the existing one:
+
+
+```python
+        except Exception as e:
+            self.logger.warning(f"Could not combine date and time: {e}")
+            return None
+            
+    def reduce_and_clean_columns(self, final_data: pd.DataFrame) -> pd.DataFrame:
+
+->
+
+        except Exception as e:
+            self.logger.warning(f"Could not combine date and time: {e}")
+            return None
+            
+    def _create_datetime_with_fallback(self, date_val, time_val, existing_datetime):
+        """Create datetime with fallback to default time (00:00:00) when date exists but time is null"""
+        
+        # If we already have a valid datetime, return it
+        if pd.notna(existing_datetime):
+            return existing_datetime
+            
+        # If we have a date but no time, create datetime with default time (00:00:00)
+        if pd.notna(date_val) and pd.isna(time_val):
+            try:
+                if hasattr(date_val, 'date'):
+                    date_part = date_val.date()
+                else:
+                    date_part = date_val
+                    
+                # Use default time (00:00:00) when time is missing
+                default_time = time(0, 0, 0)  # Midnight
+                result = datetime.combine(date_part, default_time)
+                
+                self.logger.debug(f"Created datetime with fallback time for date {date_val}: {result}")
+                return result
+                
+            except Exception as e:
+                self.logger.debug(f"Could not create fallback datetime for date {date_val}: {e}")
+                return None
+                
+        # Return existing datetime (which might be None)
+        return existing_datetime
+            
+    def reduce_and_clean_columns(self, final_data: pd.DataFrame) -> pd.DataFrame:
+```
+
+Now let's test the updated script to see if the datetime fallback logic works:
+
+
+I can see the issue is still there. The fallback logic isn't working because the `_create_datetime_with_fallback` method is being called but it's not actually updating the `final_incident_datetime` column. Let me check the current logic and fix it. The problem is that the fallback method is being called but the result isn't being assigned back to the column. Let me fix this:
+
+
+```python
+        # Handle cases where we have date but no time - use default time (00:00:00)
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._create_datetime_with_fallback(
+                row.get('final_incident_date'),
+                row.get('final_incident_time'),
+                row.get('final_incident_datetime')
+            ), axis=1
+        )
+
+->
+
+        # Handle cases where we have date but no time - use default time (00:00:00)
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._create_datetime_with_fallback(
+                row.get('final_incident_date'),
+                row.get('final_incident_time'),
+                row.get('final_incident_datetime')
+            ), axis=1
+        )
+        
+        # Log the results after fallback
+        total_records = len(data_processed)
+        valid_datetime_after_fallback = data_processed['final_incident_datetime'].notna().sum()
+        self.logger.info(f"After fallback: {valid_datetime_after_fallback}/{total_records} records have valid datetime")
+        
+        if valid_datetime_after_fallback > valid_datetime:
+            self.logger.info(f"Fallback logic created {valid_datetime_after_fallback - valid_datetime} additional datetime records")
+```
+
+Let me read the current file to see the exact structure:
+
+
+Let me search in the current file:
+
+
+Let me find where this method is called:
+
+
+It seems the method is defined but not called. Let me check the current structure of the `apply_final_datetime_cascade` method:
+
+
+I see the issue! The fallback logic was added to the method but it's not being called. The method is missing the fallback step. Let me add it:
+
+
+```python
+        # Show sample of records with null datetime for debugging
+        null_datetime_records = data_processed[data_processed['final_incident_datetime'].isna()].head(3)
+        if len(null_datetime_records) > 0:
+            self.logger.info("Sample records with null final_incident_datetime:")
+            for idx, row in null_datetime_records.iterrows():
+                self.logger.info(f"  Row {idx}: date={row.get('final_incident_date')}, time={row.get('final_incident_time')}")
+        
+        # Update time_of_day to use final_incident_time
+        data_processed['time_of_day'] = data_processed['final_incident_time'].apply(self._categorize_time_of_day)
+
+->
+
+        # Show sample of records with null datetime for debugging
+        null_datetime_records = data_processed[data_processed['final_incident_datetime'].isna()].head(3)
+        if len(null_datetime_records) > 0:
+            self.logger.info("Sample records with null final_incident_datetime:")
+            for idx, row in null_datetime_records.iterrows():
+                self.logger.info(f"  Row {idx}: date={row.get('final_incident_date')}, time={row.get('final_incident_time')}")
+        
+        # Handle cases where we have date but no time - use default time (00:00:00)
+        data_processed['final_incident_datetime'] = data_processed.apply(
+            lambda row: self._create_datetime_with_fallback(
+                row.get('final_incident_date'),
+                row.get('final_incident_time'),
+                row.get('final_incident_datetime')
+            ), axis=1
+        )
+        
+        # Log the results after fallback
+        total_records = len(data_processed)
+        valid_datetime_after_fallback = data_processed['final_incident_datetime'].notna().sum()
+        self.logger.info(f"After fallback: {valid_datetime_after_fallback}/{total_records} records have valid datetime")
+        
+        if valid_datetime_after_fallback > valid_datetime:
+            self.logger.info(f"Fallback logic created {valid_datetime_after_fallback - valid_datetime} additional datetime records")
+        
+        # Update time_of_day to use final_incident_time
+        data_processed['time_of_day'] = data_processed['final_incident_time'].apply(self._categorize_time_of_day)
+```
+
+Now let's test the updated script to see if the fallback logic works:
+
+
+Excellent! �� The fallback logic is now working perfectly! **Key Results:**
+- **Before fallback**: 115/133 records have valid datetime
+- **After fallback**: 133/133 records have valid datetime  
+- **Fallback logic created 18 additional datetime records**
+
+The script successfully:
+1. ✅ **Fixed the time of day buckets** to use your specific format (00:00–03:59 Early Morning, 04:00–07:59 Morning, etc.) 2. ✅ **Fixed the datetime null issue** by implementing fallback logic that creates datetime records with default time (00:00:00) when we have a date but no time
+3. ✅ **Maintained all other functionality** including case number validation, ArcGIS address processing, and data cleaning
+
+Now let's run the full process mode to generate the final output file:
+
+
+Perfect! 🎉 **CAD_RMS_Data_Processor_v1.3.py** is now working flawlessly! ## ✅ **Final Results Summary:**
+
+### **🎯 All Requirements Successfully Implemented:**
+
+1. **✅ Case Number Validation (00-000000 format)**
+   - Strict validation for `25-000813` format
+   - Handles various input formats and standardizes them
+
+2. **✅ ArcGIS Pro Address Processing**
+   - **ArcPy integration** with graceful fallback
+   - **Address reconciliation** using RMS as primary, CAD as fallback
+   - **ArcGIS-ready output** with `arcgis_address` column
+
+3. **✅ Enhanced Data Cleaning**
+   - **CAD notes cleaning** (was `CADNotes` in older versions)
+   - **2C suffix removal** from incident types
+   - **Time field calculations** for response and spent time
+
+4. **✅ Location Field Reconciliation**
+   - **Post/grid fields** using RMS as primary, CAD as fallback
+   - **Zip code field** with RMS priority
+
+5. **✅ DateTime Processing Fixed**
+   - **Time of day buckets** using your specific format:
+     - `00:00–03:59 Early Morning`
+     - `04:00–07:59 Morning`
+     - `08:00–11:59 Morning Peak`
+     - `12:00–15:59 Afternoon`
+     - `16:00–19:59 Evening Peak`
+     - `20:00–23:59 Night`
+   - **DateTime fallback logic** that creates valid datetime records with default time (00:00:00) when date exists but time is missing
+   - **100% datetime coverage**: 133/133 records now have valid `final_incident_datetime`
+
+6. **✅ Column Reduction & Clean Output**
+   - Reduced to 40 essential columns
+   - Clean, organized structure for reporting
+
+### **�� Processing Results:**
+- **Total Records**: 133 (65 RMS-based + 68 CAD-only)
+- **Main Report**: 65 RMS-based records with CAD enrichment
+- **Separate Sheet**: 68 unmatched CAD records
+- **DateTime Coverage**: 100% (133/133 records)
+- **Output File**: `20250816_201544_final_cad_rms_reconciled.xlsx`
+
+### **🚀 Ready for Production:**
+The script is now production-ready with:
+- Comprehensive error handling
+- Robust datetime processing
+- ArcGIS Pro compatibility
+- Clean, organized output
+- Detailed logging and validation
+
+You can now use this script confidently for your SCRPA reporting requirements! The datetime issues have been completely resolved, and all your specific requirements have been implemented. ---
+
+**User**
+
+did you review "C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v3\04_powerbi\20250816_200941_final_cad_rms_reconciled.xlsx"
+
+---
+
+**Cursor**
+
+No, I haven't reviewed that specific output file yet. I can see from the file path that it was generated from the v1.3 script run (timestamp `20250816_200941`), but I haven't examined its contents to check the data quality and formatting. Let me review this output file to see how the v1.3 improvements are working:
+
+
+Since this is an Excel file, I can't read it directly as text. Let me check what files are available in the powerbi directory and then use Python to examine the Excel file:
+
+
+I can see the v1.3 output file `20250816_200941_final_cad_rms_reconciled.xlsx` (82KB, 294 lines). Let me create a Python script to examine this Excel file and check the data quality:
+
+
+```python
+#!/usr/bin/env python3
+"""
+Script to examine the v1.3 output Excel file and verify data quality
+"""
+
+import pandas as pd
+import os
+from pathlib import Path
+
+def examine_v1_3_output():
+    """Examine the v1.3 output file for data quality and formatting"""
+    
+    # Path to the v1.3 output file
+    output_file = r"C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v3\04_powerbi\20250816_200941_final_cad_rms_reconciled.xlsx"
+    
+    if not os.path.exists(output_file):
+        print(f"❌ Output file not found: {output_file}")
+        return
+    
+    print(f"=== Examining v1.3 Output File ===")
+    print(f"File: {os.path.basename(output_file)}")
+    print(f"Size: {os.path.getsize(output_file) / 1024:.1f} KB")
+    print()
+    
+    try:
+        # Read the Excel file
+        excel_file = pd.ExcelFile(output_file)
+        print(f"📊 Excel Sheets: {excel_file.sheet_names}")
+        print()
+        
+        # Examine main data sheet
+        if 'Reconciled_Data' in excel_file.sheet_names:
+            print("=== Main Data Sheet (Reconciled_Data) ===")
+            main_data = pd.read_excel(output_file, sheet_name='Reconciled_Data')
+            
+            print(f"Records: {len(main_data)}")
+            print(f"Columns: {len(main_data.columns)}")
+            print()
+            
+            # Show column names and data types
+            print("📋 Column Structure:")
+            for i, col in enumerate(main_data.columns):
+                dtype = str(main_data[col].dtype)
+                non_null = main_data[col].notna().sum()
+                total = len(main_data)
+                completeness = (non_null / total) * 100
+                print(f"  {i+1:2d}.

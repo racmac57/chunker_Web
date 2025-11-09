@@ -1,0 +1,880 @@
+return os.path.join(REPORT_BASE_DIR, get_correct_folder_name(date_str))
+
+def get_sql_pattern_for_crime(crime_type):
+    """Get SQL pattern for specific crime type"""
+    return CRIME_SQL_PATTERNS.get(crime_type, crime_type)
+
+def sanitize_filename(text):
+    """Sanitize text for use in filenames"""
+    return (text
+            .replace(" ", "_")
+            .replace("&", "And")
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("? ", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+            .replace("-", "_"))
+
+def get_sanitized_filename(text):
+    """Alias for sanitize_filename for backward compatibility"""
+    return sanitize_filename(text)
+
+# =============================================================================
+# VALIDATION FUNCTIONS
+# =============================================================================
+
+def validate_all_paths():
+    """Validate that all paths in config.py exist and are accessible"""
+    print("🔍 VALIDATING CONFIG PATHS")
+    print("=" * 40)
+    
+    paths_to_check = {
+        "Excel Cycle File": EXCEL_CYCLE_PATH,
+        "Report Base Directory": REPORT_BASE_DIR,
+        "ArcGIS Pro Project": APR_PATH,
+        "Main PowerPoint Template": POWERPOINT_TEMPLATES.get("main", ""),
+        "7-Day PowerPoint Template": POWERPOINT_TEMPLATES.get("7day", "")
+    }
+    
+    all_valid = True
+    
+    for name, path in paths_to_check.items():
+        if path and os.path.exists(path):
+            print(f"✅ {name}")
+            print(f"   📁 {path}")
+        else:
+            print(f"❌ {name} NOT FOUND")
+            print(f"   📁 {path}")
+            all_valid = False
+        print()
+    
+    if all_valid:
+        print("🎉 ALL PATHS VALIDATED - READY TO RUN!") else:
+        print("⚠️ SOME PATHS MISSING - CHECK CONFIGURATION")
+    
+    return all_valid
+
+def quick_config_test():
+    """Quick test of all config functions"""
+    print("⚡ QUICK CONFIG TEST")
+    print("=" * 30)
+    
+    # Test Excel integration
+    test_date = date(2025, 6, 10)
+    print(f"📅 Testing with: {test_date}")
+    
+    try:
+        # Test report name lookup
+        report_name = get_excel_report_name(test_date)
+        print(f"📋 Report name: {report_name}")
+        
+        # Test folder generation
+        folder_name = get_correct_folder_name(test_date)
+        print(f"📁 Folder name: {folder_name}")
+        
+        # Test period calculation
+        start_date, end_date = get_7day_period_dates(test_date)
+        print(f"📊 7-Day period: {start_date} to {end_date}")
+        
+        # Test crime folder
+        crime_folder = get_crime_type_folder("MV Theft", "2025_06_10")
+        print(f"🚔 MV Theft folder: {crime_folder}")
+        
+        # Test standardized filename
+        standardized = get_standardized_filename("Burglary - Comm & Res")
+        print(f"📝 Standardized name: {standardized}")
+        
+        # Test CRIME_TYPES
+        print(f"🎯 Crime types: {CRIME_TYPES}")
+        
+        print("\n✅ All functions working!") return True
+            
+    except Exception as e:
+        print(f"❌ Test failed with error: {e}")
+        return False
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+if __name__ == "__main__":
+    # Run the test when this file is executed directly
+    print("🧪 CONFIG.PY STANDALONE TEST")
+    print("=" * 40)
+    quick_config_test()
+    print("\n" + "=" * 40)
+    validate_all_paths()
+````
+
+**📝 COMPLETE UPDATED CONFIG.PY**
+
+Replace your entire config.py file with the version above. This includes:
+
+**✅ NEW ADDITIONS:**
+- `CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())`  ← This fixes your main.py import error
+- `CHART_OUTPUT_DIR` for backward compatibility
+- All Excel integration functions
+- Better error handling
+
+**🧪 TEST THE FIX:**
+
+```cmd
+python -c "from config import CRIME_TYPES; print(CRIME_TYPES)"
+```
+
+**Should output:**
+```
+['MV Theft', 'Burglary - Auto', 'Burglary - Comm & Res', 'Robbery', 'Sexual Offenses']
+```
+
+**🚀 THEN TEST MAIN.PY:**
+
+```cmd
+python main.py true true false 30 false 2025_06_10
+```
+
+**🎯 WHAT THIS FIXES:**
+- Adds the missing `CRIME_TYPES` variable
+- Includes all Excel integration functions
+- Maintains backward compatibility with your existing main.py
+- Ready for full system test
+
+Save this as your new config.py and you should be good to go! 🎉
+
+
+
+## Prompt:
+6/21/2025, 3:10:16 AM
+
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>python -c "from config import CRIME_TYPES; print(CRIME_TYPES)"
+['MV Theft', 'Burglary - Auto', 'Burglary - Comm & Res', 'Robbery', 'Sexual Offenses']
+
+  File "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py", line 15, in <module>
+    from map_export import export_maps
+  File "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\map_export.py", line 10, in <module>
+    from config import get_crime_type_folder, get_sql_pattern_for_crime, LAYER_NAME_MAP, APR_PATH
+ImportError: cannot import name 'LAYER_NAME_MAP' from 'config' (C:\Users\carucci_r\SCRPA_LAPTOP\scripts\config.py)
+
+
+
+## Response:
+6/21/2025, 3:10:28 AM
+
+**🚨 Another missing import! Your map_export.py is looking for `LAYER_NAME_MAP`**
+
+**🛠️ QUICK FIX - Add LAYER_NAME_MAP to your config.py:**
+
+**Complete config.py with CRIME_TYPES** ∙ Version 2
+
+````python
+# 🕒 2025-06-21-18-35-00
+# Police_Data_Analysis/complete_config_with_crime_types
+# Author: R. A. Carucci
+# Purpose: Complete config.py with Excel integration and CRIME_TYPES for main.py compatibility
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import os
+import openpyxl
+import logging
+import sys
+from datetime import datetime, date, timedelta
+
+# =============================================================================
+# PATH CONFIGURATION - UPDATE THESE PATHS TO MATCH YOUR SYSTEM
+# =============================================================================
+
+# Excel cycle file - UPDATE THIS PATH
+EXCEL_CYCLE_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\7Day_28Day_Cycle_20250414.xlsx"
+
+# Base directory for reports - UPDATE THIS PATH
+REPORT_BASE_DIR = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Reports"
+
+# ArcGIS Pro project path - UPDATE THIS PATH
+APR_PATH = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\7_Day_Templet_SCRPA_Time_PD_BCI_LT.aprx"
+
+# Symbology layer path (if you have one) - UPDATE OR SET TO None
+SYM_LAYER_PATH = None  # Update this if you have a symbology layer file
+
+# PowerPoint templates - UPDATE THESE PATHS
+POWERPOINT_TEMPLATES = {
+    "main": r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\TimeSCRPATemplet\SCRPA_REPORT.pptx",
+    "7day": r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\7_Day_Templet_SCRPA_Time\SCRPA_REPORT.pptx"
+}
+
+# =============================================================================
+# CRIME TYPE MAPPINGS
+# =============================================================================
+
+# Crime type to folder mapping
+CRIME_FOLDER_MAPPING = {
+    "MV Theft": "MV_Theft",
+    "Burglary - Auto": "Burglary_Auto", 
+    "Burglary - Comm & Res": "Burglary_Comm_And_Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual_Offenses"
+}
+
+# For backward compatibility with existing main.py
+CRIME_TYPES = list(CRIME_FOLDER_MAPPING.keys())
+
+# For backward compatibility
+FOLDER_NAME_MAPPING = CRIME_FOLDER_MAPPING
+
+# Crime type SQL patterns for filtering data
+CRIME_SQL_PATTERNS = {
+    "MV Theft": "AUTO THEFT",
+    "Burglary - Auto": "BURGLARY AUTO",
+    "Burglary - Comm & Res": ["BURGLARY COMMERCIAL", "BURGLARY RESIDENTIAL"], 
+    "Robbery": "ROBBERY",
+    "Sexual Offenses": ["SEXUAL ASSAULT", "SEXUAL OFFENSE"]
+}
+
+# Map export suffixes (if needed for backward compatibility)
+SUFFIXES = ["7-Day", "28-Day", "YTD"]
+
+# Chart output directory (for backward compatibility)
+CHART_OUTPUT_DIR = r"C:\Users\carucci_r\OneDrive - City of Hackensack\_25_SCRPA\TIME_Based\Charts"
+
+# Layer name mapping for ArcGIS (for backward compatibility)
+LAYER_NAME_MAP = {
+    "MV Theft": "MV Theft",
+    "Burglary - Auto": "Burglary - Auto", 
+    "Burglary - Comm & Res": "Burglary - Comm & Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual Offenses"
+}
+
+# =============================================================================
+# EXCEL INTEGRATION FUNCTIONS
+# =============================================================================
+
+def get_excel_report_name(target_date):
+    """Get correct report name from Excel file with better error handling"""
+    try:
+        if isinstance(target_date, str):
+            target_date = datetime.strptime(target_date, "%Y_%m_%d").date()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+            
+        # Check if Excel file exists
+        if not os.path.exists(EXCEL_CYCLE_PATH):
+            print(f"❌ Excel file not found: {EXCEL_CYCLE_PATH}")
+            return None
+            
+        workbook = openpyxl.load_workbook(EXCEL_CYCLE_PATH, data_only=True)
+        worksheet = workbook["7Day_28Day_250414"]
+        
+        print(f"🔍 Looking for report due on: {target_date}")
+        
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            if not row[0]:  # Skip empty rows
+                continue
+                
+            report_due_date = row[0]  # Column A
+            period_start = row[1]     # Column B  
+            period_end = row[2]       # Column C
+            report_name = row[5]      # Column F
+            
+            # Convert Excel dates to Python dates
+            if isinstance(report_due_date, datetime):
+                report_due_date = report_due_date.date()
+            if isinstance(period_start, datetime):
+                period_start = period_start.date()
+            if isinstance(period_end, datetime):
+                period_end = period_end.date()
+            
+            # Debug output for June 2025 entries
+            if report_due_date and report_due_date.year == 2025 and report_due_date.month == 6:
+                print(f"📅 Found June entry: Due {report_due_date}, Period {period_start} - {period_end}, Name: {report_name}")
+            
+            # Check if target_date is the report due date (exact match)
+            if report_due_date == target_date:
+                workbook.close()
+                print(f"✅ Exact match found: {report_name}")
+                return report_name
+        
+        workbook.close()
+        print(f"❌ No exact match found for {target_date}")
+        return None
+        
+    except Exception as e:
+        print(f"Error reading Excel: {e}")
+        return None
+
+def get_excel_7day_period(target_date):
+    """Get the actual 7-day period from Excel (not calculated)"""
+    try:
+        if isinstance(target_date, str):
+            target_date = datetime.strptime(target_date, "%Y_%m_%d").date()
+        elif isinstance(target_date, datetime):
+            target_date = target_date.date()
+            
+        if not os.path.exists(EXCEL_CYCLE_PATH):
+            print(f"❌ Excel file not found: {EXCEL_CYCLE_PATH}")
+            return None, None
+            
+        workbook = openpyxl.load_workbook(EXCEL_CYCLE_PATH, data_only=True)
+        worksheet = workbook["7Day_28Day_250414"]
+        
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            if not row[0]:
+                continue
+                
+            report_due_date = row[0]  # Column A
+            period_start = row[1]     # Column B  
+            period_end = row[2]       # Column C
+            
+            # Convert Excel dates to Python dates
+            if isinstance(report_due_date, datetime):
+                report_due_date = report_due_date.date()
+            if isinstance(period_start, datetime):
+                period_start = period_start.date()
+            if isinstance(period_end, datetime):
+                period_end = period_end.date()
+            
+            # Check if target_date is the report due date
+            if report_due_date == target_date:
+                workbook.close()
+                return period_start, period_end
+        
+        workbook.close()
+        return None, None
+        
+    except Exception as e:
+        print(f"Error reading Excel period data: {e}")
+        return None, None
+
+def get_correct_folder_name(target_date):
+    """Get correct folder name from Excel lookup"""
+    report_name = get_excel_report_name(target_date)
+    
+    if report_name:
+        # Format: C06W23_2025_06_10_7Day
+        if isinstance(target_date, (date, datetime)):
+            date_str = target_date.strftime("%Y_%m_%d")
+        else:
+            date_str = target_date
+        return f"{report_name}_{date_str}_7Day"
+    else:
+        # Fallback to old naming if Excel lookup fails
+        print("Warning: Using fallback folder naming")
+        if isinstance(target_date, (date, datetime)):
+            date_str = target_date.strftime("%Y_%m_%d")
+            iso_year, iso_week, _ = target_date.isocalendar()
+            return f"C{iso_year % 100:02d}W{iso_week:02d}_{date_str}_7Day"
+        else:
+            return f"C05W24_{target_date}_7Day"
+
+def get_7day_period_dates(target_date):
+    """Get the correct 7-day period dates from Excel (preferred) or calculation (fallback)"""
+    
+    # First try to get from Excel
+    start_date, end_date = get_excel_7day_period(target_date)
+    
+    if start_date and end_date:
+        print(f"📊 Using Excel 7-day period: {start_date} to {end_date}")
+        return start_date, end_date
+    
+    # Fallback to calculation if Excel lookup fails
+    print("⚠️ Excel lookup failed, using calculated period")
+    if isinstance(target_date, str):
+        target_date = datetime.strptime(target_date, "%Y_%m_%d").date()
+    elif isinstance(target_date, datetime):
+        target_date = target_date.date()
+    
+    # For reports due on target_date, we want the 7 days BEFORE the due date
+    end_date = target_date - timedelta(days=1)  # Day before report due
+    start_date = end_date - timedelta(days=6)   # 7 days total (inclusive)
+    
+    print(f"📊 Using calculated 7-day period: {start_date} to {end_date}")
+    return start_date, end_date
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def get_crime_type_folder(crime_type, target_date_str):
+    """Get crime-specific output folder path"""
+    main_folder = get_correct_folder_name(target_date_str)
+    base_path = os.path.join(REPORT_BASE_DIR, main_folder)
+    
+    # Get the standardized folder name for this crime type
+    folder_name = CRIME_FOLDER_MAPPING.get(crime_type, crime_type.replace(' ', '_'))
+    
+    return os.path.join(base_path, folder_name)
+
+def get_standardized_filename(crime_type):
+    """Get standardized filename prefix for crime type"""
+    return CRIME_FOLDER_MAPPING.get(crime_type, crime_type.replace(' ', '_').replace('-', '_'))
+
+def get_output_folder(date_str):
+    """Get main output folder path using Excel naming.""" return os.path.join(REPORT_BASE_DIR, get_correct_folder_name(date_str))
+
+def get_sql_pattern_for_crime(crime_type):
+    """Get SQL pattern for specific crime type"""
+    return CRIME_SQL_PATTERNS.get(crime_type, crime_type)
+
+def sanitize_filename(text):
+    """Sanitize text for use in filenames"""
+    return (text
+            .replace(" ", "_")
+            .replace("&", "And")
+            .replace("/", "_")
+            .replace("\\", "_")
+            .replace(":", "_")
+            .replace("*", "_")
+            .replace("? ", "_")
+            .replace("\"", "_")
+            .replace("<", "_")
+            .replace(">", "_")
+            .replace("|", "_")
+            .replace("-", "_"))
+
+def get_sanitized_filename(text):
+    """Alias for sanitize_filename for backward compatibility"""
+    return sanitize_filename(text)
+
+# =============================================================================
+# VALIDATION FUNCTIONS
+# =============================================================================
+
+def validate_all_paths():
+    """Validate that all paths in config.py exist and are accessible"""
+    print("🔍 VALIDATING CONFIG PATHS")
+    print("=" * 40)
+    
+    paths_to_check = {
+        "Excel Cycle File": EXCEL_CYCLE_PATH,
+        "Report Base Directory": REPORT_BASE_DIR,
+        "ArcGIS Pro Project": APR_PATH,
+        "Main PowerPoint Template": POWERPOINT_TEMPLATES.get("main", ""),
+        "7-Day PowerPoint Template": POWERPOINT_TEMPLATES.get("7day", "")
+    }
+    
+    all_valid = True
+    
+    for name, path in paths_to_check.items():
+        if path and os.path.exists(path):
+            print(f"✅ {name}")
+            print(f"   📁 {path}")
+        else:
+            print(f"❌ {name} NOT FOUND")
+            print(f"   📁 {path}")
+            all_valid = False
+        print()
+    
+    if all_valid:
+        print("🎉 ALL PATHS VALIDATED - READY TO RUN!") else:
+        print("⚠️ SOME PATHS MISSING - CHECK CONFIGURATION")
+    
+    return all_valid
+
+def quick_config_test():
+    """Quick test of all config functions"""
+    print("⚡ QUICK CONFIG TEST")
+    print("=" * 30)
+    
+    # Test Excel integration
+    test_date = date(2025, 6, 10)
+    print(f"📅 Testing with: {test_date}")
+    
+    try:
+        # Test report name lookup
+        report_name = get_excel_report_name(test_date)
+        print(f"📋 Report name: {report_name}")
+        
+        # Test folder generation
+        folder_name = get_correct_folder_name(test_date)
+        print(f"📁 Folder name: {folder_name}")
+        
+        # Test period calculation
+        start_date, end_date = get_7day_period_dates(test_date)
+        print(f"📊 7-Day period: {start_date} to {end_date}")
+        
+        # Test crime folder
+        crime_folder = get_crime_type_folder("MV Theft", "2025_06_10")
+        print(f"🚔 MV Theft folder: {crime_folder}")
+        
+        # Test standardized filename
+        standardized = get_standardized_filename("Burglary - Comm & Res")
+        print(f"📝 Standardized name: {standardized}")
+        
+        # Test CRIME_TYPES
+        print(f"🎯 Crime types: {CRIME_TYPES}")
+        
+        print("\n✅ All functions working!") return True
+            
+    except Exception as e:
+        print(f"❌ Test failed with error: {e}")
+        return False
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+if __name__ == "__main__":
+    # Run the test when this file is executed directly
+    print("🧪 CONFIG.PY STANDALONE TEST")
+    print("=" * 40)
+    quick_config_test()
+    print("\n" + "=" * 40)
+    validate_all_paths()
+````
+
+**📝 ADD THIS TO YOUR CONFIG.PY:**
+
+Find the `CHART_OUTPUT_DIR` line in your config.py and add this right after it:
+
+```python
+# Layer name mapping for ArcGIS (for backward compatibility)
+LAYER_NAME_MAP = {
+    "MV Theft": "MV Theft",
+    "Burglary - Auto": "Burglary - Auto", 
+    "Burglary - Comm & Res": "Burglary - Comm & Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual Offenses"
+}
+```
+
+**🧪 TEST THE FIX:**
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print(LAYER_NAME_MAP)"
+```
+
+**🚀 THEN TEST MAIN.PY AGAIN:**
+
+```cmd
+python main.py true true false 30 false 2025_06_10
+```
+
+**🎯 WHAT THIS ADDS:**
+- `LAYER_NAME_MAP` for map_export.py compatibility
+- Maps crime types to their ArcGIS layer names
+- Usually the same as the crime type name itself
+
+This should fix the import error and let main.py load successfully! 🎉
+
+
+
+## Prompt:
+6/21/2025, 3:12:28 AM
+
+i might have not saved the updated config when you provided it. I updated and ran the second test again and got:
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>python main.py true true false 30 false 2025_06_10
+Traceback (most recent call last):
+  File "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\main.py", line 15, in <module>
+    from map_export import export_maps
+  File "C:\Users\carucci_r\SCRPA_LAPTOP\scripts\map_export.py", line 10, in <module>
+    from config import get_crime_type_folder, get_sql_pattern_for_crime, LAYER_NAME_MAP, APR_PATH
+ImportError: cannot import name 'LAYER_NAME_MAP' from 'config' (C:\Users\carucci_r\SCRPA_LAPTOP\scripts\config.py)
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+
+
+
+## Response:
+6/21/2025, 3:12:37 AM
+
+**🚨 You still need to add LAYER_NAME_MAP to your config.py! **
+
+**🔍 Let's check what's currently in your config:**
+
+```cmd
+python -c "import config; print([x for x in dir(config) if not x.startswith('_')])"
+```
+
+**🛠️ QUICK ADD - Run this command to add LAYER_NAME_MAP:**
+
+```cmd
+echo. >> config.py
+echo # Layer name mapping for ArcGIS (for backward compatibility) >> config.py
+echo LAYER_NAME_MAP = { >> config.py
+echo     "MV Theft": "MV Theft", >> config.py
+echo     "Burglary - Auto": "Burglary - Auto", >> config.py
+echo     "Burglary - Comm & Res": "Burglary - Comm & Res", >> config.py
+echo     "Robbery": "Robbery", >> config.py
+echo     "Sexual Offenses": "Sexual Offenses" >> config.py
+echo } >> config.py
+```
+
+**🧪 OR - Manual add to your config.py file:**
+
+Open config.py and add these lines at the end:
+
+```python
+# Layer name mapping for ArcGIS (for backward compatibility)
+LAYER_NAME_MAP = {
+    "MV Theft": "MV Theft",
+    "Burglary - Auto": "Burglary - Auto", 
+    "Burglary - Comm & Res": "Burglary - Comm & Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual Offenses"
+}
+```
+
+**✅ VERIFY IT WORKED:**
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS:', LAYER_NAME_MAP)"
+```
+
+**🚀 THEN TEST MAIN.PY:**
+
+```cmd
+python main.py true true false 30 false 2025_06_10
+```
+
+The LAYER_NAME_MAP is just missing from your config.py - add those 6 lines and you should be good to go! 🎯
+
+
+
+## Prompt:
+6/21/2025, 3:13:04 AM
+
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>python -c "import config; print([x for x in dir(config) if not x.startswith('_')])"
+['APR_PATH', 'CHART_OUTPUT_DIR', 'CRIME_FOLDER_MAPPING', 'CRIME_SQL_PATTERNS', 'CRIME_TYPES', 'EXCEL_CYCLE_PATH', 'FOLDER_NAME_MAPPING', 'POWERPOINT_TEMPLATES', 'REPORT_BASE_DIR', 'SUFFIXES', 'SYM_LAYER_PATH', 'date', 'datetime', 'get_7day_period_dates', 'get_correct_folder_name', 'get_crime_type_folder', 'get_excel_7day_period', 'get_excel_report_name', 'get_output_folder', 'get_sanitized_filename', 'get_sql_pattern_for_crime', 'get_standardized_filename', 'logging', 'openpyxl', 'os', 'quick_config_test', 'sanitize_filename', 'sys', 'timedelta', 'validate_all_paths']
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+(arcgispro-py3) C:\Users\carucci_r\SCRPA_LAPTOP\scripts>
+
+
+
+## Response:
+6/21/2025, 3:13:11 AM
+
+**🔍 I can see LAYER_NAME_MAP is missing from your config! **
+
+**🛠️ QUICK COMMAND LINE FIX:**
+
+```cmd
+echo. >> config.py
+echo # Layer name mapping for ArcGIS >> config.py
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+
+**✅ VERIFY IT WORKED:**
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS:', LAYER_NAME_MAP)"
+```
+
+**📝 OR - Manual Method:**
+
+1. Open `config.py` in Notepad
+2. Go to the very end of the file
+3. Add these lines:
+
+```python
+# Layer name mapping for ArcGIS
+LAYER_NAME_MAP = {
+    "MV Theft": "MV Theft",
+    "Burglary - Auto": "Burglary - Auto", 
+    "Burglary - Comm & Res": "Burglary - Comm & Res",
+    "Robbery": "Robbery",
+    "Sexual Offenses": "Sexual Offenses"
+}
+```
+
+4. Save the file
+
+**🚀 THEN TEST:**
+
+```cmd
+python main.py true true false 30 false 2025_06_10
+```
+
+The command line method should add it quickly. Just run that echo command and test! 🎯
+
+
+
+## Prompt:
+6/21/2025, 3:14:27 AM
+
+Like this? Microsoft Windows [Version 10.0.26200.5622]
+(c) Microsoft Corporation. All rights reserved. C:\Users\carucci_r>echo. >> config.py
+C:\Users\carucci_r>echo # Layer name mapping for ArcGIS >> config.py
+C:\Users\carucci_r>echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+C:\Users\carucci_r>
+
+
+
+## Response:
+6/21/2025, 3:14:35 AM
+
+**🚨 WRONG LOCATION! **
+
+You're in `C:\Users\carucci_r\` but your config.py is in `C:\Users\carucci_r\SCRPA_LAPTOP\scripts\`
+
+**🔄 FIX THIS:**
+
+1. **Navigate to the correct directory:**
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+```
+
+2. **Then run the echo commands:**
+```cmd
+echo. >> config.py
+echo # Layer name mapping for ArcGIS >> config.py
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+
+3. **Test it:**
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS:', LAYER_NAME_MAP)"
+```
+
+**📝 WHAT HAPPENED:**
+- You created a new config.py in the wrong folder
+- Your scripts are looking for the config.py in the scripts folder
+- Need to be in the right directory first
+
+**🎯 CORRECT SEQUENCE:**
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+
+Make sure you're in the scripts directory first! 📁
+
+
+
+## Prompt:
+6/21/2025, 3:15:31 AM
+
+and i run that in command prompt. I am sorry I am not familiar with any of this
+
+
+
+## Response:
+6/21/2025, 3:15:40 AM
+
+**👍 YES, you run it in command prompt! No worries, let me guide you step by step:**
+
+**🔄 STEP-BY-STEP:**
+
+1. **You're currently here:** `C:\Users\carucci_r>`
+2. **You need to go here:** `C:\Users\carucci_r\SCRPA_LAPTOP\scripts>`
+
+**📝 TYPE THESE COMMANDS ONE BY ONE:**
+
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+```
+*(This moves you to the right folder)*
+
+```cmd
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+*(This adds the missing code to your config.py file)*
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS')"
+```
+*(This tests if it worked)*
+
+**🎯 WHAT YOU'LL SEE:**
+- First command: Your prompt changes to show you're in the scripts folder
+- Second command: Nothing happens (that's good!) - Third command: Should print "SUCCESS"
+
+**📍 YOU'RE DOING GREAT! ** 
+- Command prompt = ✅ Correct
+- Just need to be in the right folder first
+- Then add the missing code
+- Then test it
+
+Type the first `cd` command and let me know what you see! 😊
+
+
+
+## Prompt:
+6/21/2025, 3:17:02 AM
+
+C:\Users\carucci_r>echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+
+C:\Users\carucci_r\SCRPA_LAPTOP\scripts>python -c "from config import LAYER_NAME_MAP; print('SUCCESS')"
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ImportError: cannot import name 'LAYER_NAME_MAP' from 'config' (C:\Users\carucci_r\SCRPA_LAPTOP\scripts\config.py)
+
+
+
+## Response:
+6/21/2025, 3:17:19 AM
+
+**🚨 I see the issue! You added the code to the wrong config.py file! **
+
+**🔍 WHAT HAPPENED:**
+- You were in `C:\Users\carucci_r\` when you ran the echo command
+- So you added LAYER_NAME_MAP to a config.py in the wrong folder
+- But your scripts need it in `C:\Users\carucci_r\SCRPA_LAPTOP\scripts\config.py`
+
+**🛠️ FIX THIS:**
+
+You're now in the right folder. Run this command:
+
+```cmd
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+
+**🧪 THEN TEST:**
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS')"
+```
+
+**📝 SIMPLE RULE:**
+- Always make sure your command prompt shows: `C:\Users\carucci_r\SCRPA_LAPTOP\scripts>`
+- THEN run the echo command
+- The `>>` adds to the file in your CURRENT folder
+
+**🎯 You're in the right place now, just run that echo command again! **
+
+
+
+## Prompt:
+6/21/2025, 3:18:09 AM
+
+> File: config.py
+
+this is my config file
+
+
+
+## Response:
+6/21/2025, 3:18:19 AM
+
+**🔍 I can see your config.py file - it's missing LAYER_NAME_MAP! **
+
+**🛠️ SIMPLE FIX - Add this to the end of your config.py:**
+
+Since you're in the right directory now (`C:\Users\carucci_r\SCRPA_LAPTOP\scripts>`), run:
+
+```cmd
+echo. >> config.py
+echo # Layer name mapping for ArcGIS >> config.py
+echo LAYER_NAME_MAP = {"MV Theft": "MV Theft", "Burglary - Auto": "Burglary - Auto", "Burglary - Comm & Res": "Burglary - Comm & Res", "Robbery": "Robbery", "Sexual Offenses": "Sexual Offenses"} >> config.py
+```
+
+**🧪 TEST IT:**
+
+```cmd
+python -c "from config import LAYER_NAME_MAP; print('SUCCESS:', LAYER_NAME_MAP)"
+```
+
+**📝 OR - Manual Method (if you prefer):**
+
+1. Open `config.py` in Notepad
+2. Go to the very end (after the `validate_all_paths()` line)
+3.

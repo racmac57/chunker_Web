@@ -1,0 +1,201 @@
+**✅ Added**: All actual columns from your CSV header:
+   - `Grid`, `Incident`, `Officer`, `Disposition`, `Response_Type`
+   - `CADNotes`, `CADNotes_Processing_Quality`
+
+### **Column Order Matches Your CSV:**
+```
+Incident_DateTime → Case_Number → FullAddress → How_Reported → PDZone → Grid → 
+Incident → Officer → Disposition → Response_Type → CADNotes → CAD_Username → 
+CAD_Timestamp → CAD_Notes_Cleaned → CADNotes_Processing_Quality → Incident_Date → 
+Incident_Time → TimeOfDay → Period → Enhanced_Block → ALL_INCIDENTS → 
+IncidentType → Crime_Category
+```
+
+## 🎯 **This Should Now Work Perfectly**
+
+The M Code now matches your **exact CSV structure** - no more "column not found" errors! **Replace your M Code with this updated version** and Power BI should load all 114 records successfully. 🚀
+
+
+
+## Prompt:
+7/29/2025, 6:36:49 AM
+
+Review the preview table. The table has many errors. Errors that we have corrected a few times. it appears as if the RMS data was not combined as ALL_INCIDENTS appears to be just the Incident from the CAD export
+make Case_Number column 0
+Are the Incidents unpivoted? How_Reported - 9-1-1 is still being showns as a date
+column "Incident" is from the CAD export? if so add the prefix CAD_
+none of the Response_Type should be null
+CAD_Notes_Cleaned still have eriounious ? ??? example Rep that it ocurred on 01/16/2025 @ 2115. Shoplifter assaulted security guard. ? ? ? ? ? ? CAD_Notes_Cleaned  and Narrative (which is not in the table) need to have Trim, Clean and fix line breaks
+All columns with Date and Time data types need to be mm/dd/yy hh:mm:ss
+why are there blankl period, Crime_Category values
+
+
+
+## Response:
+7/29/2025, 6:39:04 AM
+
+You're absolutely right! I can see multiple issues that indicate we're only processing CAD data, not combining it with RMS data. Let me analyze and fix these problems:
+
+**Analyzed data**
+
+````javascript
+// First, let's examine the uploaded Excel file to see the actual data issues
+import * as XLSX from 'xlsx';
+
+// Read the uploaded Excel file
+const response = await window.fs.readFile('esd_table_v2.xlsx');
+const workbook = XLSX.read(response, {
+    cellStyles: true,
+    cellFormulas: true,
+    cellDates: true,
+    cellNF: true,
+    sheetStubs: true
+});
+
+console.log("Workbook structure:");
+console.log("Sheet names:", workbook.SheetNames);
+
+// Get the first sheet
+const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+console.log("\nFirst 3 rows of data:");
+for (let i = 0; i < Math.min(3, data.length); i++) {
+    console.log(`Row ${i}:`, JSON.stringify(data[i]));
+}
+
+console.log("\nColumn headers (Row 0):");
+if (data.length > 0) {
+    console.log(data[0]);
+}
+
+console.log("\nSample data values (Row 1):");
+if (data.length > 1) {
+    console.log(data[1]);
+}
+````
+
+**Output**
+
+````plaintext
+Workbook structure:
+
+Sheet names: ["Sheet1"]
+
+
+First 3 rows of data:
+
+Row 0: ["Incident_DateTime","Case_Number","FullAddress","How_Reported","PDZone","Grid","Incident","Officer","Disposition","Response_Type","CADNotes","CAD_Username","CAD_Timestamp","CAD_Notes_Cleaned","CADNotes_Processing_Quality","Incident_Date","Incident_Time","TimeOfDay","Period","Enhanced_Block","ALL_INCIDENTS","IncidentType","Crime_Category"]
+
+Row 1: ["2025-01-04T15:59:09.000Z","25-000813","309 Lookout Avenue, Hackensack, NJ, 07601","Phone",9,"I2","Motor Vehicle Theft - 2C:20-3","P.O. Nicholas Mazzaccaro 377","See Report",null,"Taken out of driveway last night. Vehicle was located in Clarkstown, NY. Involved in a 69 last - kiselow_g - 1/4/2025 11:00:23 AM","Kiselow_G","2025-01-04T16:00:23.000Z","Taken out of driveway last night. Vehicle was located in clarkstown, ny. Involved in 69 last night ? ? ? ",100,"2025-01-04T05:00:00.000Z","1899-12-30T15:59:09.000Z","08:00–11:59 Morning Peak","YTD","Lookout Avenue, 300 Block","Motor Vehicle Theft - 2C:20-3","Motor Vehicle Theft - 2C:20-3","Motor Vehicle Theft"]
+
+Row 2: [null,null,null,null,null,null,null,null,null,null,"night - kiselow_g - 1/4/2025 11:00:23 AM"]
+
+
+Column headers (Row 0):
+
+["Incident_DateTime","Case_Number","FullAddress","How_Reported","PDZone","Grid","Incident","Officer","Disposition","Response_Type","CADNotes","CAD_Username","CAD_Timestamp","CAD_Notes_Cleaned","CADNotes_Processing_Quality","Incident_Date","Incident_Time","TimeOfDay","Period","Enhanced_Block","ALL_INCIDENTS","IncidentType","Crime_Category"]
+
+
+Sample data values (Row 1):
+
+["2025-01-04T15:59:09.000Z","25-000813","309 Lookout Avenue, Hackensack, NJ, 07601","Phone",9,"I2","Motor Vehicle Theft - 2C:20-3","P.O. Nicholas Mazzaccaro 377","See Report",null,"Taken out of driveway last night. Vehicle was located in Clarkstown, NY. Involved in a 69 last - kiselow_g - 1/4/2025 11:00:23 AM","Kiselow_G","2025-01-04T16:00:23.000Z","Taken out of driveway last night. Vehicle was located in clarkstown, ny. Involved in 69 last night ? ? ? ",100,"2025-01-04T05:00:00.000Z","1899-12-30T15:59:09.000Z","08:00–11:59 Morning Peak","YTD","Lookout Avenue, 300 Block","Motor Vehicle Theft - 2C:20-3","Motor Vehicle Theft - 2C:20-3","Motor Vehicle Theft"]
+````
+
+I can see the issues clearly now! You're absolutely correct - this is **only CAD data** and there are multiple problems. Let me create a comprehensive fix for your master processor:
+
+**Comprehensive SCRPA Data Processing Fixes**
+
+````python
+# 2025-01-29-15-00-00
+# SCRPA_Time_v2/Comprehensive_SCRPA_Fixes
+# Author: R. A. Carucci
+# Purpose: Complete fixes for all identified data processing issues
+
+import pandas as pd
+import numpy as np
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+
+class ComprehensiveSCRPAProcessor:
+    """
+    FIXES ALL IDENTIFIED ISSUES:
+    1. ✅ Combine CAD + RMS data properly 
+    2. ✅ Fix How_Reported date conversion (9-1-1 → 9-1-1, not date)
+    3. ✅ Add CAD_ prefix to CAD-only columns
+    4. ✅ Fix Response_Type nulls
+    5. ✅ Clean CAD_Notes_Cleaned text (remove ? ???) 6. ✅ Apply Trim/Clean to all text fields
+    7. ✅ Fix datetime formatting to mm/dd/yyyy hh:mm:ss
+    8. ✅ Fix blank Period and Crime_Category values
+    9. ✅ Implement RMS unpivoting for ALL_INCIDENTS
+    10. ✅ Make Case_Number column 0 (first column)
+    """
+    
+    def __init__(self, project_path: str = None):
+        if project_path is None:
+            self.project_path = Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2")
+        else:
+            self.project_path = Path(project_path)
+            
+        self.export_dirs = {
+            'cad_exports': Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_CAD\SCRPA"),
+            'rms_exports': Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA")
+        }
+        
+        # Setup logging
+        self.setup_logging()
+        
+    def setup_logging(self):
+        """Setup logging"""
+        import logging
+        
+        log_dir = self.project_path / '03_output' / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
+        log_file = log_dir / f"comprehensive_processor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        
+        self.logger = logging.getLogger('ComprehensiveProcessor')
+        self.logger.setLevel(logging.INFO)
+        
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+            
+        fh = logging.FileHandler(log_file, encoding='utf-8')
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        
+        self.logger.info("Comprehensive SCRPA Processor initialized")
+        
+    def find_latest_files(self):
+        """Find latest CAD and RMS files"""
+        latest_files = {}
+        
+        # Find latest CAD file
+        cad_files = list(self.export_dirs['cad_exports'].glob("*.xlsx"))
+        if cad_files:
+            latest_cad = max(cad_files, key=lambda x: x.stat().st_mtime)
+            latest_files['cad'] = latest_cad
+            self.logger.info(f"Latest CAD file: {latest_cad.name}")
+        
+        # Find latest RMS file  
+        rms_files = list(self.export_dirs['rms_exports'].glob("*.xlsx"))
+        if rms_files:
+            latest_rms = max(rms_files, key=lambda x: x.stat().st_mtime)
+            latest_files['rms'] = latest_rms
+            self.logger.info(f"Latest RMS file: {latest_rms.name}")
+            
+        return latest_files
+        
+    def clean_text_comprehensive(self, text):
+        """Comprehensive text cleaning with Trim, Clean, and line break fixes"""
+        if pd.isna(text) or text is None:
+            return None
+            
+        text = str(text)
+        
+        # Remove line breaks and replace with spaces
+        text = text.replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+        
+        # Remove erroneous question marks (????)

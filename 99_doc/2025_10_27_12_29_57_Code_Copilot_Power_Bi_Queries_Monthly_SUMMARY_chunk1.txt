@@ -1,0 +1,99 @@
+Here is a structured **`.md` technical summary outline** of what we did, what worked, and what still needs work for your Power BI arrest reporting solution:
+
+---
+
+````md
+---
+title: Hackensack PD Arrest Master - Power BI Migration Summary
+date: 2025-06-13
+author: Code Copilot
+tags: [Power BI, M Code, DAX, Power Query, Municipality Lookup, Rolling 12 Months]
+---
+
+## ✅ What Was Accomplished
+
+### 🔹 M Code Migration
+- Successfully migrated `Arrest_Master` Excel logic into Power BI via Power Query. - All source files (`_Arrests.xlsx`, `Counties and Municipalities.xlsx`) are parameterized using:
+  - `Param_ArrestFolder`
+  - `Param_AssignmentFile`
+  - `Param_CountyFile`
+
+### 🔹 Municipality & State Detection
+- Loaded `NJCounties` and `NewYorkCounty` sheets into a unified lookup table. - Implemented **fuzzy text match** logic to detect city and state from unstructured `address` fields. - Added these new output fields:
+  - `city_residence`
+  - `state_county_residence`
+  - Includes fallback logic: `"Unmatched"` or `"N/A"`
+
+### 🔹 Sheet Load Robustness
+- Introduced safe sheet reader (`GetSheet1`) using `try`/`otherwise` logic to prevent errors on bad headers or missing sheets. ---
+
+## 🔧 What We're Still Finalizing
+
+### ⚠️ Data Slicing: Rolling 12 Months
+- Need to implement a proper `Date` table with a calculated column for:
+  - `IsInRolling12 = ...` logic
+- Current Power Query loads all dates — filtering is pending via DAX. ### ⚠️ Visualization (Matrix)
+- DAX measures (`F`, `M`, `Total`) still need to be created:
+  - Measures should count filtered rows by `sex`
+  - Matrix should show rows by state/county → city
+
+---
+
+## 🟢 Updated Working Code Snippets
+
+### ✅ DAX Measure: Rolling 12-Month Filter
+```dax
+IsInRolling12 = 
+IF(
+    'Date'[Date] >= EDATE(TODAY(), -12) + 1 &&
+    'Date'[Date] <= EOMONTH(TODAY(), -1),
+    1, 0
+)
+````
+
+### ✅ DAX Measures: Arrest Counts
+
+```dax
+Arrest Count = COUNTROWS('Arrest_Master_Migrated')
+
+Arrest Count F = 
+CALCULATE([Arrest Count], 'Arrest_Master_Migrated'[sex] = "F")
+
+Arrest Count M = 
+CALCULATE([Arrest Count], 'Arrest_Master_Migrated'[sex] = "M")
+
+Arrest Count Total = [Arrest Count F] + [Arrest Count M]
+```
+
+---
+
+## 💡 Recommendations for Next Steps
+
+1. **Build Matrix Visual**:
+
+   * Rows: `state_county_residence` → `city_residence`
+   * Columns: F, M, Total
+   * Values: Count of arrests
+2. **Apply filter** `IsInRolling12 = 1` to all visuals or report pages
+3. **Style**: Add conditional formatting to match pivot table visual design (yellow grand totals)
+
+---
+
+## 📁 Files Modified
+
+* `Arrest_Master_Migrated` (Power BI Query)
+* Parameters added: `Param_ArrestFolder`, `Param_AssignmentFile`, `Param_CountyFile`
+
+---
+
+## ✉️ Notes
+
+If data grows beyond 12 months or more jurisdictions are added, consider separating:
+
+* Address parser logic
+* Municipality master data by state
+* Date range slicer logic for user flexibility
+
+```
+
+Let me know if you'd like me to export this to a downloadable `.md` file or extend this outline to include visuals, charts, or deployment notes. ```

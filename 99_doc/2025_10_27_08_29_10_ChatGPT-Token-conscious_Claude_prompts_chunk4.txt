@@ -1,0 +1,820 @@
+if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+  echo Opening QA JSON for details...
+  if "%OPEN_OUTPUT%"=="1" start "" "%OUT_DIR%\SCRPA_QA_Summary.json"
+)
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b 3
+
+:success
+echo Success. if "%OPEN_OUTPUT%"=="1" (
+  set "LATEST_HTML="
+  for /f "delims=" %%F in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_Combined_Executive_Summary_*.html" 2^>nul') do (
+    set "LATEST_HTML=%%F"
+    goto :found_html
+  )
+  :found_html
+  if defined LATEST_HTML (
+    echo Opening HTML: "%OUT_DIR%\%LATEST_HTML%"
+    start "" "%OUT_DIR%\%LATEST_HTML%"
+  ) else (
+    echo No HTML files found in "%OUT_DIR%".
+  ) if exist "%OUT_DIR%\SCRPA_LagDate_Notice.txt" (
+    echo Opening Lag Notice: "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+    start "" "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+  )
+
+  if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+    echo QA JSON: "%OUT_DIR%\SCRPA_QA_Summary.json"
+  )
+  if exist "%OUT_DIR%\SCRPA_Period_Counts.csv" (
+    echo Period CSV: "%OUT_DIR%\SCRPA_Period_Counts.csv"
+  )
+
+  for /f "delims=" %%Z in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_TestWeek_*.zip" 2^>nul') do (
+    echo ZIP: "%OUT_DIR%\%%Z"
+    goto :zip_done
+  )
+  :zip_done
+)
+
+echo Done. exit /b 0
+```
+
+* * *
+
+If you ever need Claude to tweak anything for a new folder/date scheme, reuse the diff-only prompt above and just change the required lists or patterns. ## Prompt:
+  ✅ Modifications Complete
+
+  New argparse flags added:
+  - --assert-schema - Validates required columns exist
+  - --assert-skin - Checks for DIN font and #0c233d color in HTML
+  - --zip-artifacts - Creates timestamped ZIP archive
+
+  New functionality:
+  1. Schema assertions - Exit code 4 for missing columns
+  2. Skin assertions - Exit code 5 for missing styling
+  3. Print statements - "Period CSV:" and "QA JSON:" outputs
+  4. ZIP archiving - Bundles HTML, TXT, JSON, CSV artifacts
+
+  Import added:
+  - zipfile module for ZIP compression
+
+  Exit codes:
+  - 3: Min rows or max lag assertion failure
+  - 4: Schema assertion failure (missing columns)
+  - 5: Skin assertion failure (missing DIN/#0c233d)
+
+  All changes are minimal and focused, preserving existing
+  functionality while adding the requested QA capabilities for
+  Run_SCRPA_TestWeek.bat. ✅ All requested features implemented:
+
+  1. Import additions:
+    - zipfile and re modules already added
+  2. Argparse flags:
+    - --assert-schema ✅
+    - --assert-skin ✅
+    - --zip-artifacts ✅
+  3. Schema assertion:
+    - Checks for required columns: ["Incident_Date_Date", "Report
+  Date", "Period"]
+    - Exit code 4 on failure ✅
+  4. Skin assertion:
+    - Validates DIN font and #0c233d color in HTML output
+    - Exit code 5 on failure ✅
+  5. ZIP artifacts:
+    - Creates timestamped ZIP with HTML, TXT, JSON, CSV files
+    - Prints "ZIP: {filename}" ✅
+  6. Print statements:
+    - "Period CSV:" and "QA JSON:" outputs ✅
+
+  The implementation matches the requested diff exactly and all
+  functionality is working as demonstrated by the --help output showing
+   all new flags. The script is ready for use with
+  Run_SCRPA_TestWeek.bat. ● Perfect! Now the Python script supports all the CLI arguments that
+  the batch file expects. ✅ Batch File Compatibility Complete
+
+  Added missing CLI arguments:
+  - --cycle-id - For cycle identifier in QA output
+  - --range-start - For start date in QA output
+  - --range-end - For end date in QA output
+
+  QA JSON integration:
+  - Metadata now populated from command line arguments
+  - Uses getattr() for safe access to optional arguments
+
+  Batch file features supported:
+  - ✅ Test mode execution with --test-week
+  - ✅ All assertion flags with proper exit codes
+  - ✅ QA/CSV output generation
+  - ✅ ZIP artifact creation
+  - ✅ Metadata passing via CLI arguments
+  - ✅ Log file generation and error handling
+
+  The Run_SCRPA_TestWeek.bat script is now fully compatible and ready
+  to run comprehensive QA testing with proper error handling,
+  assertions, and artifact generation. ## Response:
+Thought for 19s
+
+🔥 Nailed it. Everything’s wired up cleanly. Here’s a tiny runbook + a couple of optional quality-of-life add-ons you can drop in whenever you’re ready. * * *
+
+### Quick runbook (cheatsheet)
+
+**Run the weekly QA test**
+
+```powershell
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy"
+.\Run_SCRPA_TestWeek.bat
+```
+
+**What you’ll get**
+
+*   HTML: `...\05_orchestrator\SCRPA_Combined_Executive_Summary_*.html`
+*   (if lag): `SCRPA_LagDate_Notice.txt`
+*   QA JSON: `SCRPA_QA_Summary.json`
+*   Period CSV: `SCRPA_Period_Counts.csv`
+*   ZIP bundle: `SCRPA_TestWeek_YYYYMMDD_HHMMSS.zip`
+*   Log: `SCRPA_TestWeek_YYYYMMDD.log`
+
+**Exit codes**
+
+*   `0` = success
+*   `3` = min-rows / max-lag assertion failed
+*   `4` = schema assertion failed (missing cols)
+*   `5` = skin assertion failed (DIN / #0c233d not found)
+
+* * *
+
+### Optional add-ons (copy/paste)
+
+#### A) Schedule the weekly QA (Task Scheduler)
+
+Runs every Tuesday at 09:00; adjust as needed. ```cmd
+schtasks /Create ^
+ /SC WEEKLY /D TUE ^
+ /ST 09:00 ^
+ /TN "SCRPA TestWeek QA" ^
+ /TR "\"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\Run_SCRPA_TestWeek.bat\""
+```
+
+#### B) One-click email draft with latest artifacts (Outlook COM)
+
+Save as `Send_SCRPA_TestWeek_Email.ps1`, then right-click → Run with PowerShell. ```powershell
+$OutDir = "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator"
+$Html = Get-ChildItem $OutDir -Filter "SCRPA_Combined_Executive_Summary_*.html" | Sort-Object LastWriteTime -Desc | Select-Object -First 1
+$Lag  = Join-Path $OutDir "SCRPA_LagDate_Notice.txt"
+$Zip  = Get-ChildItem $OutDir -Filter "SCRPA_TestWeek_*.zip" | Sort-Object LastWriteTime -Desc | Select-Object -First 1
+
+if (-not $Html) { Write-Host "No HTML found. "; exit 2 }
+
+$ol = New-Object -ComObject Outlook.Application
+$mail = $ol.CreateItem(0)
+$mail.To = "Captain Smith <captain.smith@hackensackpd.gov>"
+$mail.Subject = "SCRPA Weekly QA Package"
+$mail.HTMLBody = @"
+<p>Captain Smith,</p>
+<p>Please find attached the latest SCRPA weekly report and QA artifacts.</p>
+<ul>
+  <li><b>Executive Summary</b> (DIN / #0c233d)</li>
+  <li><b>QA Summary</b> (period counts, lag rows)</li>
+  <li><b>Lag Date Notice</b> (only when applicable)</li>
+</ul>
+<p>Respectfully,<br/>P.O. R. A. Carucci</p>
+"@
+$mail.Attachments.Add($Html.FullName) | Out-Null
+if (Test-Path (Join-Path $OutDir "SCRPA_QA_Summary.json")) { $mail.Attachments.Add((Join-Path $OutDir "SCRPA_QA_Summary.json")) | Out-Null }
+if (Test-Path (Join-Path $OutDir "SCRPA_Period_Counts.csv")) { $mail.Attachments.Add((Join-Path $OutDir "SCRPA_Period_Counts.csv")) | Out-Null }
+if (Test-Path $Lag) { $mail.Attachments.Add($Lag) | Out-Null }
+if ($Zip) { $mail.Attachments.Add($Zip.FullName) | Out-Null }
+$mail.Display()  # Show draft for review
+```
+
+#### C) Fast thresholds tune (in the .bat)
+
+Open `Run_SCRPA_TestWeek.bat` and tweak:
+
+```bat
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+```
+
+* * *
+
+If you want, I can also give you a tiny “baseline calculator” that reads the last 8 QA JSONs and suggests fresh min-rows / max-lag thresholds—handy when volumes drift seasonally. ## Prompt:
+I have the .bat saved here:
+"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat"
+
+## Response:
+Thought for 27s
+
+perfect—that location works great. if you want the batch to be fully **portable** from that folder, here’s a tiny tweak so it **auto-detects paths** based on where the `.bat` lives (no hard-coded directories). ### Drop-in portable header for your `.bat`
+
+Put this at the **top** of `Run_SCRPA_TestWeek.bat`, replacing the existing “CONFIG” block:
+
+```bat
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM --- Portable pathing: infer dirs from where this .bat lives ---
+set "ORCH_DIR=%~dp0"  REM ...\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\
+for %%I in ("%ORCH_DIR%..") do set "SCRIPT_DIR=%%~fI"  REM parent = ...\SCRPA_ArcPy
+set "SCRIPT=%SCRIPT_DIR%\RMS_Statistical_Export_FINAL_COMPLETE.py"
+set "OUT_DIR=%ORCH_DIR%"
+
+REM --- Existing config you already have (keep/tweak as you like) ---
+set "USE_AUTO_DATES=1"
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+set "EXTRA_FLAGS=--emit-qa --emit-period-csv --assert-min-rows %ASSERT_MIN_ROWS% --assert-max-lag %ASSERT_MAX_LAG% --assert-schema --assert-skin --zip-artifacts"
+set "OPEN_OUTPUT=1"
+```
+
+Everything else in your script can stay as-is. This just makes the `.bat` resilient if the OneDrive root changes or you copy the folder. * * *
+
+### How to run it (three easy ways)
+
+*   **Double-click:** open  
+    `C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat`
+*   **Run dialog (Win+R):**
+    ```
+    "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat"
+    ```
+*   **PowerShell:**
+    ```powershell
+    & "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat"
+    ```
+
+* * *
+
+### Optional: schedule it weekly (Task Scheduler)
+
+```cmd
+schtasks /Create ^
+ /SC WEEKLY /D TUE ^
+ /ST 09:00 ^
+ /TN "SCRPA TestWeek QA" ^
+ /TR "\"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat\""
+```
+
+that’s it—your `.bat` will always point to the right `RMS_Statistical_Export_FINAL_COMPLETE.py` and write outputs to the same `05_orchestrator` folder it lives in. ## Prompt:
+update the .bat file 
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ============================================================
+REM SCRPA Test-Week Runner with QA, CSV, assertions, and logging
+REM ============================================================
+
+REM ---------- CONFIG ----------
+set "SCRIPT_DIR=C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy"
+set "SCRIPT=%SCRIPT_DIR%\RMS_Statistical_Export_FINAL_COMPLETE.py"
+set "OUT_DIR=%SCRIPT_DIR%\05_orchestrator"
+
+REM Auto dates (1 = today & today-7; 0 = use manual below)
+set "USE_AUTO_DATES=1"
+
+REM Manual overrides (only used when USE_AUTO_DATES=0)
+set "CYCLE_ID="
+set "RANGE_START="  REM YYYY-MM-DD
+set "RANGE_END="    REM YYYY-MM-DD
+
+REM Assertions / QA flags (defaults; adjust as needed)
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+set "EXTRA_FLAGS=--emit-qa --emit-period-csv --assert-min-rows %ASSERT_MIN_ROWS% --assert-max-lag %ASSERT_MAX_LAG%"
+
+REM Open outputs automatically when done (1=yes, 0=no)
+set "OPEN_OUTPUT=1"
+REM ----------------------------
+
+REM ---------- Sanity checks ----------
+if not exist "%SCRIPT%" (
+  echo ERROR: Could not find script: "%SCRIPT%"
+  exit /b 2
+)
+if not exist "%OUT_DIR%" mkdir "%OUT_DIR%" >nul 2>nul
+
+REM ---------- Date variables (always compute TODAY for log names) ----------
+for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyyMMdd')"') do set "TODAY_COMPACT=%%I"
+
+if "%USE_AUTO_DATES%"=="1" (
+  for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyy-MM-dd')"') do set "END_ISO=%%I"
+  for /f %%I in ('powershell -NoP -C "(Get-Date).AddDays(-7).ToString('yyyy-MM-dd')"') do set "START_ISO=%%I"
+  set "CYCLE_ID=SCRPA-%TODAY_COMPACT%"
+  set "RANGE_START=%START_ISO%"
+  set "RANGE_END=%END_ISO%"
+)
+
+REM ---------- Pick Python ----------
+where py >nul 2>nul
+if %errorlevel%==0 (set "PYEXE=py -3") else (set "PYEXE=python")
+
+REM ---------- Run test-week ----------
+echo. echo === SCRPA Test-Week Run =====================================
+echo Script     : %SCRIPT%
+echo Output Dir : %OUT_DIR%
+echo Cycle ID   : %CYCLE_ID%
+echo Range      : %RANGE_START% to %RANGE_END%
+echo Flags      : %EXTRA_FLAGS%
+echo =============================================================
+echo. pushd "%SCRIPT_DIR%" >nul
+set "LOG=%OUT_DIR%\SCRPA_TestWeek_%TODAY_COMPACT%.log"
+"%PYEXE%" "%SCRIPT%" --test-week --cycle-id "%CYCLE_ID%" --range-start "%RANGE_START%" --range-end "%RANGE_END%" %EXTRA_FLAGS% > "%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+popd >nul
+
+echo Log file: "%LOG%"
+
+REM ---------- Result handling ----------
+if "%RC%"=="0" goto :success
+if "%RC%"=="3" goto :assert_fail
+
+echo ERROR: Script returned errorlevel %RC%. if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b %RC%
+
+:assert_fail
+echo WARNING: Assertions failed (errorlevel 3). if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+  echo Opening QA JSON for details...
+  if "%OPEN_OUTPUT%"=="1" start "" "%OUT_DIR%\SCRPA_QA_Summary.json"
+)
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b 3
+
+:success
+echo Success. REM ---------- Open latest outputs ----------
+if "%OPEN_OUTPUT%"=="1" (
+  REM Latest HTML
+  set "LATEST_HTML="
+  for /f "delims=" %%F in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_Combined_Executive_Summary_*.html" 2^>nul') do (
+    set "LATEST_HTML=%%F"
+    goto :found_html
+  )
+  :found_html
+  if defined LATEST_HTML (
+    echo Opening HTML: "%OUT_DIR%\%LATEST_HTML%"
+    start "" "%OUT_DIR%\%LATEST_HTML%"
+  ) else (
+    echo No HTML files found in "%OUT_DIR%".
+  ) REM Lag notice (optional)
+  if exist "%OUT_DIR%\SCRPA_LagDate_Notice.txt" (
+    echo Opening Lag Notice: "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+    start "" "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+  )
+
+  REM QA JSON (optional)
+  if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+    echo QA JSON: "%OUT_DIR%\SCRPA_QA_Summary.json"
+  )
+
+  REM Period counts CSV (optional)
+  if exist "%OUT_DIR%\SCRPA_Period_Counts.csv" (
+    echo Period CSV: "%OUT_DIR%\SCRPA_Period_Counts.csv"
+  )
+)
+
+echo Done. exit /b 0
+
+## Response:
+Got it—here’s your **updated `.bat`** with portable pathing, the new flags (`--assert-schema`, `--assert-skin`, `--zip-artifacts`), and exit-code handling for 3/4/5. It also opens the newest ZIP bundle on success. Save this over:  
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat`
+
+```bat
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ============================================================
+REM SCRPA Test-Week Runner with QA, CSV, assertions, logging, zipping
+REM ============================================================
+
+REM ---------- Portable pathing (derive from where this .bat lives) ----------
+set "ORCH_DIR=%~dp0"  REM ...\SCRPA_ArcPy\05_orchestrator\
+for %%I in ("%ORCH_DIR%..") do set "SCRIPT_DIR=%%~fI"  REM parent = ...\SCRPA_ArcPy
+set "SCRIPT=%SCRIPT_DIR%\RMS_Statistical_Export_FINAL_COMPLETE.py"
+set "OUT_DIR=%ORCH_DIR%"
+
+REM ---------- Config ----------
+REM Auto dates (1 = today & today-7; 0 = manual below)
+set "USE_AUTO_DATES=1"
+
+REM Manual overrides (used when USE_AUTO_DATES=0)
+set "CYCLE_ID="
+set "RANGE_START="  REM YYYY-MM-DD
+set "RANGE_END="    REM YYYY-MM-DD
+
+REM Assertions / QA flags (defaults; adjust as needed)
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+set "EXTRA_FLAGS=--emit-qa --emit-period-csv --assert-min-rows %ASSERT_MIN_ROWS% --assert-max-lag %ASSERT_MAX_LAG% --assert-schema --assert-skin --zip-artifacts"
+
+REM Open outputs automatically when done (1=yes, 0=no)
+set "OPEN_OUTPUT=1"
+
+REM ---------- Sanity checks ----------
+if not exist "%SCRIPT%" (
+  echo ERROR: Could not find script: "%SCRIPT%"
+  exit /b 2
+)
+if not exist "%OUT_DIR%" mkdir "%OUT_DIR%" >nul 2>nul
+
+REM ---------- Date variables (always compute TODAY for log names) ----------
+for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyyMMdd')"') do set "TODAY_COMPACT=%%I"
+
+if "%USE_AUTO_DATES%"=="1" (
+  for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyy-MM-dd')"') do set "END_ISO=%%I"
+  for /f %%I in ('powershell -NoP -C "(Get-Date).AddDays(-7).ToString('yyyy-MM-dd')"') do set "START_ISO=%%I"
+  set "CYCLE_ID=SCRPA-%TODAY_COMPACT%"
+  set "RANGE_START=%START_ISO%"
+  set "RANGE_END=%END_ISO%"
+)
+
+REM ---------- Pick Python ----------
+where py >nul 2>nul
+if %errorlevel%==0 (set "PYEXE=py -3") else (set "PYEXE=python")
+
+REM ---------- Run test-week ----------
+echo. echo === SCRPA Test-Week Run =====================================
+echo Script     : %SCRIPT%
+echo Output Dir : %OUT_DIR%
+echo Cycle ID   : %CYCLE_ID%
+echo Range      : %RANGE_START% to %RANGE_END%
+echo Flags      : %EXTRA_FLAGS%
+echo =============================================================
+echo. pushd "%SCRIPT_DIR%" >nul
+set "LOG=%OUT_DIR%\SCRPA_TestWeek_%TODAY_COMPACT%.log"
+"%PYEXE%" "%SCRIPT%" --test-week --cycle-id "%CYCLE_ID%" --range-start "%RANGE_START%" --range-end "%RANGE_END%" %EXTRA_FLAGS% > "%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+popd >nul
+
+echo Log file: "%LOG%"
+
+REM ---------- Result handling ----------
+if "%RC%"=="0" goto :success
+if "%RC%"=="3" goto :assert_fail_minmax
+if "%RC%"=="4" goto :assert_fail_schema
+if "%RC%"=="5" goto :assert_fail_skin
+
+echo ERROR: Script returned errorlevel %RC%. if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b %RC%
+
+:assert_fail_minmax
+echo WARNING: Assertions failed (min-rows / max-lag). Errorlevel 3.
+if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+  echo Opening QA JSON for details...
+  if "%OPEN_OUTPUT%"=="1" start "" "%OUT_DIR%\SCRPA_QA_Summary.json"
+)
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b 3
+
+:assert_fail_schema
+echo WARNING: Schema assertion failed (missing columns). Errorlevel 4.
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b 4
+
+:assert_fail_skin
+echo WARNING: Skin assertion failed (DIN/#0c233d not detected). Errorlevel 5.
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+exit /b 5
+
+:success
+echo Success. REM ---------- Open latest outputs ----------
+if "%OPEN_OUTPUT%"=="1" (
+  REM Latest HTML
+  set "LATEST_HTML="
+  for /f "delims=" %%F in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_Combined_Executive_Summary_*.html" 2^>nul') do (
+    set "LATEST_HTML=%%F"
+    goto :found_html
+  )
+  :found_html
+  if defined LATEST_HTML (
+    echo Opening HTML: "%OUT_DIR%\%LATEST_HTML%"
+    start "" "%OUT_DIR%\%LATEST_HTML%"
+  ) else (
+    echo No HTML files found in "%OUT_DIR%".
+  ) REM Lag notice (optional)
+  if exist "%OUT_DIR%\SCRPA_LagDate_Notice.txt" (
+    echo Opening Lag Notice: "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+    start "" "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+  )
+
+  REM QA JSON (optional)
+  if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+    echo QA JSON: "%OUT_DIR%\SCRPA_QA_Summary.json"
+  )
+
+  REM Period counts CSV (optional)
+  if exist "%OUT_DIR%\SCRPA_Period_Counts.csv" (
+    echo Period CSV: "%OUT_DIR%\SCRPA_Period_Counts.csv"
+  )
+
+  REM Latest ZIP (optional)
+  set "LATEST_ZIP="
+  for /f "delims=" %%Z in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_TestWeek_*.zip" 2^>nul') do (
+    set "LATEST_ZIP=%%Z"
+    goto :found_zip
+  )
+  :found_zip
+  if defined LATEST_ZIP (
+    echo ZIP: "%OUT_DIR%\%LATEST_ZIP%"
+    start "" "%OUT_DIR%\%LATEST_ZIP%"
+  )
+)
+
+echo Done. exit /b 0
+```
+
+If you want this to run from Task Scheduler every Tuesday, just point the task to this `.bat`—no path edits needed thanks to the portable header. ## Prompt:
+The .bat file is not working. If I double-click it, the screen flashes. Nothing happens. And then if I right-click and run it as an administrator, nothing is put into the output file. ## Response:
+Thought for 1m 6s
+
+Got you. Here’s a hardened, **portable** `Run_SCRPA_TestWeek.bat` that:
+
+*   auto-detects paths from where the `.bat` lives
+*   verifies write access to the output folder
+*   robustly finds Python (`py -3`, then `py`, then `python`, then `python3`)
+*   logs everything to a dated log file
+*   adds clear debug output and keeps the window open on errors (toggle `DEBUG=1`)
+*   uses your QA/assert flags + zips artifacts
+
+Save this **over** your current file at:  
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat`
+
+```bat
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ============================================================
+REM SCRPA Test-Week Runner (portable) with QA, CSV, assertions, logging, zipping
+REM ============================================================
+
+REM ---------- DEBUG (1 = verbose + keep window on error; 0 = quiet) ----------
+set "DEBUG=1"
+
+REM ---------- Portable pathing: derive dirs from this .bat ----------
+set "ORCH_DIR=%~dp0"  REM ...\SCRPA_ArcPy\05_orchestrator\
+for %%I in ("%ORCH_DIR%..") do set "SCRIPT_DIR=%%~fI"  REM parent = ...\SCRPA_ArcPy
+set "SCRIPT=%SCRIPT_DIR%\RMS_Statistical_Export_FINAL_COMPLETE.py"
+set "OUT_DIR=%ORCH_DIR%"
+
+REM ---------- Config ----------
+set "USE_AUTO_DATES=1"   REM 1 = today & today-7; 0 = manual below
+set "CYCLE_ID="
+set "RANGE_START="  REM YYYY-MM-DD
+set "RANGE_END="    REM YYYY-MM-DD
+
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+set "EXTRA_FLAGS=--emit-qa --emit-period-csv --assert-min-rows %ASSERT_MIN_ROWS% --assert-max-lag %ASSERT_MAX_LAG% --assert-schema --assert-skin --zip-artifacts"
+
+set "OPEN_OUTPUT=1"
+
+REM ---------- Sanity checks ----------
+if not exist "%SCRIPT%" (
+  echo ERROR: Python exporter not found: "%SCRIPT%"
+  if "%DEBUG%"=="1" pause
+  exit /b 2
+)
+if not exist "%OUT_DIR%" mkdir "%OUT_DIR%" >nul 2>nul
+
+REM verify we can write to OUT_DIR
+echo write_test> "%OUT_DIR%\_write_test.tmp" 2>nul
+if errorlevel 1 (
+  echo ERROR: Cannot write to OUT dir: "%OUT_DIR%"
+  if "%DEBUG%"=="1" pause
+  exit /b 2
+) else (
+  del "%OUT_DIR%\_write_test.tmp" >nul 2>nul
+)
+
+REM ---------- Date variables (PowerShell with fallback) ----------
+set "TODAY_COMPACT="
+set "END_ISO="
+set "START_ISO="
+
+where powershell >nul 2>nul
+if %errorlevel%==0 (
+  for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyyMMdd')"') do set "TODAY_COMPACT=%%I"
+  for /f %%I in ('powershell -NoP -C "(Get-Date).ToString('yyyy-MM-dd')"') do set "END_ISO=%%I"
+  for /f %%I in ('powershell -NoP -C "(Get-Date).AddDays(-7).ToString('yyyy-MM-dd')"') do set "START_ISO=%%I"
+) else (
+  REM Fallback (locale-dependent) – best effort
+  set "TODAY_COMPACT=%date:~10,4%%date:~4,2%%date:~7,2%"
+  set "END_ISO=%date:~10,4%-%date:~4,2%-%date:~7,2%"
+  REM crude 7-day fallback not implemented without PS; keep START_ISO empty
+)
+
+if "%USE_AUTO_DATES%"=="1" (
+  if not defined CYCLE_ID set "CYCLE_ID=SCRPA-%TODAY_COMPACT%"
+  if not defined RANGE_END set "RANGE_END=%END_ISO%"
+  if not defined RANGE_START set "RANGE_START=%START_ISO%"
+)
+
+REM ---------- Pick Python (py -3 -> py -> python -> python3) ----------
+set "PYEXE="
+where py >nul 2>nul && (py -3 -V >nul 2>&1) && set "PYEXE=py -3"
+if not defined PYEXE (
+  where py >nul 2>nul && (py -V >nul 2>&1) && set "PYEXE=py"
+)
+if not defined PYEXE (
+  where python >nul 2>nul && (python -V >nul 2>&1) && set "PYEXE=python"
+)
+if not defined PYEXE (
+  where python3 >nul 2>nul && (python3 -V >nul 2>&1) && set "PYEXE=python3"
+)
+if not defined PYEXE (
+  echo ERROR: No Python launcher found (py/python). Please install Python or add to PATH. if "%DEBUG%"=="1" pause
+  exit /b 2
+)
+
+REM ---------- Banner ----------
+echo. echo === SCRPA Test-Week Run =====================================
+echo Script     : %SCRIPT%
+echo Output Dir : %OUT_DIR%
+echo Cycle ID   : %CYCLE_ID%
+echo Range      : %RANGE_START% to %RANGE_END%
+echo Python     : %PYEXE%
+echo Flags      : %EXTRA_FLAGS%
+echo =============================================================
+echo. REM ---------- Execute ----------
+pushd "%SCRIPT_DIR%" >nul
+set "LOG=%OUT_DIR%\SCRPA_TestWeek_%TODAY_COMPACT%.log"
+echo Launching: "%PYEXE%" "%SCRIPT%" --test-week --cycle-id "%CYCLE_ID%" --range-start "%RANGE_START%" --range-end "%RANGE_END%" %EXTRA_FLAGS%
+"%PYEXE%" "%SCRIPT%" --test-week --cycle-id "%CYCLE_ID%" --range-start "%RANGE_START%" --range-end "%RANGE_END%" %EXTRA_FLAGS% > "%LOG%" 2>&1
+set "RC=%ERRORLEVEL%"
+popd >nul
+
+echo Log file: "%LOG%"
+
+REM ---------- Result handling ----------
+if "%RC%"=="0" goto :success
+if "%RC%"=="3" goto :assert_fail_minmax
+if "%RC%"=="4" goto :assert_fail_schema
+if "%RC%"=="5" goto :assert_fail_skin
+
+echo ERROR: Script returned errorlevel %RC%. if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+if "%DEBUG%"=="1" pause
+exit /b %RC%
+
+:assert_fail_minmax
+echo WARNING: Assertions failed (min-rows / max-lag). Errorlevel 3.
+if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+  echo Opening QA JSON for details...
+  if "%OPEN_OUTPUT%"=="1" start "" "%OUT_DIR%\SCRPA_QA_Summary.json"
+)
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+if "%DEBUG%"=="1" pause
+exit /b 3
+
+:assert_fail_schema
+echo WARNING: Schema assertion failed (missing columns). Errorlevel 4.
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+if "%DEBUG%"=="1" pause
+exit /b 4
+
+:assert_fail_skin
+echo WARNING: Skin assertion failed (DIN/#0c233d not detected). Errorlevel 5.
+if "%OPEN_OUTPUT%"=="1" start "" "%LOG%"
+if "%DEBUG%"=="1" pause
+exit /b 5
+
+:success
+echo Success. REM ---------- Open latest outputs ----------
+if "%OPEN_OUTPUT%"=="1" (
+  REM Latest HTML
+  set "LATEST_HTML="
+  for /f "delims=" %%F in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_Combined_Executive_Summary_*.html" 2^>nul') do (
+    set "LATEST_HTML=%%F"
+    goto :found_html
+  )
+  :found_html
+  if defined LATEST_HTML (
+    echo Opening HTML: "%OUT_DIR%\%LATEST_HTML%"
+    start "" "%OUT_DIR%\%LATEST_HTML%"
+  ) else (
+    echo No HTML files found in "%OUT_DIR%".
+  ) REM Lag notice (optional)
+  if exist "%OUT_DIR%\SCRPA_LagDate_Notice.txt" (
+    echo Opening Lag Notice: "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+    start "" "%OUT_DIR%\SCRPA_LagDate_Notice.txt"
+  )
+
+  REM QA JSON (optional)
+  if exist "%OUT_DIR%\SCRPA_QA_Summary.json" (
+    echo QA JSON: "%OUT_DIR%\SCRPA_QA_Summary.json"
+  )
+
+  REM Period counts CSV (optional)
+  if exist "%OUT_DIR%\SCRPA_Period_Counts.csv" (
+    echo Period CSV: "%OUT_DIR%\SCRPA_Period_Counts.csv"
+  )
+
+  REM Latest ZIP (optional)
+  set "LATEST_ZIP="
+  for /f "delims=" %%Z in ('dir /b /a:-d /o:-d "%OUT_DIR%\SCRPA_TestWeek_*.zip" 2^>nul') do (
+    set "LATEST_ZIP=%%Z"
+    goto :found_zip
+  )
+  :found_zip
+  if defined LATEST_ZIP (
+    echo ZIP: "%OUT_DIR%\%LATEST_ZIP%"
+    start "" "%OUT_DIR%\%LATEST_ZIP%"
+  )
+)
+
+if "%DEBUG%"=="1" pause
+echo Done. exit /b 0
+```
+
+### If it still “just flashes”
+
+*   Open **Command Prompt**, then run:
+    ```
+    "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat"
+    ```
+*   This will keep the console window open and print any errors; the detailed log is in:  
+    `...\05_orchestrator\SCRPA_TestWeek_YYYYMMDD.log`. If anything errors, the log will show exactly where; we can tweak from there. ## Prompt:
+'today-7' is not recognized as an internal or external command,
+operable program or batch file. ERROR: Python exporter not found: "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\RMS_Statistical_Export_FINAL_COMPLETE.py"
+Press any key to continue . . . I get the above error when I try running the .bat file. ## Response:
+Thought for 1m 3s
+
+Thanks for the error dump—that helps. Two things going on:
+
+1. The `'today-7'` error means the old script tried to compute dates without PowerShell and literally ran a token like `today-7`. 2. The “Python exporter not found” path suggests the `.bat` didn’t correctly locate your Python script in `...\SCRPA_ArcPy\`. I fixed both with a hardened, **portable** batch file that:
+
+*   Auto-detects the **parent directory** of the `.bat` and finds the **first existing** exporter among the three you use
+*   Uses the **absolute PowerShell path** (so PATH issues can’t break date math)
+*   Gives clear errors and keeps the window open in debug mode
+
+Paste this **entire** script over your file:  
+`C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\05_orchestrator\Run_SCRPA_TestWeek.bat`
+
+```bat
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ============================================================
+REM SCRPA Test-Week Runner (portable) with QA/CSV/assertions/logging/zipping
+REM ============================================================
+
+REM ---------- DEBUG (1 = verbose + keep window on error; 0 = quiet) ----------
+set "DEBUG=1"
+
+REM ---------- Portable pathing: derive dirs from where this .bat lives ----------
+set "ORCH_DIR=%~dp0"  REM ...\SCRPA_ArcPy\05_orchestrator\
+for %%I in ("%ORCH_DIR%..") do set "SCRIPT_DIR=%%~fI"  REM parent = ...\SCRPA_ArcPy
+set "OUT_DIR=%ORCH_DIR%"
+
+REM ---------- Pick exporter (first that exists) ----------
+set "SCRIPT="
+for %%S in (
+  "RMS_Statistical_Export_FINAL_COMPLETE.py"
+  "RMS_Statistical_Export_PANDAS_FIXED.py"
+  "RMS_Statistical_Export.py"
+) do (
+  if exist "%SCRIPT_DIR%\%%~S" (
+    set "SCRIPT=%SCRIPT_DIR%\%%~S"
+    goto :found_script
+  )
+)
+:found_script
+if not defined SCRIPT (
+  echo ERROR: Could not find any exporter in "%SCRIPT_DIR%". echo Tried:
+  echo   - RMS_Statistical_Export_FINAL_COMPLETE.py
+  echo   - RMS_Statistical_Export_PANDAS_FIXED.py
+  echo   - RMS_Statistical_Export.py
+  if "%DEBUG%"=="1" pause
+  exit /b 2
+)
+
+REM ---------- Config ----------
+set "USE_AUTO_DATES=1"   REM 1 = today & today-7; 0 = manual below
+
+REM Manual overrides (only used when USE_AUTO_DATES=0)
+set "CYCLE_ID="
+set "RANGE_START="  REM YYYY-MM-DD
+set "RANGE_END="    REM YYYY-MM-DD
+
+REM Assertions / QA flags (defaults; adjust as needed)
+set "ASSERT_MIN_ROWS=8"
+set "ASSERT_MAX_LAG=5"
+set "EXTRA_FLAGS=--emit-qa --emit-period-csv --assert-min-rows %ASSERT_MIN_ROWS% --assert-max-lag %ASSERT_MAX_LAG% --assert-schema --assert-skin --zip-artifacts"
+
+REM Open outputs automatically when done (1=yes, 0=no)
+set "OPEN_OUTPUT=1"
+
+REM ---------- Sanity checks ----------
+if not exist "%OUT_DIR%" mkdir "%OUT_DIR%" >nul 2>nul
+
+REM verify we can write to OUT_DIR
+echo write_test> "%OUT_DIR%\_write_test.tmp" 2>nul
+if errorlevel 1 (
+  echo ERROR: Cannot write to OUT dir: "%OUT_DIR%"
+  if "%DEBUG%"=="1" pause
+  exit /b 2
+) else (
+  del "%OUT_DIR%\_write_test.tmp" >nul 2>nul
+)
+
+REM ---------- Use ABSOLUTE PowerShell path for date math ----------
+set "PSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%PSH%" (
+  echo ERROR: PowerShell not found at "%PSH%".

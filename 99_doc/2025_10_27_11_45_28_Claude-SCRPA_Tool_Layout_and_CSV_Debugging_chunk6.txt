@@ -1,0 +1,388 @@
+Attachment 5 has the layout I envisioned. Pattern Offender/Suspects image is 8.33 width by 1.98 height
+Charts is 5.84 w by 4.00 h
+map/placeholder 5.6 w by 4.03 h
+I distributed the chart and map placeholder I align to slide and distributed horizontally
+
+
+
+## Response:
+6/22/2025, 5:50:02 PM
+
+
+
+**SCRPA PowerPoint Template Fixes & Block Code Integration**
+
+````markdown
+# 🕒 2025-06-22-22-30-00
+# SCRPA_Place_and_Time/powerpoint_template_fixes
+# Author: R. A. Carucci
+# Purpose: PowerPoint template restructuring and Block M code integration for improved output
+
+## 🎯 **IMMEDIATE FIXES REQUIRED**
+
+### **1. PowerPoint Template Restructuring**
+**Problem**: Elements layering on top of existing charts/maps
+**Solution**: Remove existing elements, create placeholder shapes with exact dimensions
+
+#### **Template Modifications Needed:**
+```
+DELETE:
+- Existing chart image/object
+- Existing map image/object
+- Current Pattern Offenders/Suspects content
+
+REPLACE WITH PLACEHOLDER SHAPES:
+1. Pattern Offenders/Suspects: 8.33" W × 1.98" H
+2. Chart Placeholder: 5.84" W × 4.00" H  
+3. Map Placeholder: 5.60" W × 4.03" H
+```
+
+#### **Placeholder Shape Text:**
+- **Pattern Offenders**: "INSERT_INCIDENT_TABLE_HERE"
+- **Chart**: "INSERT_CHART_HERE" 
+- **Map**: "INSERT_MAP_HERE"
+
+---
+
+### **2. Block M Code Integration**
+**Current Issue**: CSV shows "BLOCK 82424995" instead of proper addresses
+**Fix**: Implement your provided Block M code to format addresses correctly
+
+#### **Enhanced Address Processing Function:**
+```python
+def extract_proper_block_address(row_data):
+    """
+    Use Block M code logic to format addresses properly
+    Based on R. Carucci's address formatting requirements
+    """
+    try:
+        # Get raw address data
+        fulladdr = row_data.get('fulladdr', '')
+        
+        if fulladdr and 'BLOCK' not in fulladdr.upper():
+            # Apply Block M code formatting logic here
+            # (Insert your specific M code logic)
+            return format_block_address(fulladdr)
+        else:
+            # Fallback to coordinate-based block
+            return f"BLOCK {extract_block_number(row_data)}"
+            
+    except Exception as e:
+        return "Address Unavailable"
+
+def format_block_address(address):
+    """
+    Apply Block M code formatting
+    Replace with your specific Block M code logic
+    """
+    # YOUR BLOCK M CODE LOGIC HERE
+    # Example formatting based on common patterns:
+    
+    # Remove apartment/unit numbers
+    address = re.sub(r'\s+(APT|UNIT|#)\s*\d+. *$', '', address, flags=re.IGNORECASE)
+    
+    # Extract block number from street address
+    # Format as "100 BLOCK MAIN ST" instead of "123 MAIN ST"
+    match = re.match(r'(\d+)\s+(.+)', address.strip())
+    if match:
+        number = int(match.group(1))
+        street = match.group(2)
+        
+        # Round to nearest 100 for block format
+        block_num = (number // 100) * 100
+        return f"{block_num} BLOCK {street.upper()}"
+    
+    return address.upper()
+```
+
+---
+
+### **3. Map Zoom/Extent Fix**
+**Problem**: MV Theft map zoomed too far out, city boundaries not visible
+**Solution**: Auto-calculate extent based on incident locations with proper buffer
+
+#### **Enhanced Map Extent Function:**
+```python
+def calculate_optimal_map_extent(layer, map_frame):
+    """
+    Calculate optimal extent showing all incidents with minimal zoom
+    Ensure city boundaries are visible
+    """
+    try:
+        import arcpy
+        
+        # Get incident extent
+        incident_extent = arcpy.Describe(layer).extent
+        
+        if incident_extent.width == 0 or incident_extent.height == 0:
+            # Single point or no data - use city boundaries
+            return get_city_boundary_extent()
+        
+        # Add 20% buffer around incidents
+        buffer_factor = 0.2
+        width_buffer = incident_extent.width * buffer_factor
+        height_buffer = incident_extent.height * buffer_factor
+        
+        # Create buffered extent
+        new_extent = arcpy.Extent(
+            incident_extent.XMin - width_buffer,
+            incident_extent.YMin - height_buffer,
+            incident_extent.XMax + width_buffer,
+            incident_extent.YMax + height_buffer
+        )
+        
+        # Ensure minimum zoom level shows city boundaries
+        min_extent = get_city_boundary_extent()
+        if new_extent.width < min_extent.width * 0.3:
+            new_extent = min_extent
+        
+        # Apply to map frame
+        map_frame.camera.setExtent(new_extent)
+        
+        return True
+        
+    except Exception as e:
+        arcpy.AddError(f"❌ Extent calculation failed: {e}")
+        return False
+
+def get_city_boundary_extent():
+    """
+    Return Hackensack city boundary extent for minimum zoom
+    """
+    # Hackensack approximate bounds (adjust as needed)
+    return arcpy.Extent(
+        -74.0760, 40.8650,  # Southwest corner  
+        -74.0180, 40.9150   # Northeast corner
+    )
+```
+
+---
+
+### **4. PowerPoint Auto-Assembly Enhancement**
+**Goal**: Replace placeholder shapes with generated images at exact dimensions
+
+#### **Enhanced PowerPoint Assembly:**
+```python
+def replace_placeholder_with_image(slide, placeholder_text, image_path, width_inches, height_inches):
+    """
+    Find placeholder shape and replace with image at exact dimensions
+    """
+    try:
+        from pptx.util import Inches
+        
+        for shape in slide.shapes:
+            if hasattr(shape, 'text') and placeholder_text in shape.text:
+                # Get position
+                left = shape.left
+                top = shape.top
+                
+                # Remove placeholder
+                slide.shapes._spTree.remove(shape._element)
+                
+                # Add image at exact size
+                slide.shapes.add_picture(
+                    image_path, 
+                    left, top,
+                    width=Inches(width_inches),
+                    height=Inches(height_inches)
+                )
+                
+                return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"❌ Placeholder replacement failed: {e}")
+        return False
+
+def auto_assemble_powerpoint_enhanced(output_folder, crime_types):
+    """
+    Enhanced PowerPoint assembly with exact placeholder replacement
+    """
+    try:
+        from pptx import Presentation
+        
+        # Load template
+        ppt_files = glob.glob(os.path.join(output_folder, "*.pptx"))
+        if not ppt_files:
+            return False
+            
+        prs = Presentation(ppt_files[0])
+        
+        for i, crime_type in enumerate(crime_types):
+            if i >= len(prs.slides):
+                continue
+                
+            slide = prs.slides[i]
+            crime_folder = get_crime_type_folder(crime_type, get_date_string())
+            filename_prefix = get_standardized_filename(crime_type)
+            
+            # Replace chart placeholder
+            chart_path = os.path.join(crime_folder, f"{filename_prefix}_Chart.png")
+            if os.path.exists(chart_path):
+                replace_placeholder_with_image(
+                    slide, "INSERT_CHART_HERE", chart_path, 5.84, 4.00
+                )
+            
+            # Replace map placeholder  
+            map_path = os.path.join(crime_folder, f"{filename_prefix}_Map.png")
+            if os.path.exists(map_path):
+                replace_placeholder_with_image(
+                    slide, "INSERT_MAP_HERE", map_path, 5.60, 4.03
+                )
+            
+            # Replace incident table placeholder
+            table_paths = [
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_AutoFit.png"),
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+            ]
+            
+            for table_path in table_paths:
+                if os.path.exists(table_path):
+                    replace_placeholder_with_image(
+                        slide, "INSERT_INCIDENT_TABLE_HERE", table_path, 8.33, 1.98
+                    )
+                    break
+        
+        # Save updated presentation
+        prs.save(ppt_files[0])
+        return True
+        
+    except Exception as e:
+        print(f"❌ PowerPoint assembly failed: {e}")
+        return False
+```
+
+---
+
+### **5. Incident Table Image Generation**
+**For Attachment 2 scenario**: Generate table image when manual entry required
+
+#### **Auto-Fit Incident Table:**
+```python
+def create_incident_table_image_autofit(crime_type, incidents_data, output_path):
+    """
+    Create incident table image with proper Block formatting
+    Dimensions: 8.33" × 1.98" (PowerPoint placeholder size)
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Convert to pixels: 8.33" × 1.98" at 200 DPI
+        width = int(8.33 * 200)  # 1666 pixels
+        height = int(1.98 * 200)  # 396 pixels
+        
+        img = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(img)
+        
+        # Process incidents with proper Block formatting
+        formatted_incidents = []
+        for incident in incidents_data:
+            # Apply Block M code formatting
+            proper_block = extract_proper_block_address(incident)
+            
+            formatted_incident = {
+                **incident,
+                'block': proper_block  # Replace with formatted address
+            }
+            formatted_incidents.append(formatted_incident)
+        
+        # Create table layout (implementation details...)
+        # Use provided dimensions and format
+        
+        img.save(output_path, 'PNG', dpi=(200, 200))
+        return True
+        
+    except Exception as e:
+        print(f"❌ Incident table creation failed: {e}")
+        return False
+```
+
+---
+
+## 📋 **IMPLEMENTATION STEPS**
+
+### **Step 1: PowerPoint Template Update** ⏰ *30 minutes*
+1. **Open template file**: `SCRPA_REPORT.pptx`
+2. **Delete existing objects**: Charts, maps, pattern analysis content
+3. **Create placeholder rectangles** with exact dimensions:
+   - Pattern table: 8.33" × 1.98"
+   - Chart: 5.84" × 4.00"  
+   - Map: 5.60" × 4.03"
+4. **Add placeholder text** to each shape
+5. **Distribute horizontally** and align to slide
+6. **Save template**
+
+### **Step 2: Block M Code Integration** ⏰ *45 minutes*
+1. **Add Block formatting function** to `incident_table_automation.py`
+2. **Update CSV export** to use proper Block format
+3. **Test with sample addresses** to verify formatting
+4. **Ensure backward compatibility** with coordinate fallback
+
+### **Step 3: Map Extent Enhancement** ⏰ *30 minutes*
+1. **Add extent calculation** to `map_export.py`
+2. **Test with MV Theft data** to ensure proper zoom
+3. **Verify city boundaries** are visible
+4. **Apply to all crime types**
+
+### **Step 4: PowerPoint Assembly** ⏰ *60 minutes*
+1. **Implement placeholder replacement** function
+2. **Test with generated images** at exact dimensions
+3. **Verify positioning** and alignment
+4. **Test with multiple crime types**
+
+---
+
+## 🎯 **SUCCESS CRITERIA**
+
+- **CSV shows**: "100 BLOCK MAIN ST" instead of "BLOCK 82424995"
+- **Maps display**: Appropriate zoom with city boundaries visible
+- **PowerPoint**: Clean assembly with no overlapping elements
+- **Incident tables**: Auto-generated at exact 8.33" × 1.98" dimensions
+- **All elements**: Properly positioned and formatted
+
+---
+
+## ⚠️ **QUESTIONS FOR YOU**
+
+1. **Block M Code**: Can you provide the specific Block M code logic for address formatting? 2. **PowerPoint Template**: Should I provide the exact PowerPoint template modification steps, or would you prefer to handle the template changes manually? 3. **City Boundaries Layer**: What's the exact name of the city boundaries layer in your ArcGIS project? 4. **Placeholder Text**: Are the suggested placeholder texts ("INSERT_CHART_HERE") acceptable, or do you prefer different text? ---
+
+**Ready to implement these fixes once you confirm the Block M code details and template modification approach! **
+````
+
+Looking at your success but need these key fixes! The images show exactly what needs addressing:
+
+## 🎯 **PRIORITY FIXES**
+
+### **1. Block Address Format Issue**
+Your CSV shows "BLOCK 82424995" - need to integrate your **Block M code** to get proper format like "100 BLOCK MAIN ST"
+
+### **2. Map Zoom Too Far Out** 
+The Sexual Offenses map shows way too much area - should be zoomed to just show the incident with minimal buffer
+
+### **3. PowerPoint Template Structure**
+You're right - the elements are layering. Need to:
+- **Remove existing chart/map objects** from template
+- **Create placeholder shapes** with your exact dimensions:
+  - Pattern table: **8.33" W × 1.98" H**  
+  - Chart: **5.84" W × 4.00" H**
+  - Map: **5.60" W × 4.03" H**
+
+### **4. Incident Table as Image**
+Yes! The table in attachment 2 should be **generated as an image** for PowerPoint insertion, especially when manual entry is needed. ## 🔧 **IMMEDIATE ACTIONS**
+
+**Can you provide:**
+1. **Your Block M code** - the specific logic for formatting addresses properly
+2. **Confirm**: Should I create the PowerPoint template modification steps, or will you handle template changes manually? **I'll implement:**
+- Auto-zoom calculation for maps (tight to incidents + small buffer)
+- Enhanced PowerPoint assembly with exact dimension replacement
+- Incident table image generation at 8.33" × 1.98"
+
+Your vision in attachment 5 is perfect - clean layout with proper spacing and alignment. The system is working great, just need these formatting refinements! **Ready to code the fixes once you share the Block M code details! **
+
+
+
+## Prompt:
+6/22/2025, 6:05:05 PM
+
+!

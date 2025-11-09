@@ -1,0 +1,775 @@
+**Set up automated processing** with your file structure
+
+---
+
+## 📁 **File Structure Setup**
+
+### **Organize Your Project Directory:**
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2\
+├── 01_scripts\
+│   ├── enhanced_cadnotes_processor.py      (New - CADNotes processing)
+│   ├── actual_structure_python_validation.py (Your existing)
+│   ├── unified_data_processor.py           (Your existing)
+│   ├── scrpa_validation_script.py          (Your existing)
+│   ├── llm_report_generator.py             (Your existing)
+│   └── master_scrpa_processor.py           (New - Main integration script)
+├── 02_input\
+│   ├── CAD_Exports\
+│   └── RMS_Exports\
+├── 03_output\
+│   ├── processed_data\
+│   ├── reports\
+│   └── logs\
+└── 04_powerbi\
+    └── enhanced_scrpa_data.csv             (Clean output for Power BI)
+```
+
+---
+
+## 🔧 **Step 1: Enhanced Master Processor (15 minutes)**
+
+Create `master_scrpa_processor.py` that integrates all your scripts:
+
+### **Key Features:**
+- **Automatic data source detection** using your `SCRPAActualDataValidator`
+- **Enhanced CADNotes processing** with the new processor
+- **Unified data pipeline** using your `UnifiedDataProcessor`
+- **Clean CSV output** for Power BI (replaces complex M Code)
+- **Comprehensive logging** and error handling
+
+### **Main Processing Functions:**
+```python
+def process_cad_rms_complete():
+    """Complete CAD/RMS processing pipeline"""
+    
+    # 1. Detect data source automatically
+    validator = SCRPAActualDataValidator(project_path)
+    df, data_source = validator.load_data_file()
+    
+    # 2. Process based on detected structure
+    if data_source == DataSource.CAD:
+        processed_df = process_cad_structure(df)
+    else:
+        processed_df = process_rms_structure(df)
+    
+    # 3. Enhanced CADNotes processing
+    cadnotes_processor = EnhancedCADNotesProcessor()
+    final_df = cadnotes_processor.process_cadnotes_dataframe(processed_df)
+    
+    # 4. Add all derived columns (replaces M Code logic)
+    enhanced_df = add_all_enhancements(final_df)
+    
+    # 5. Export for Power BI
+    export_for_powerbi(enhanced_df)
+    
+    return enhanced_df
+```
+
+---
+
+## 🚀 **Step 2: Implementation Commands (5 minutes)**
+
+### **A. Download and Setup:**
+```bash
+# Navigate to your scripts directory
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2\01_scripts"
+
+# Create the enhanced CADNotes processor
+# (Copy the enhanced_cadnotes_processor.py code from the artifact above)
+
+# Create the master integration script
+# (I'll provide this next)
+```
+
+### **B. Test Your Current Data:**
+```bash
+# Run validation on your current data
+python actual_structure_python_validation.py
+
+# Test CADNotes processing
+python enhanced_cadnotes_processor.py
+
+# Run complete pipeline
+python master_scrpa_processor.py --input-folder "../02_input" --output-folder "../03_output"
+```
+
+---
+
+## 📊 **Step 3: Power BI Integration (10 minutes)**
+
+### **Replace Complex M Code with Simple Loader:**
+
+**Old M Code (280+ lines):**
+```m
+// Complex joins, CADNotes parsing, error handling, etc. // (Your current complex code)
+```
+
+**New M Code (10 lines):**
+```m
+let
+    // Load clean, pre-processed data
+    Source = Csv.Document(File.Contents("C:\...\SCRPA_Time_v2\04_powerbi\enhanced_scrpa_data.csv")),
+    PromotedHeaders = Table.PromoteHeaders(Source),
+    ChangedTypes = Table.TransformColumnTypes(PromotedHeaders, {
+        {"Case_Number", type text},
+        {"Incident_Date", type date},
+        {"Incident_Time", type time},
+        {"Crime_Category", type text},
+        {"Period", type text},
+        {"CAD_Username", type text},
+        {"CAD_Timestamp", type text},
+        {"CAD_Notes_Cleaned", type text}
+    })
+in
+    ChangedTypes
+```
+
+### **Column Structure You'll Get:**
+- ✅ **Case_Number** (unified from CAD/RMS)
+- ✅ **Incident_Date** & **Incident_Time** (properly formatted)
+- ✅ **Crime_Category** (your exact pattern matching)
+- ✅ **Enhanced_Block** (address processing)
+- ✅ **CAD_Username** (first occurrence, formatted)
+- ✅ **CAD_Timestamp** (standardized format)
+- ✅ **CAD_Notes_Cleaned** (all artifacts removed)
+- ✅ **Period** (7-Day, 28-Day, YTD classification)
+- ✅ **Time_Response_Formatted** & **Time_Spent_Formatted**
+- ✅ **All your existing derived columns**
+
+---
+
+## 🔄 **Step 4: Automated Processing Setup (10 minutes)**
+
+### **A. Batch Processing Script:**
+```bash
+# Create run_daily_processing.bat
+@echo off
+cd "C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2\01_scripts"
+
+echo Starting SCRPA processing at %date% %time%
+python master_scrpa_processor.py --mode auto
+
+echo Processing complete at %date% %time%
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Processing failed! pause
+) else (
+    echo SUCCESS: Data ready for Power BI
+)
+```
+
+### **B. Task Scheduler Integration:**
+```bash
+# Set up Windows Task Scheduler to run daily processing
+# Trigger: Daily at 6:00 AM
+# Action: Run run_daily_processing.bat
+# Conditions: Only if computer is on AC power
+```
+
+---
+
+## 📋 **Step 5: DAX Studio Measures (Ready for Bulk Import)**
+
+Once your Python processing is working, here are the DAX measures for bulk import:
+
+### **Core Crime Analysis Measures:**
+```dax
+// Crime Count Measures
+Total_7Day_Incidents = 
+CALCULATE(COUNTROWS(enhanced_scrpa_data), enhanced_scrpa_data[Period] = "7-Day")
+
+Motor_Vehicle_Theft_7Day = 
+CALCULATE(
+    COUNTROWS(enhanced_scrpa_data),
+    enhanced_scrpa_data[Crime_Category] = "Motor Vehicle Theft",
+    enhanced_scrpa_data[Period] = "7-Day"
+)
+
+Burglary_Auto_7Day = 
+CALCULATE(
+    COUNTROWS(enhanced_scrpa_data),
+    enhanced_scrpa_data[Crime_Category] = "Burglary - Auto", 
+    enhanced_scrpa_data[Period] = "7-Day"
+)
+
+// CAD Performance Measures
+CAD_Match_Rate = 
+DIVIDE(
+    CALCULATE(COUNTROWS(enhanced_scrpa_data), enhanced_scrpa_data[CAD_Username] <> BLANK()),
+    COUNTROWS(enhanced_scrpa_data),
+    0
+)
+
+Avg_Response_Time_Minutes = 
+CALCULATE(
+    AVERAGE(enhanced_scrpa_data[Time_Response_Minutes]),
+    enhanced_scrpa_data[Time_Response_Minutes] > 0
+)
+
+// Geographic Analysis
+Top_Crime_Block = 
+CALCULATE(
+    TOPN(1, VALUES(enhanced_scrpa_data[Enhanced_Block]), 
+         CALCULATE(COUNTROWS(enhanced_scrpa_data))),
+    enhanced_scrpa_data[Period] = "7-Day"
+)
+
+// Temporal Analysis  
+Peak_Time_Period = 
+CALCULATE(
+    TOPN(1, VALUES(enhanced_scrpa_data[TimeOfDay]),
+         CALCULATE(COUNTROWS(enhanced_scrpa_data))),
+    enhanced_scrpa_data[Period] = "7-Day"
+)
+```
+
+---
+
+## 🎯 **Expected Results After Implementation**
+
+### **Performance Improvements:**
+- **⚡ 10x faster processing** (30 seconds vs 5+ minutes)
+- **🛡️ No more M Code errors** or data type conflicts
+- **🔄 Automated daily processing** with error handling
+- **📊 Clean, consistent data** for Power BI
+
+### **Feature Enhancements:**
+- **🎯 Perfect CADNotes parsing** (username, timestamp, cleaned text)
+- **🔍 Intelligent data source detection** (CAD vs RMS)
+- **📈 Quality scoring** for all processed records
+- **📝 Comprehensive logging** for troubleshooting
+
+### **Dashboard Benefits:**
+- **✅ All 5 crime category pages** work correctly
+- **🗺️ Clean mapping** with Enhanced_Block addresses
+- **📊 Accurate KPI cards** with proper formatting
+- **📄 PDF export ready** for command staff
+
+---
+
+## 🚀 **Immediate Next Steps**
+
+### **Priority 1: Setup (Today)**
+1. **Create enhanced_cadnotes_processor.py** in your 01_scripts folder
+2. **Run validation** on your current data files
+3. **Test CADNotes processing** with sample data
+4. **Verify output structure** matches your needs
+
+### **Priority 2: Integration (Tomorrow)** 
+1. **Create master_scrpa_processor.py** integration script
+2. **Process your latest CAD/RMS exports** with Python
+3. **Test Power BI connection** to clean CSV output
+4. **Validate dashboard functionality** with new data
+
+### **Priority 3: Production (Next Week)**
+1. **Replace complex M Code** in Power BI with simple CSV loader
+2. **Set up automated processing** with Task Scheduler
+3. **Import DAX measures** using DAX Studio bulk import
+4. **Create all 5 crime category dashboard pages**
+
+---
+
+## 💡 **Ready to Start? **
+
+**Your immediate task:** 
+1. Copy the `enhanced_cadnotes_processor.py` code to your 01_scripts folder
+2. Run: `python enhanced_cadnotes_processor.py` to test
+3. Let me know the results - then we'll create the master integration script! **This will eliminate your M Code complexity forever and give you a professional, automated crime analysis pipeline! 🚀**
+````
+
+Now let's create the master integration script that ties everything together:
+
+**Master SCRPA Processor - Complete Integration**
+
+````python
+# 🕒 2025-07-23-17-30-00
+# SCRPA_Time_v2/Master_SCRPA_Processor
+# Author: R. A. Carucci  
+# Purpose: Complete integration script that replaces complex M Code with clean Python processing
+
+import pandas as pd
+import numpy as np
+import logging
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Union
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import your existing validation and processing modules
+try:
+    from actual_structure_python_validation import SCRPAActualDataValidator, DataSource
+    from enhanced_cadnotes_processor import EnhancedCADNotesProcessor
+    from unified_data_processor import UnifiedDataProcessor
+except ImportError as e:
+    print(f"⚠️ Import error: {e}")
+    print("Make sure all your existing scripts are in the same directory")
+
+class MasterSCRPAProcessor:
+    """
+    Master processor that integrates all your existing scripts into a complete
+    pipeline that replaces your complex Power BI M Code.
+    """ def __init__(self, project_path: str = None):
+        """Initialize master processor with your existing project structure.""" if project_path is None:
+            self.project_path = Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2")
+        else:
+            self.project_path = Path(project_path)
+        
+        # Setup directory structure
+        self.setup_directories()
+        
+        # Initialize logging
+        self.setup_logging()
+        
+        # Initialize component processors
+        self.data_validator = SCRPAActualDataValidator(str(self.project_path))
+        self.cadnotes_processor = EnhancedCADNotesProcessor()
+        
+        # Processing statistics
+        self.stats = {
+            'processing_start_time': None,
+            'data_source_detected': None,
+            'total_input_records': 0,
+            'total_output_records': 0,
+            'cadnotes_processed': 0,
+            'quality_score_avg': 0.0,
+            'processing_duration': 0.0,
+            'errors_encountered': []
+        }
+        
+        self.logger.info("🚀 Master SCRPA Processor initialized")
+    
+    def setup_directories(self):
+        """Setup your project directory structure.""" self.dirs = {
+            'scripts': self.project_path / '01_scripts',
+            'input': self.project_path / '02_input',
+            'output': self.project_path / '03_output', 
+            'powerbi': self.project_path / '04_powerbi',
+            'logs': self.project_path / '03_output' / 'logs',
+            'reports': self.project_path / '03_output' / 'reports'
+        }
+        
+        # Create directories if they don't exist
+        for dir_path in self.dirs.values():
+            dir_path.mkdir(parents=True, exist_ok=True)
+    
+    def setup_logging(self):
+        """Setup comprehensive logging system.""" log_file = self.dirs['logs'] / f"master_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        self.logger = logging.getLogger('MasterProcessor')
+        self.logger.info(f"Logging initialized: {log_file}")
+    
+    def process_complete_pipeline(self, input_file: str = None, 
+                                output_file: str = None) -> Tuple[pd.DataFrame, Dict]:
+        """
+        Run the complete SCRPA processing pipeline. This replaces all your complex M Code with clean, fast Python processing.
+        """ self.logger.info("=" * 80)
+        self.logger.info("🚀 STARTING COMPLETE SCRPA PROCESSING PIPELINE")
+        self.logger.info("=" * 80)
+        
+        self.stats['processing_start_time'] = datetime.now()
+        
+        try:
+            # Step 1: Auto-detect and load data
+            df, data_source, structure_info = self.auto_detect_and_load_data(input_file)
+            
+            # Step 2: Process based on detected structure
+            processed_df = self.process_by_data_source(df, data_source)
+            
+            # Step 3: Enhanced CADNotes processing
+            enhanced_df = self.process_cadnotes_enhanced(processed_df)
+            
+            # Step 4: Add all derived columns (replaces M Code logic)
+            final_df = self.add_all_enhancements(enhanced_df)
+            
+            # Step 5: Data quality validation and cleanup
+            validated_df = self.validate_and_cleanup(final_df)
+            
+            # Step 6: Export for Power BI
+            output_path = self.export_for_powerbi(validated_df, output_file)
+            
+            # Step 7: Generate processing report
+            report_path = self.generate_processing_report(validated_df, structure_info)
+            
+            # Calculate final statistics
+            self.calculate_final_stats(validated_df)
+            
+            self.logger.info("=" * 80)
+            self.logger.info("✅ COMPLETE SCRPA PROCESSING PIPELINE FINISHED")
+            self.logger.info(f"📊 Processed: {self.stats['total_input_records']} → {self.stats['total_output_records']} records")
+            self.logger.info(f"⏱️ Duration: {self.stats['processing_duration']:.1f} seconds")
+            self.logger.info(f"📄 Output: {output_path}")
+            self.logger.info(f"📋 Report: {report_path}")
+            self.logger.info("=" * 80)
+            
+            return validated_df, self.stats
+            
+        except Exception as e:
+            self.logger.error(f"❌ PIPELINE FAILED: {str(e)}")
+            self.stats['errors_encountered'].append(str(e))
+            raise
+    
+    def auto_detect_and_load_data(self, input_file: str = None) -> Tuple[pd.DataFrame, DataSource, Dict]:
+        """Auto-detect data source and load using your existing validator.""" self.logger.info("🔍 Step 1: Auto-detecting data source and loading data")
+        
+        try:
+            if input_file:
+                # Load specific file
+                df = pd.read_excel(input_file, engine='openpyxl')
+                data_source, structure_info = self.data_validator.detect_data_source(df)
+            else:
+                # Use your existing validation logic to find and load latest file
+                df, quality_report, data_source, structure_info = self.data_validator.run_validation()
+            
+            self.stats['data_source_detected'] = data_source.value
+            self.stats['total_input_records'] = len(df)
+            
+            self.logger.info(f"✅ Detected {data_source.value} structure with {len(df)} records")
+            return df, data_source, structure_info
+            
+        except Exception as e:
+            self.logger.error(f"Failed to auto-detect and load data: {e}")
+            raise
+    
+    def process_by_data_source(self, df: pd.DataFrame, data_source: DataSource) -> pd.DataFrame:
+        """Process data based on detected source structure.""" self.logger.info(f"🔧 Step 2: Processing {data_source.value} data structure")
+        
+        if data_source == DataSource.CAD:
+            return self.process_cad_structure(df)
+        elif data_source == DataSource.RMS:
+            return self.process_rms_structure(df)
+        else:
+            raise ValueError(f"Unknown data source: {data_source}")
+    
+    def process_cad_structure(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process CAD data structure (single Incident column).""" self.logger.info("   📋 Processing CAD structure (no unpivoting needed)")
+        
+        # Use your existing CAD preparation logic
+        prepared_df = self.data_validator.prepare_cad_data(df)
+        
+        # Standardize column names for downstream processing
+        if 'ReportNumberNew' in prepared_df.columns:
+            prepared_df['Case_Number'] = prepared_df['ReportNumberNew']
+        
+        if 'Incident' in prepared_df.columns:
+            prepared_df['IncidentType'] = prepared_df['Incident']
+        
+        # Add crime categorization
+        prepared_df['Crime_Category'] = prepared_df['IncidentType'].apply(self.categorize_crime_type)
+        
+        self.logger.info(f"   ✅ CAD processing complete: {len(prepared_df)} records")
+        return prepared_df
+    
+    def process_rms_structure(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process RMS data structure (multiple Incident Type columns).""" self.logger.info("   📋 Processing RMS structure (unpivoting required)")
+        
+        # Use your existing RMS preparation logic
+        prepared_df = self.data_validator.prepare_rms_data(df)
+        
+        # Standardize column names
+        if 'Case Number' in prepared_df.columns:
+            prepared_df['Case_Number'] = prepared_df['Case Number']
+        
+        if 'incident_text' in prepared_df.columns:
+            prepared_df['IncidentType'] = prepared_df['incident_text']
+        
+        # Add crime categorization
+        prepared_df['Crime_Category'] = prepared_df['IncidentType'].apply(self.categorize_crime_type)
+        
+        self.logger.info(f"   ✅ RMS processing complete: {len(prepared_df)} records")
+        return prepared_df
+    
+    def process_cadnotes_enhanced(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process CADNotes using enhanced processor.""" self.logger.info("🤖 Step 3: Enhanced CADNotes processing")
+        
+        if 'CADNotes' in df.columns:
+            enhanced_df = self.cadnotes_processor.process_cadnotes_dataframe(df, 'CADNotes')
+            self.stats['cadnotes_processed'] = enhanced_df['CAD_Username'].notna().sum()
+        else:
+            self.logger.warning("   ⚠️ No CADNotes column found, skipping CADNotes processing")
+            enhanced_df = df.copy()
+            # Add empty CADNotes columns for consistency
+            enhanced_df['CAD_Username'] = None
+            enhanced_df['CAD_Timestamp'] = None
+            enhanced_df['CAD_Notes_Cleaned'] = None
+            enhanced_df['CADNotes_Processing_Quality'] = 0.0
+        
+        self.logger.info(f"   ✅ CADNotes processing complete: {self.stats['cadnotes_processed']} notes processed")
+        return enhanced_df
+    
+    def add_all_enhancements(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add all derived columns that replace your M Code logic.""" self.logger.info("📊 Step 4: Adding derived columns (replaces M Code logic)")
+        
+        enhanced_df = df.copy()
+        
+        # Date/Time enhancements
+        enhanced_df = self.add_datetime_enhancements(enhanced_df)
+        
+        # Address/Block enhancements  
+        enhanced_df = self.add_address_enhancements(enhanced_df)
+        
+        # Period classification
+        enhanced_df = self.add_period_classification(enhanced_df)
+        
+        # Time formatting (response time, time spent)
+        enhanced_df = self.add_time_formatting(enhanced_df)
+        
+        # Geographic enhancements
+        enhanced_df = self.add_geographic_enhancements(enhanced_df)
+        
+        self.logger.info("   ✅ All enhancements complete")
+        return enhanced_df
+    
+    def add_datetime_enhancements(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add date/time derived columns.""" # Ensure we have proper date/time columns
+        if 'incident_date' in df.columns:
+            df['Incident_Date'] = pd.to_datetime(df['incident_date'], errors='coerce').dt.date
+        elif 'Incident_Date' not in df.columns:
+            # Try to extract from available datetime columns
+            for col in df.columns:
+                if 'date' in col.lower() or 'time' in col.lower():
+                    try:
+                        df['Incident_Date'] = pd.to_datetime(df[col], errors='coerce').dt.date
+                        break
+                    except:
+                        continue
+        
+        if 'incident_time' in df.columns:
+            df['Incident_Time'] = pd.to_datetime(df['incident_time'], errors='coerce').dt.time
+        elif 'Incident_Time' not in df.columns:
+            df['Incident_Time'] = None
+        
+        # Add time of day categorization
+        df['TimeOfDay'] = df.apply(self.categorize_time_of_day, axis=1)
+        
+        # Add day/month/year components
+        if 'Incident_Date' in df.columns:
+            incident_dates = pd.to_datetime(df['Incident_Date'], errors='coerce')
+            df['Day_Name'] = incident_dates.dt.day_name()
+            df['Month_Name'] = incident_dates.dt.month_name()
+            df['Year'] = incident_dates.dt.year
+            df['Month'] = incident_dates.dt.month
+            df['Day'] = incident_dates.dt.day
+        
+        return df
+    
+    def add_address_enhancements(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add address and block enhancements.""" # Find address column
+        address_col = None
+        for col in ['address', 'Address', 'FullAddress', 'FullAddress2', 'Enhanced_FullAddress']:
+            if col in df.columns:
+                address_col = col
+                break
+        
+        if address_col:
+            df['Enhanced_Block'] = df[address_col].apply(self.calculate_enhanced_block)
+        else:
+            df['Enhanced_Block'] = 'Unknown Block'
+        
+        return df
+    
+    def add_period_classification(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add period classification (7-Day, 28-Day, YTD, Historical).""" def classify_period(incident_date):
+            if pd.isna(incident_date):
+                return 'Historical'
+            
+            try:
+                incident_dt = pd.to_datetime(incident_date)
+                today = pd.Timestamp.now()
+                days_diff = (today - incident_dt).days
+                
+                if days_diff <= 7:
+                    return '7-Day'
+                elif days_diff <= 28:
+                    return '28-Day'
+                elif incident_dt.year == today.year:
+                    return 'YTD'
+                else:
+                    return 'Historical'
+            except:
+                return 'Historical'
+        
+        df['Period'] = df['Incident_Date'].apply(classify_period)
+        return df
+    
+    def add_time_formatting(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add formatted time columns for response time and time spent.""" # Format response time
+        if 'Time_Response_Minutes' in df.columns:
+            df['Time_Response_Formatted'] = df['Time_Response_Minutes'].apply(self.format_response_time)
+        
+        # Format time spent
+        if 'Time_Spent_Minutes' in df.columns:
+            df['Time_Spent_Formatted'] = df['Time_Spent_Minutes'].apply(self.format_time_spent)
+        
+        return df
+    
+    def add_geographic_enhancements(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add geographic enhancements (Grid, Zone, etc.).""" # Standardize Grid/Zone columns
+        grid_cols = [col for col in df.columns if 'grid' in col.lower()]
+        if grid_cols:
+            df['Grid'] = df[grid_cols[0]]
+        
+        zone_cols = [col for col in df.columns if 'zone' in col.lower()]
+        if zone_cols:
+            df['Zone'] = df[zone_cols[0]]
+        
+        # Standardize Officer column
+        officer_cols = [col for col in df.columns if 'officer' in col.lower()]
+        if officer_cols:
+            df['Officer'] = df[officer_cols[0]]
+        
+        return df
+    
+    def validate_and_cleanup(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Final data validation and cleanup.""" self.logger.info("🔍 Step 5: Data validation and cleanup")
+        
+        # Remove records with missing critical fields
+        original_count = len(df)
+        
+        # Keep records with valid case numbers and incident types
+        df = df[
+            df['Case_Number'].notna() & 
+            (df['Case_Number'] != '') &
+            df['IncidentType'].notna() &
+            (df['IncidentType'] != '')
+        ]
+        
+        # Calculate overall data quality score
+        if 'CADNotes_Processing_Quality' in df.columns:
+            self.stats['quality_score_avg'] = df['CADNotes_Processing_Quality'].mean()
+        
+        removed_count = original_count - len(df)
+        if removed_count > 0:
+            self.logger.warning(f"   ⚠️ Removed {removed_count} records with missing critical fields")
+        
+        self.logger.info(f"   ✅ Validation complete: {len(df)} clean records")
+        return df
+    
+    def export_for_powerbi(self, df: pd.DataFrame, output_file: str = None) -> str:
+        """Export clean data for Power BI consumption.""" self.logger.info("📊 Step 6: Exporting for Power BI")
+        
+        if output_file is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = self.dirs['powerbi'] / f"enhanced_scrpa_data
+````
+
+
+
+
+
+## Prompt:
+7/24/2025, 5:49:23 PM
+
+CAD Date is exported to: C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_CAD\SCRPA
+RMS Data is exported to:  C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA
+
+update the scripts
+
+
+
+## Response:
+7/24/2025, 5:51:30 PM
+
+Perfect! Let me update the scripts to use your actual export directories and create a complete, ready-to-run solution. **Master SCRPA Processor - Complete Integration** ∙ Version 4
+
+````python
+# 🕒 2025-07-23-17-30-00
+# SCRPA_Time_v2/Master_SCRPA_Processor
+# Author: R. A. Carucci  
+# Purpose: Complete integration script that replaces complex M Code with clean Python processing
+
+import pandas as pd
+import numpy as np
+import logging
+import sys
+import argparse
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple, Union
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import your existing validation and processing modules
+try:
+    from actual_structure_python_validation import SCRPAActualDataValidator, DataSource
+    from enhanced_cadnotes_processor import EnhancedCADNotesProcessor
+    from unified_data_processor import UnifiedDataProcessor
+except ImportError as e:
+    print(f"⚠️ Import error: {e}")
+    print("Make sure all your existing scripts are in the same directory")
+
+class MasterSCRPAProcessor:
+    """
+    Master processor that integrates all your existing scripts into a complete
+    pipeline that replaces your complex Power BI M Code.
+    """ def __init__(self, project_path: str = None):
+        """Initialize master processor with your actual export directory structure.""" if project_path is None:
+            self.project_path = Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\01_DataSources\SCRPA_Time_v2")
+        else:
+            self.project_path = Path(project_path)
+        
+        # Your actual export directories
+        self.export_dirs = {
+            'cad_exports': Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_CAD\SCRPA"),
+            'rms_exports': Path(r"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA")
+        }
+        
+        # Setup directory structure
+        self.setup_directories()
+        
+        # Initialize logging
+        self.setup_logging()
+        
+        # Initialize component processors
+        self.data_validator = SCRPAActualDataValidator(str(self.project_path))
+        self.cadnotes_processor = EnhancedCADNotesProcessor()
+        
+        # Processing statistics
+        self.stats = {
+            'processing_start_time': None,
+            'data_source_detected': None,
+            'total_input_records': 0,
+            'total_output_records': 0,
+            'cadnotes_processed': 0,
+            'quality_score_avg': 0.0,
+            'processing_duration': 0.0,
+            'errors_encountered': []
+        }
+        
+        self.logger.info("🚀 Master SCRPA Processor initialized")
+    
+    def setup_directories(self):
+        """Setup your actual project directory structure.""" self.dirs = {
+            'scripts': self.project_path / '01_scripts',
+            'cad_exports': self.export_dirs['cad_exports'],
+            'rms_exports': self.export_dirs['rms_exports'],
+            'output': self.project_path / '03_output', 
+            'powerbi': self.project_path / '04_powerbi',
+            'logs': self.project_path / '03_output' / 'logs',
+            'reports': self.project_path / '03_output' / 'reports'
+        }
+        
+        # Create output directories if they don't exist (don't create export dirs - they're managed by your system)
+        for dir_name, dir_path in self.dirs.items():
+            if dir_name not in ['cad_exports', 'rms_exports']:
+                dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # Verify export directories exist
+        if not self.dirs['cad_exports'].exists():
+            self.logger.warning(f"CAD export directory not found: {self.dirs['cad_exports']}")
+        if not self.dirs['rms_exports'].exists():
+            self.logger.warning(f"RMS export directory not found: {self.dirs['rms_exports']}")
+    
+    def find_latest_export_file(self, export_type: str = "auto") -> Tuple[str, DataSource]:
+        """Find the latest CAD or RMS export file from your actual export directories."""

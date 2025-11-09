@@ -1,0 +1,254 @@
+import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+    import glob
+    
+    try:
+        # Get crime-specific output folder using Excel naming
+        crime_output_folder = get_crime_type_folder(crime_type, target_date)
+        os.makedirs(crime_output_folder, exist_ok=True)
+        
+        # Get standardized filename prefix
+        filename_prefix = get_standardized_filename(crime_type)
+        
+        # Clean old charts
+        for file in glob.glob(os.path.join(crime_output_folder, f"{filename_prefix}_*Chart*.png")):
+            try:
+                os.remove(file)
+                print(f"🧹 Deleted old chart: {os.path.basename(file)}")
+            except:
+                pass
+
+        print(f"\n🔍 Processing chart for {crime_type} in {crime_output_folder}")
+        
+        # Get the 7-day period for data filtering
+        start_date, end_date = get_7day_period_dates(target_date)
+        
+        # Time periods and colors
+        time_periods = {
+            "00:00-03:59": "Early Morning",
+            "04:00-07:59": "Morning", 
+            "08:00-11:59": "Midday",
+            "12:00-15:59": "Afternoon",
+            "16:00-19:59": "Evening",
+            "20:00-23:59": "Night"
+        }
+        
+        period_colors = {
+            "7-Day": "#D9F2D0",   # Light green
+            "28-Day": "#E0404C",  # Red
+            "YTD": "#96A0F9"      # Light blue
+        }
+        
+        # Process data using real ArcGIS connection
+        combined_data = {}
+        
+        try:
+            # Load ArcGIS Pro project for real data
+            import arcpy
+            aprx = arcpy.mp.ArcGISProject(APR_PATH)
+            maps = aprx.listMaps()
+            
+            if maps:
+                map_obj = maps[0]
+                
+                # Define corrected timestamp dates for each period
+                timestamp_dates = {
+                    "7-Day": f"{start_date.strftime('%Y-%m-%d')} 00:00:00.000",
+                    "28-Day": f"{(start_date - timedelta(days=21)).strftime('%Y-%m-%d')} 00:00:00.000",  # 28 days total
+                    "YTD": f"{start_date.replace(month=1, day=1).strftime('%Y-%m-%d')} 00:00:00.000"
+                }
+                
+                for period in ["7-Day", "28-Day", "YTD"]:
+                    print(f"📅 Processing {period} data...")
+                    
+                    # Initialize time period counts
+                    period_data = {time_range: 0 for time_range in time_periods.keys()}
+                    
+                    # Find the layer for this period
+                    layer_name = f"{crime_type} {period}"
+                    target_layer = None
+                    
+                    for lyr in map_obj.listLayers():
+                        if lyr.name == layer_name:
+                            target_layer = lyr
+                            break
+                    
+                    if not target_layer:
+                        print(f"❌ Layer not found: {layer_name}")
+                        combined_data[period] = period_data
+                        continue
+                    
+                    # Build and apply SQL filter
+                    sql_pattern = get_sql_pattern_for_crime(crime_type)
+                    
+                    if isinstance(sql_pattern, list):
+                        conditions = []
+                        for p in sql_pattern:
+                            conditions.append(f"calltype LIKE '%{p}%'")
+                        crime_condition = f"({' OR '.join(conditions)})"
+                    else:
+                        crime_condition = f"calltype LIKE '%{sql_pattern}%'"
+                    
+                    timestamp = timestamp_dates[period]
+                    sql_filter = f"{crime_condition} And disposition LIKE '%See Report%' And calldate >= timestamp '{timestamp}'"
+                    
+                    if period == "7-Day":
+                        # For 7-day, add end date to limit to exact 7-day window
+                        end_timestamp = f"{end_date.strftime('%Y-%m-%d')} 23:59:59.999"
+                        sql_filter += f" And calldate <= timestamp '{end_timestamp}'"
+                    
+                    print(f"🔎 {period} SQL Filter: {sql_filter}")
+                    
+                    # Apply filter and get data
+                    original_query = target_layer.definitionQuery
+                    target_layer.definitionQuery = sql_filter
+                    
+                    try:
+                        feature_count = int(arcpy.GetCount_management(target_layer).getOutput(0))
+                        print(f"📊 {period} features found: {feature_count}")
+                        
+                        if feature_count > 0:
+                            # Extract real time data
+                            with arcpy.da.SearchCursor(target_layer, ["calldate"]) as cursor:
+                                for row in cursor:
+                                    try:
+                                        calldate = row[0]
+                                        if isinstance(calldate, datetime):
+                                            hour = calldate.hour
+                                        else:
+                                            continue
+                                        
+                                        # Categorize by time period
+                                        if 0 <= hour <= 3:
+                                            period_data["00:00-03:59"] += 1
+                                        elif 4 <= hour <= 7:
+                                            period_data["04:00-07:59"] += 1
+                                        elif 8 <= hour <= 11:
+                                            period_data["08:00-11:59"] += 1
+                                        elif 12 <= hour <= 15:
+                                            period_data["12:00-15:59"] += 1
+                                        elif 16 <= hour <= 19:
+                                            period_data["16:00-19:59"] += 1
+                                        elif 20 <= hour <= 23:
+                                            period_data["20:00-23:59"] += 1
+                                            
+                                    except Exception as e:
+                                        print(f"⚠️ Error processing record: {e}")
+                                        continue
+                        
+                        print(f"✅ {period} time distribution: {period_data}")
+                        
+                    except Exception as e:
+                        print(f"❌ Error processing {period}: {e}")
+                    finally:
+                        target_layer.definitionQuery = original_query
+                    
+                    combined_data[period] = period_data
+                
+                # Clean up
+                del aprx
+                
+        except Exception as e:
+            print(f"❌ Error accessing ArcGIS data: {e}")
+            # Use fallback data if needed
+            combined_data = {
+                "7-Day": {time_range: 0 for time_range in time_periods.keys()},
+                "28-Day": {time_range: 0 for time_range in time_periods.keys()},
+                "YTD": {time_range: 0 for time_range in time_periods.keys()}
+            }
+        
+        # Create the chart
+        fig, ax = plt.subplots(figsize=(6.95, 4.63))
+        
+        # Prepare data for grouped bars
+        time_ranges = list(time_periods.keys())
+        time_labels = [f"{time_range}\n{time_periods[time_range]}" for time_range in time_ranges]
+        
+        # Set up bar positions
+        x_positions = range(len(time_ranges))
+        bar_width = 0.25
+        
+        # Plot grouped bars
+        for i, period in enumerate(["7-Day", "28-Day", "YTD"]):
+            values = [combined_data[period][time_range] for time_range in time_ranges]
+            positions = [x + (i - 1) * bar_width for x in x_positions]
+            
+            bars = ax.bar(positions, values, 
+                         width=bar_width,
+                         label=period,
+                         color=period_colors[period],
+                         alpha=0.9,
+                         edgecolor='black',
+                         linewidth=0.5)
+            
+            # Add value labels on bars (only for non-zero values)
+            for bar, value in zip(bars, values):
+                if value > 0:
+                    height = bar.get_height()
+                    ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                           f'{int(value)}',
+                           ha='center', va='bottom', 
+                           fontsize=8, fontweight='bold')
+        
+        # Customize the chart
+        ax.set_title(f"{crime_type} - Calls by Time of Day", 
+                    fontsize=12, fontweight='bold', pad=15)
+        ax.set_xlabel("Time of Day", fontsize=10, fontweight='bold')
+        ax.set_ylabel("Count", fontsize=10, fontweight='bold')
+        
+        # Set x-axis
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(time_labels, fontsize=9, ha='center')
+        
+        # Set y-axis
+        max_value = max([max(data.values()) for data in combined_data.values()])
+        if max_value > 0:
+            ax.set_ylim(0, max_value * 1.2)
+        else:
+            ax.set_ylim(0, 1)
+        
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+        
+        # Configure legend
+        ax.legend(title="Period", title_fontsize=9, fontsize=9, 
+                 loc='upper right', framealpha=0.9)
+        
+        # Remove grid lines
+        ax.grid(False)
+        
+        # Improve layout
+        plt.tight_layout()
+        
+        # Save chart with standardized filename
+        chart_path = os.path.join(crime_output_folder, f"{filename_prefix}_Chart.png")
+        plt.savefig(chart_path, dpi=300, bbox_inches='tight', 
+                   facecolor='white', edgecolor='none')
+        plt.close()
+        
+        print(f"✅ Chart saved: {chart_path}")
+        
+        # Print summary
+        print(f"\n📊 Chart Data Summary for {crime_type}:")
+        for period in ["7-Day", "28-Day", "YTD"]:
+            total = sum(combined_data[period].values())
+            print(f"  {period}: {total} incidents")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating chart for {crime_type}: {e}")
+        return False
+
+# =============================================================================
+# UPDATED MAIN PROCESSING FUNCTION
+# =============================================================================
+
+def run_updated_7day_analysis(target_date, crime_types, export_maps=True, export_charts=True):
+````
+
+
+
+## Prompt:
+6/10/2025, 12:32:44 PM
+
+!

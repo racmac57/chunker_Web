@@ -1,0 +1,690 @@
+Verify data appears correctly in worksheets
+
+## 📂 **FILE PATH REQUIREMENTS**
+
+**INFOCOP Data Location (CONFIRMED):**
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type\2024_04_Officer_Charge_Date_Case_Type.csv
+```
+
+**For Traffic_Enforcement_Data:**
+- Update path to match your actual traffic data location
+- Likely similar structure: `C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\...`
+
+**Path Structure Notes:**
+- Uses OneDrive for Business (City of Hackensack)
+- Organized by data type and export frequency
+- CSV files in specific INFOCOP folders
+
+## ⚠️ **PITFALLS TO AVOID**
+
+### **Don't:**
+- Keep multiple numbered versions of same query
+- Use hardcoded file paths that break on other machines
+- Import without proper error handling
+
+### **Do:**
+- Use dynamic file path detection
+- Include error handling in all queries
+- Test with "Refresh All" before saving
+- Document file path requirements
+
+## 🔄 **MAINTENANCE SCHEDULE**
+
+**Weekly:**
+- Refresh all data connections
+- Check for new CSV files
+- Verify no error messages
+
+**Monthly:**
+- Review and clean unused queries
+- Update file paths if locations change
+- Archive old CSV files
+
+---
+
+**Next Steps:**
+1. Backup current workbook
+2. Execute Phase 1 cleanup
+3. Rebuild connections using provided M code
+4. Test all refreshes work properly
+
+## 🔍 **Key Diagnostics for Your Advanced Code**
+
+### **Most Likely Issues:**
+
+1. **OneDrive Sync Problem**
+   - Files showing cloud icons (not downloaded locally)
+   - Power Query can't access cloud-only files
+
+2. **File Format Mismatch** 
+   - Your code expects Excel files (`.xlsx`)
+   - Error mentioned CSV files
+   - Check what's actually in those folders
+
+3. **Permissions Issue**
+   - Long OneDrive path causing access problems
+   - Try shorter path or mapped drive
+
+### **Quick Tests:**
+
+1. **Navigate to folder in Windows Explorer:**
+   ```
+   C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type
+   ```
+
+2. **Check file types:** Are they `.xlsx` or `.csv`? 3. **Test OneDrive sync:** Open one file manually first
+
+### **Your Code is Excellent** - just needs path/sync debugging! The issue isn't your M code logic (which is sophisticated) but likely **file access** or **OneDrive synchronization**. Try the diagnostic steps in the artifact first. ```
+
+
+
+### *User:*
+
+1\. see attachment 1\. 2\. they are \.csv
+3\. i downloaded the files to always be on my device
+
+
+
+### *Claude:*
+
+Perfect! Now I see the issue clearly. Your folder contains **CSV files**, but your Power Query code is trying to read them as **Excel files** using `Excel.Workbook()`. **SUMMONS_MASTER.xlsx Power Query Fixes**
+
+// 🕒 2025-06-08-23-30-00
+# SUMMONS_MASTER_REPAIRS/power_query_fixes
+# Author: R. A. Carucci  
+# Purpose: Complete fix guide for broken Power Query connections in SUMMONS_MASTER.xlsx
+
+## 🚨 **CRITICAL FIXES NEEDED**
+
+### **1. SUMMONS_MASTER (2) - CSV FILES DETECTED**
+
+**Problem Identified:** Your code uses `Excel.Workbook()` but folder contains **CSV files**
+
+**Solution:** Replace Excel reading with CSV reading in your ExtractOfficerData function
+
+**Updated Function for CSV Files:**
+```m
+let
+    // Function to extract officer data from CSV files (NOT Excel)
+    ExtractOfficerData = (FileContent as binary) => 
+    let
+        // Read as CSV instead of Excel
+        CsvData = Csv.Document(FileContent, [Delimiter=",", Columns=null, Encoding=1252, QuoteStyle=QuoteStyle.Csv]),
+        
+        // Promote headers (CSV structure different from Excel)
+        Promoted = Table.PromoteHeaders(CsvData, [PromoteAllScalars=true]),
+        
+        // Clean column names
+        CleanHeaders = Table.TransformColumnNames(Promoted, 
+            each Text.Proper(Text.Clean(Text.Trim(_)))),
+        
+        // Set data types for INFOCOP CSV structure
+        TypedData = Table.TransformColumnTypes(CleanHeaders, {
+            {"Officer", type text},
+            {"Charge_Date", type date},
+            {"Case_Type", type text},
+            {"Badge", Int64.Type}
+        })
+    in
+        TypedData,
+
+    // Load Officer_Charge_Date_Case_Type folder - CSV FILES
+    ChargeFolder = Folder.Files("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_MONTHLY_DATA\\_EXPORTS\\Summons\\INFOCOP\\Officer_Charge_Date_Case_Type"),
+    
+    // Filter for CSV files only (not Excel)
+    ChargeCsvFiles = Table.SelectRows(ChargeFolder, each Text.EndsWith([Name], ".csv")),
+    ChargeData = Table.Combine(List.Transform(ChargeCsvFiles[Content], each ExtractOfficerData(_))),
+    
+    // Load Officer_Street_Statute folder - CSV FILES  
+    StreetFolder = Folder.Files("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_MONTHLY_DATA\\_EXPORTS\\Summons\\INFOCOP\\Officer_Street_Statute"),
+    StreetCsvFiles = Table.SelectRows(StreetFolder, each Text.EndsWith([Name], ".csv")),
+    StreetData = Table.Combine(List.Transform(StreetCsvFiles[Content], each ExtractOfficerData(_))),
+    
+    // Combine both datasets
+    Combined = Table.Combine({ChargeData, StreetData}),
+    
+    // [Rest of your assignment matching code stays the same...]
+    
+    // Load ASSIGNMENT_MASTER data (this one IS Excel)
+    AssignmentSource = Excel.Workbook(File.Contents("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\ASSIGNED_SHIFT\\ASSIGNMENT_MASTER.xlsx"), null, true),
+    AssignmentData = AssignmentSource{[Item="ASSIGNMENT_MASTER",Kind="Sheet"]}[Data],
+    AssignmentHeaders = Table.PromoteHeaders(AssignmentData, [PromoteAllScalars=true]),
+    AssignmentTyped = Table.TransformColumnTypes(AssignmentHeaders,{
+        {"RANK", type text}, 
+        {"FIRST_NAME", type text}, 
+        {"LAST_NAME", type text}, 
+        {"BADGE_NUMBER", Int64.Type}, 
+        {"Squad", type text}, 
+        {"ASSIGNMENT", type text}
+    }),
+    
+    // [Continue with your matching logic...]
+    AssignmentLookup = Table.AddColumn(AssignmentTyped, "FULL_NAME", each [FIRST_NAME] & " " & [LAST_NAME]),
+    AssignmentLookup2 = Table.AddColumn(AssignmentLookup, "LAST_FIRST", each [LAST_NAME] & ", " & [FIRST_NAME]),
+    AssignmentLookup3 = Table.AddColumn(AssignmentLookup2, "LAST_FIRST_ALT", each [LAST_NAME] & " " & [FIRST_NAME]),
+    AssignmentLookup4 = Table.AddColumn(AssignmentLookup3, "BADGE_TEXT", each Text.From([BADGE_NUMBER])),
+    
+    // Clean and standardize officer names in summons data
+    CleanedSummons = Table.TransformColumns(Combined, {
+        {"Officer", each Text.Trim(Text.Clean(_)), type text}
+    }),
+    
+    // [Rest of your matching logic continues exactly as before...]
+    
+in
+    Combined
+```
+
+**Key Changes Made:**
+1. **`Excel.Workbook()` → `Csv.Document()`** for reading files
+2. **Filter for `.csv` files** instead of `.xlsx`
+3. **Removed Excel-specific row skipping** (no need to skip 8 rows in CSV)
+4. **Simplified header promotion** for CSV structure
+
+**CSV vs Excel Structure Differences:**
+- **Excel**: Has multiple sheets, needs row skipping, complex structure
+- **CSV**: Simple tabular format, direct header promotion
+- **Your INFOCOP CSVs**: Likely have headers in row 1 (standard CSV format)
+
+### **2. Traffic_Enforcement_Data - REBUILD CONNECTION**
+
+**Problem**: List enumeration error - expecting more columns than available
+
+**Solution**: Rebuild with proper error handling
+
+```m
+let
+    // Source connection with error handling
+    Source = try Csv.Document(File.Contents("C:\Data\Traffic_Enforcement_Data.csv"), [
+        Delimiter = ",", 
+        Encoding = 1252, 
+        QuoteStyle = QuoteStyle.Csv
+    ]) otherwise #table({"Error"}, {{"File not found or corrupted"}}),
+    
+    // Check if source is valid
+    ValidSource = if Table.ColumnNames(Source){0} = "Error" 
+                  then error "Traffic enforcement CSV file missing or corrupted"
+                  else Source,
+    
+    PromoteHeaders = Table.PromoteHeaders(ValidSource, [PromoteAllScalars=true]),
+    
+    // Safe column transformations
+    SafeTypes = Table.TransformColumnTypes(PromoteHeaders, {
+        {"Officer", type text},
+        {"Date", type date},
+        {"Location", type text},
+        {"Violation", type text}
+    }),
+    
+    // Handle any list columns safely
+    SafeExpansion = if Table.HasColumns(SafeTypes, "Actions") then
+        Table.AddColumn(SafeTypes, "Action Count", 
+            each try List.Count(Text.Split([Actions], ",")) otherwise 0)
+    else SafeTypes
+    
+in
+    SafeExpansion
+```
+
+## 🧹 **CLEANUP ACTIONS**
+
+### **Sheets to DELETE:**
+- `SUMMONS_MASTER (2)` 
+- `Simple_Monday_CompStat (2)` through `(5)`
+- `Debug_Multi_Month_Loader (2)` through `(4)`
+
+### **Sheets to KEEP:**
+- `SUMMONS_MASTER` (original)
+- `Simple_Monday_CompStat` (original)
+- `Debug_Multi_Month_Loader` (original)
+- `ENHANCED_BADGE`
+- `ROBUSTV7`
+
+## 🎯 **STEP-BY-STEP REPAIR PROCESS**
+
+### **Phase 1: Emergency Cleanup (Do First)**
+1. Open Data → Queries & Connections
+2. Delete all queries ending in `(2)`, `(3)`, `(4)`, `(5)`
+3. Delete corresponding worksheet tabs
+4. Save workbook
+
+### **Phase 2: Rebuild Broken Connections**
+1. **For SUMMONS_MASTER data:**
+   - Data → Get Data → From File → From Folder
+   - Navigate to your CSV files location  
+   - Filter for `2024_04_Officer_Charge_Date_Case_Type.csv`
+   - Use M code above
+
+2. **For Traffic_Enforcement_Data:**
+   - Data → Get Data → From File → From CSV
+   - Select correct traffic enforcement file
+   - Use M code above
+
+### **Phase 3: Verification**
+1. Refresh all connections (Data → Refresh All)
+2. Check each query loads without errors
+3. Verify data appears correctly in worksheets
+
+## 📂 **FILE PATH REQUIREMENTS**
+
+**INFOCOP Data Location (CONFIRMED):**
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type\2024_04_Officer_Charge_Date_Case_Type.csv
+```
+
+**For Traffic_Enforcement_Data:**
+- Update path to match your actual traffic data location
+- Likely similar structure: `C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\...`
+
+**Path Structure Notes:**
+- Uses OneDrive for Business (City of Hackensack)
+- Organized by data type and export frequency
+- CSV files in specific INFOCOP folders
+
+## ⚠️ **PITFALLS TO AVOID**
+
+### **Don't:**
+- Keep multiple numbered versions of same query
+- Use hardcoded file paths that break on other machines
+- Import without proper error handling
+
+### **Do:**
+- Use dynamic file path detection
+- Include error handling in all queries
+- Test with "Refresh All" before saving
+- Document file path requirements
+
+## 🔄 **MAINTENANCE SCHEDULE**
+
+**Weekly:**
+- Refresh all data connections
+- Check for new CSV files
+- Verify no error messages
+
+**Monthly:**
+- Review and clean unused queries
+- Update file paths if locations change
+- Archive old CSV files
+
+---
+
+**Next Steps:**
+1. Backup current workbook
+2. Execute Phase 1 cleanup
+3. Rebuild connections using provided M code
+4. Test all refreshes work properly
+
+## 🎯 **The Root Cause Found! **
+
+Your code was written for **Excel files** but you have **CSV files**. Here's what needs to change:
+
+### **Quick Fix Summary:**
+
+1. **Replace `Excel.Workbook()` with `Csv.Document()`**
+2. **Remove row skipping logic** (CSVs don't need it)
+3. **Change file filter from `.xlsx` to `.csv`**
+
+### **Test First:**
+Before implementing the full code, test with a single CSV:
+
+```m
+let
+    TestFile = File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type\2024_04_Officer_Charge_Date_Case_Type.csv"),
+    TestCsv = Csv.Document(TestFile, [Delimiter=",", Columns=null, Encoding=1252])
+in
+    TestCsv
+```
+
+### **Key Insight:**
+Your **assignment matching logic** is excellent and doesn't need to change - just the file reading part needs the CSV fix! The updated code in the artifact should resolve your "External table is not in the expected format" error. ### *User:*
+
+
+
+
+
+### *Claude:*
+
+Perfect! Now I can see the actual CSV structure. This explains everything - your CSV files have a **very different format** than expected. Let me analyze this structure:
+
+Now I understand! Your CSV files are **vertical reports**, not standard tabular data. This requires a completely different parsing approach. **SUMMONS_MASTER.xlsx Power Query Fixes**
+
+// 🕒 2025-06-08-23-30-00
+# SUMMONS_MASTER_REPAIRS/power_query_fixes
+# Author: R. A. Carucci  
+# Purpose: Complete fix guide for broken Power Query connections in SUMMONS_MASTER.xlsx
+
+## 🚨 **CRITICAL FIXES NEEDED**
+
+### **1. SUMMONS_MASTER (2) - VERTICAL CSV REPORT PARSER**
+
+**Problem Identified:** CSV files are **vertical reports**, not tabular data! **CSV Structure:**
+- **Rows 1-7**: Report metadata  
+- **Row 8+**: Officer name followed by date/violation pairs
+- **Pattern**: Officer → Date → ViolationType → Date → ViolationType...
+
+**Completely New Parser Function:**
+```m
+let
+    // Function to parse vertical INFOCOP CSV reports
+    ParseInfocopVerticalCSV = (FileContent as binary) => 
+    let
+        // Read CSV as single column
+        CsvData = Csv.Document(FileContent, [Delimiter=",", Columns=1, Encoding=1252]),
+        
+        // Convert to list for easier processing
+        AllRows = Table.ToRows(CsvData),
+        CleanRows = List.Transform(AllRows, each _{0}),
+        
+        // Skip metadata rows (first 7 rows are headers)
+        DataRows = List.Skip(CleanRows, 7),
+        
+        // Remove empty rows
+        NonEmptyRows = List.Select(DataRows, each _ <> null and Text.Trim(_) <> ""),
+        
+        // Extract date range from header (rows 2-3 if available)
+        ReportStartDate = try Date.From(CleanRows{2}) otherwise null,
+        ReportEndDate = try Date.From(CleanRows{3}) otherwise null,
+        MonthYear = if ReportStartDate <> null then 
+            Text.PadStart(Text.From(Date.Month(ReportStartDate)), 2, "0") & "-" & Text.From(Date.Year(ReportStartDate))
+            else null,
+        
+        // Parse officer sections
+        ParsedRecords = List.Generate(
+            () => [Index = 0, CurrentOfficer = null, Records = {}],
+            each [Index] < List.Count(NonEmptyRows),
+            each let
+                CurrentRow = NonEmptyRows{[Index]},
+                IsOfficerName = not (try Date.From(CurrentRow) is date otherwise false) and 
+                               not Text.Contains(CurrentRow, "Grand Total") and
+                               CurrentRow <> "P" and CurrentRow <> "M" and CurrentRow <> "C",
+                
+                NextOfficer = if IsOfficerName then CurrentRow else [CurrentOfficer],
+                
+                // If this is a date followed by violation type
+                IsDate = try Date.From(CurrentRow) is date otherwise false,
+                NextIndex = [Index] + 1,
+                ViolationType = if IsDate and NextIndex < List.Count(NonEmptyRows) 
+                               then NonEmptyRows{NextIndex} else null,
+                
+                NewRecord = if IsDate and [CurrentOfficer] <> null then
+                    [Officer = [CurrentOfficer], 
+                     Charge_Date = Date.From(CurrentRow),
+                     Case_Type = ViolationType,
+                     Month_Year = MonthYear,
+                     Report_Start_Date = ReportStartDate,
+                     Report_End_Date = ReportEndDate]
+                else null,
+                
+                UpdatedRecords = if NewRecord <> null then [Records] & {NewRecord} else [Records],
+                SkipNext = if IsDate and ViolationType <> null then 2 else 1
+            in
+                [Index = [Index] + SkipNext, 
+                 CurrentOfficer = NextOfficer, 
+                 Records = UpdatedRecords],
+            each [Records]
+        ),
+        
+        // Get final records and convert to table
+        FinalRecords = List.Last(ParsedRecords),
+        ResultTable = if List.Count(FinalRecords) > 0 then
+            Table.FromRecords(FinalRecords)
+        else
+            #table({"Officer", "Charge_Date", "Case_Type", "Month_Year", "Report_Start_Date", "Report_End_Date"}, {})
+    in
+        ResultTable,
+
+    // Load Officer_Charge_Date_Case_Type folder - VERTICAL CSV REPORTS
+    ChargeFolder = Folder.Files("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_MONTHLY_DATA\\_EXPORTS\\Summons\\INFOCOP\\Officer_Charge_Date_Case_Type"),
+    ChargeCsvFiles = Table.SelectRows(ChargeFolder, each Text.EndsWith([Name], ".csv")),
+    ChargeData = Table.Combine(List.Transform(ChargeCsvFiles[Content], each ParseInfocopVerticalCSV(_))),
+    
+    // Load Officer_Street_Statute folder - VERTICAL CSV REPORTS
+    StreetFolder = Folder.Files("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_MONTHLY_DATA\\_EXPORTS\\Summons\\INFOCOP\\Officer_Street_Statute"),
+    StreetCsvFiles = Table.SelectRows(StreetFolder, each Text.EndsWith([Name], ".csv")),
+    StreetData = Table.Combine(List.Transform(StreetCsvFiles[Content], each ParseInfocopVerticalCSV(_))),
+    
+    // Combine both datasets
+    Combined = Table.Combine({ChargeData, StreetData}),
+    
+    // Clean officer names
+    CleanedData = Table.TransformColumns(Combined, {
+        {"Officer", each Text.Trim(Text.Clean(_)), type text}
+    }),
+    
+    // [Rest of your assignment matching code continues exactly as before...]
+    
+    // Load ASSIGNMENT_MASTER data (this one IS Excel)
+    AssignmentSource = Excel.Workbook(File.Contents("C:\\Users\\carucci_r\\OneDrive - City of Hackensack\\_Hackensack_Data_Repository\\ASSIGNED_SHIFT\\ASSIGNMENT_MASTER.xlsx"), null, true),
+    AssignmentData = AssignmentSource{[Item="ASSIGNMENT_MASTER",Kind="Sheet"]}[Data],
+    AssignmentHeaders = Table.PromoteHeaders(AssignmentData, [PromoteAllScalars=true]),
+    AssignmentTyped = Table.TransformColumnTypes(AssignmentHeaders,{
+        {"RANK", type text}, 
+        {"FIRST_NAME", type text}, 
+        {"LAST_NAME", type text}, 
+        {"BADGE_NUMBER", Int64.Type}, 
+        {"Squad", type text}, 
+        {"ASSIGNMENT", type text}
+    }),
+    
+    // Create lookup variations for officer matching
+    AssignmentLookup = Table.AddColumn(AssignmentTyped, "FULL_NAME", each [FIRST_NAME] & " " & [LAST_NAME]),
+    AssignmentLookup2 = Table.AddColumn(AssignmentLookup, "LAST_FIRST", each [LAST_NAME] & ", " & [FIRST_NAME]),
+    AssignmentLookup3 = Table.AddColumn(AssignmentLookup2, "LAST_FIRST_ALT", each [LAST_NAME] & " " & [FIRST_NAME]),
+    AssignmentLookup4 = Table.AddColumn(AssignmentLookup3, "BADGE_TEXT", each Text.From([BADGE_NUMBER])),
+    
+    // Add variations of officer names for better matching
+    SummonsWithVariations = Table.AddColumn(CleanedData, "Officer_Name_Cleaned", each 
+        let
+            cleaned = Text.Trim([Officer]),
+            // Remove common prefixes that might interfere
+            withoutPrefixes = Text.Replace(Text.Replace(Text.Replace(cleaned, "PEO ", ""), "P.O. ", ""), "DET. ", ""),
+            // Handle potential "Last, First" format
+            splitComma = Text.Split(withoutPrefixes, ","),
+            reversed = if List.Count(splitComma) = 2 then Text.Trim(splitComma{1}) & " " & Text.Trim(splitComma{0}) else withoutPrefixes
+        in
+            Text.Trim(reversed)
+    ),
+    
+    // Method 1: Try to join by full name match
+    MergedByName = Table.NestedJoin(SummonsWithVariations, {"Officer_Name_Cleaned"}, AssignmentLookup4, {"FULL_NAME"}, "AssignmentData", JoinKind.LeftOuter),
+    
+    // Method 2: For unmatched records, try alternative name formats
+    MergedByNameAlt = Table.NestedJoin(MergedByName, {"Officer"}, AssignmentLookup4, {"LAST_FIRST"}, "AssignmentData2", JoinKind.LeftOuter),
+    
+    // Method 3: Try last name first format
+    MergedByNameAlt2 = Table.NestedJoin(MergedByNameAlt, {"Officer"}, AssignmentLookup4, {"LAST_FIRST_ALT"}, "AssignmentData3", JoinKind.LeftOuter),
+    
+    // Combine all assignment data (prioritize first match)
+    CombinedAssignment = Table.AddColumn(MergedByNameAlt2, "FinalAssignment", each 
+        if Table.RowCount([AssignmentData]) > 0 then [AssignmentData]
+        else if Table.RowCount([AssignmentData2]) > 0 then [AssignmentData2]
+        else if Table.RowCount([AssignmentData3]) > 0 then [AssignmentData3]
+        else #table({"RANK", "FIRST_NAME", "LAST_NAME", "BADGE_NUMBER", "Squad", "ASSIGNMENT", "FULL_NAME", "LAST_FIRST", "LAST_FIRST_ALT", "BADGE_TEXT"}, {})
+    ),
+    
+    // Expand the final assignment data
+    ExpandedAssignment = Table.ExpandTableColumn(CombinedAssignment, "FinalAssignment", 
+        {"RANK", "FIRST_NAME", "LAST_NAME", "BADGE_NUMBER", "Squad", "ASSIGNMENT"}, 
+        {"Officer_RANK", "Officer_FIRST_NAME", "Officer_LAST_NAME", "Officer_BADGE_NUMBER", "Officer_Squad", "Officer_ASSIGNMENT"}),
+    
+    // Clean up intermediate columns
+    CleanedResult = Table.RemoveColumns(ExpandedAssignment, {"AssignmentData", "AssignmentData2", "AssignmentData3", "Officer_Name_Cleaned"}, MissingField.Ignore),
+    
+    // Add flag for unmatched officers
+    FinalResult = Table.AddColumn(CleanedResult, "Assignment_Match_Status", each 
+        if [Officer_BADGE_NUMBER] <> null then "Matched"
+        else "Unmatched - Check Officer Name"
+    )
+    
+in
+    FinalResult
+```
+
+**Key Changes for Vertical CSV Format:**
+1. **Single column CSV read** (not tabular)
+2. **Row-by-row parsing** to identify officers vs dates vs violations
+3. **Pattern recognition** for Officer → Date → ViolationType sequence
+4. **Metadata extraction** from header rows
+5. **List.Generate** for complex sequential parsing
+
+### **2. Traffic_Enforcement_Data - REBUILD CONNECTION**
+
+**Problem**: List enumeration error - expecting more columns than available
+
+**Solution**: Rebuild with proper error handling
+
+```m
+let
+    // Source connection with error handling
+    Source = try Csv.Document(File.Contents("C:\Data\Traffic_Enforcement_Data.csv"), [
+        Delimiter = ",", 
+        Encoding = 1252, 
+        QuoteStyle = QuoteStyle.Csv
+    ]) otherwise #table({"Error"}, {{"File not found or corrupted"}}),
+    
+    // Check if source is valid
+    ValidSource = if Table.ColumnNames(Source){0} = "Error" 
+                  then error "Traffic enforcement CSV file missing or corrupted"
+                  else Source,
+    
+    PromoteHeaders = Table.PromoteHeaders(ValidSource, [PromoteAllScalars=true]),
+    
+    // Safe column transformations
+    SafeTypes = Table.TransformColumnTypes(PromoteHeaders, {
+        {"Officer", type text},
+        {"Date", type date},
+        {"Location", type text},
+        {"Violation", type text}
+    }),
+    
+    // Handle any list columns safely
+    SafeExpansion = if Table.HasColumns(SafeTypes, "Actions") then
+        Table.AddColumn(SafeTypes, "Action Count", 
+            each try List.Count(Text.Split([Actions], ",")) otherwise 0)
+    else SafeTypes
+    
+in
+    SafeExpansion
+```
+
+## 🧹 **CLEANUP ACTIONS**
+
+### **Sheets to DELETE:**
+- `SUMMONS_MASTER (2)` 
+- `Simple_Monday_CompStat (2)` through `(5)`
+- `Debug_Multi_Month_Loader (2)` through `(4)`
+
+### **Sheets to KEEP:**
+- `SUMMONS_MASTER` (original)
+- `Simple_Monday_CompStat` (original)
+- `Debug_Multi_Month_Loader` (original)
+- `ENHANCED_BADGE`
+- `ROBUSTV7`
+
+## 🎯 **STEP-BY-STEP REPAIR PROCESS**
+
+### **Phase 1: Emergency Cleanup (Do First)**
+1. Open Data → Queries & Connections
+2. Delete all queries ending in `(2)`, `(3)`, `(4)`, `(5)`
+3. Delete corresponding worksheet tabs
+4. Save workbook
+
+### **Phase 2: Rebuild Broken Connections**
+1. **For SUMMONS_MASTER data:**
+   - Data → Get Data → From File → From Folder
+   - Navigate to your CSV files location  
+   - Filter for `2024_04_Officer_Charge_Date_Case_Type.csv`
+   - Use M code above
+
+2. **For Traffic_Enforcement_Data:**
+   - Data → Get Data → From File → From CSV
+   - Select correct traffic enforcement file
+   - Use M code above
+
+### **Phase 3: Verification**
+1. Refresh all connections (Data → Refresh All)
+2. Check each query loads without errors
+3. Verify data appears correctly in worksheets
+
+## 📂 **FILE PATH REQUIREMENTS**
+
+**INFOCOP Data Location (CONFIRMED):**
+```
+C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type\2024_04_Officer_Charge_Date_Case_Type.csv
+```
+
+**For Traffic_Enforcement_Data:**
+- Update path to match your actual traffic data location
+- Likely similar structure: `C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\...`
+
+**Path Structure Notes:**
+- Uses OneDrive for Business (City of Hackensack)
+- Organized by data type and export frequency
+- CSV files in specific INFOCOP folders
+
+## ⚠️ **PITFALLS TO AVOID**
+
+### **Don't:**
+- Keep multiple numbered versions of same query
+- Use hardcoded file paths that break on other machines
+- Import without proper error handling
+
+### **Do:**
+- Use dynamic file path detection
+- Include error handling in all queries
+- Test with "Refresh All" before saving
+- Document file path requirements
+
+## 🔄 **MAINTENANCE SCHEDULE**
+
+**Weekly:**
+- Refresh all data connections
+- Check for new CSV files
+- Verify no error messages
+
+**Monthly:**
+- Review and clean unused queries
+- Update file paths if locations change
+- Archive old CSV files
+
+---
+
+**Next Steps:**
+1. Backup current workbook
+2. Execute Phase 1 cleanup
+3. Rebuild connections using provided M code
+4. Test all refreshes work properly
+
+## 🎯 **Critical Discovery: Your CSVs Are Vertical Reports! **
+
+The issue isn't just Excel vs CSV - your **INFOCOP CSV files are vertical reports**, not tabular data! ### **CSV Structure Pattern:**
+```
+PEO M RAMIREZ       ← Officer Name
+04/10/2024          ← Date  
+P                   ← Violation Type
+04/24/2024          ← Date
+P                   ← Violation Type
+```
+
+### **Why Your Original Code Failed:**
+- Expected **tabular Excel** with columns/rows
+- Got **vertical CSV** with sequential data
+- Needs **pattern parsing**, not table operations
+
+### **Test the New Parser:**
+1. **Replace your current `ExtractOfficerData` function** with the vertical parser from the artifact
+2. **Test with one file first** to verify the parsing works
+3. **Check output structure** matches your assignment matching expectations
+
+### **Validation Steps:**
+1. Run the query on a single CSV file
+2. Check if officer names are correctly extracted
+3. Verify date/violation pairs are properly matched
+4. Confirm assignment matching still works
+
+This completely new parser should handle your **unique INFOCOP vertical report format**! ### *User:*
+
+like this? ### *Claude:*
+
+Almost perfect! You have **both functions** in there - I can see the issue. You have the new CSV parser AND the old Excel function mixed together.

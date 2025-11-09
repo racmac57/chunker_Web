@@ -1,0 +1,535 @@
+409        """
+       410 -      log.info(f"Expanding summary data from {source_filename}")
+       410 +      log.info(f"Converting summary data to aggregate records from {source_filename}")
+       411 +      log.warning("NOTE: Summary data will be stored as aggregate counts, not individual tickets")
+       412 +
+       413        records = []
+       414 -
+       414 +
+       415        for idx, row in df_summary.iterrows():
+       416            try:
+       417                count = int(float(row.get("Count of TICKET_NUMBER", 0)))
+       418                if count <= 0:
+       419                    continue
+       420 -
+       420 +
+       421                month_year_str = str(row.get("Month_Year", "")).strip()
+       422                violation_type = str(row.get("TYPE", "P")).strip()
+       423 -
+       423 +
+       424                # Parse Month_Year (format: MM-YY)
+       425                if "-" in month_year_str:
+       426                    parts = month_year_str.split("-")
+     ...
+       427                else:
+       428                    log.warning(f"Invalid Month_Year format: {month_year_str}, skipping")
+       429                    continue
+       430 -
+       431 -              # Get number of days in the month for distribution
+       432 -              days_in_month = calendar.monthrange(year, month)[1]
+       433 -
+       434 -              # Create individual records
+       435 -              for i in range(count):
+       436 -                  # Distribute dates across the month (cycle through days 1-28 for safety)
+       437 -                  day = (i % 28) + 1
+       438 -                  issue_date = pd.Timestamp(year, month, min(day, days_in_month))
+       439 -
+       440 -                  # Generate synthetic ticket number
+       441 -                  ticket_num = f"HIST_{year}{month:02d}_{violation_type}_{i+1:06d}"
+       442 -
+       443 -                  # Determine violation code and description based on type
+       444 -                  if violation_type == "M":
+       445 -                      viol_code = "39:4-85"
+       446 -                      viol_desc = "Moving Violation - Historical"
+       447 -                  elif violation_type == "P":
+       448 -                      viol_code = "175-10"
+       449 -                      viol_desc = "Parking Violation - Historical"
+       450 -                  else:  # C
+       451 -                      viol_code = "MUNICIPAL"
+       452 -                      viol_desc = "Special Complaint - Historical"
+       453 -
+       454 -                  record = {
+       455 -                      "TICKET_NUMBER": ticket_num,
+       456 -                      "OFFICER_NAME_RAW": "",
+       457 -                      "BADGE_NUMBER_RAW": "",
+       458 -                      "PADDED_BADGE_NUMBER": "",
+       459 -                      "ISSUE_DATE": issue_date,
+       460 -                      "VIOLATION_NUMBER": viol_code,
+       461 -                      "VIOLATION_DESCRIPTION": viol_desc,
+       462 -                      "VIOLATION_TYPE": viol_desc,
+       463 -                      "TYPE": violation_type,
+       464 -                      "STATUS": "Historical",
+       465 -                      "LOCATION": "",
+       466 -                      "WARNING_FLAG": "",
+       467 -                      "SOURCE_FILE": source_filename,
+       468 -                      "ETL_VERSION": "HISTORICAL_BACKFILL",
+       469 -                      "Year": year,
+       470 -                      "Month": month,
+       471 -                      "YearMonthKey": year * 100 + month,
+       472 -                      "Month_Year": f"{month:02d}-{year-2000:02d}",
+       473 -                      # Financial columns
+       474 -                      "TOTAL_PAID_AMOUNT": np.nan,
+       475 -                      "FINE_AMOUNT": np.nan,
+       476 -                      "COST_AMOUNT": np.nan,
+       477 -                      "MISC_AMOUNT": np.nan,
+       478 -                      # Assignment columns (will be enriched later)
+       479 -                      "OFFICER_DISPLAY_NAME": "",
+       480 -                      "TEAM": "",
+       481 -                      "WG1": "",
+       482 -                      "WG2": "",
+       483 -                      "WG3": "",
+       484 -                      "WG4": "",
+       485 -                      "WG5": "",
+       486 -                      "POSS_CONTRACT_TYPE": "",
+       487 -                  }
+       488 -                  records.append(record)
+       489 -
+       430 +
+       431 +              # Create ONE aggregate record per summary row (not individual tickets)
+       432 +              # Use first day of month for the aggregate date
+       433 +              issue_date = pd.Timestamp(year, month, 1)
+       434 +
+       435 +              # Generate aggregate ticket identifier
+       436 +              ticket_num = f"HIST_AGG_{year}{month:02d}_{violation_type}_{idx}"
+       437 +
+       438 +              # Determine violation code and description based on type
+       439 +              if violation_type == "M":
+       440 +                  viol_code = "39:4-85"
+       441 +                  viol_desc = f"Moving Violations - Historical Summary ({count} tickets)"
+       442 +              elif violation_type == "P":
+       443 +                  viol_code = "175-10"
+       444 +                  viol_desc = f"Parking Violations - Historical Summary ({count} tickets)"
+       445 +              else:  # C
+       446 +                  viol_code = "MUNICIPAL"
+       447 +                  viol_desc = f"Special Complaints - Historical Summary ({count} tickets)"
+       448 +
+       449 +              record = {
+       450 +                  "TICKET_NUMBER": ticket_num,
+       451 +                  "TICKET_COUNT": count,  # NEW: store the actual count
+       452 +                  "IS_AGGREGATE": True,    # NEW: flag for aggregate records
+       453 +                  "OFFICER_NAME_RAW": "MULTIPLE OFFICERS",
+       454 +                  "BADGE_NUMBER_RAW": "",
+       455 +                  "PADDED_BADGE_NUMBER": "",
+       456 +                  "ISSUE_DATE": issue_date,
+       457 +                  "VIOLATION_NUMBER": viol_code,
+       458 +                  "VIOLATION_DESCRIPTION": viol_desc,
+       459 +                  "VIOLATION_TYPE": viol_desc,
+       460 +                  "TYPE": violation_type,
+       461 +                  "STATUS": "Historical Summary",
+       462 +                  "LOCATION": "",
+       463 +                  "WARNING_FLAG": "",
+       464 +                  "SOURCE_FILE": source_filename,
+       465 +                  "ETL_VERSION": "HISTORICAL_SUMMARY",  # Changed to distinguish from fake individual
+           +  records
+       466 +                  "Year": year,
+       467 +                  "Month": month,
+       468 +                  "YearMonthKey": year * 100 + month,
+       469 +                  "Month_Year": f"{month:02d}-{year-2000:02d}",
+       470 +                  # Financial columns
+       471 +                  "TOTAL_PAID_AMOUNT": np.nan,
+       472 +                  "FINE_AMOUNT": np.nan,
+       473 +                  "COST_AMOUNT": np.nan,
+       474 +                  "MISC_AMOUNT": np.nan,
+       475 +                  # Assignment columns (N/A for aggregate records)
+       476 +                  "OFFICER_DISPLAY_NAME": "MULTIPLE OFFICERS",
+       477 +                  "TEAM": "AGGREGATE",
+       478 +                  "WG1": "",
+       479 +                  "WG2": "AGGREGATE",
+       480 +                  "WG3": "",
+       481 +                  "WG4": "",
+       482 +                  "WG5": "",
+       483 +                  "POSS_CONTRACT_TYPE": "",
+       484 +              }
+       485 +              records.append(record)
+       486 +
+       487            except Exception as e:
+       488 -              log.warning(f"Error expanding row {idx} from {source_filename}: {e}")
+       488 +              log.warning(f"Error processing summary row {idx} from {source_filename}: {e}")
+       489                continue
+       490 -
+       490 +
+       491        result = pd.DataFrame(records)
+       492 -      log.info(f"  Expanded {len(df_summary):,} summary rows into {len(result):,} individual
+           - records")
+       492 +      total_tickets = result["TICKET_COUNT"].sum() if "TICKET_COUNT" in result.columns else
+           + len(result)
+       493 +      log.info(f"  Converted {len(df_summary):,} summary rows into {len(result):,} aggregate records
+           + (representing {total_tickets:,} total tickets)")
+       494        return result
+       495
+       496    def process_court_csv(df, path):
+
+● Now let's fix the assignment merge logic to prevent Cartesian products and ensure proper column handling:
+
+● Update(SummonsMaster_Transition.py)
+  ⎿  Updated SummonsMaster_Transition.py with 51 additions and 11 removals
+       277          - Normalizes PADDED_BADGE_NUMBER on the fact DF
+       278          - Single left-merge to bring officer/team fields
+       279          - Adds clean fallbacks; no row loops
+       280 +        - Validates merge to prevent Cartesian products
+       281        """
+       282        if assign_df.empty:
+       283            # No assignment data available, just ensure columns exist
+     ...
+       286            if "PEO_RULE_APPLIED" not in df.columns:
+       287                df["PEO_RULE_APPLIED"] = False
+       288            return df
+       289 -
+       289 +
+       290 +      # Record starting row count for validation
+       291 +      starting_rows = len(df)
+       292 +
+       293        # Ensure columns exist
+       294        for c in ["PADDED_BADGE_NUMBER", "OFFICER_DISPLAY_NAME",
+             "TEAM","WG1","WG2","WG3","WG4","WG5","POSS_CONTRACT_TYPE"]:
+       295            if c not in df.columns:
+     ...
+       300            .str.zfill(4)
+       301        )
+       302
+       303 +      # Validate assignment data - ensure no duplicate badge numbers
+       304 +      assign_dupes = assign_df["PADDED_BADGE_NUMBER"].duplicated().sum()
+       305 +      if assign_dupes > 0:
+       306 +          if logger:
+       307 +              logger.warning(f"Found {assign_dupes} duplicate badge numbers in assignment file -
+           + deduplicating")
+       308 +          assign_df = assign_df.drop_duplicates(subset=["PADDED_BADGE_NUMBER"], keep="first")
+       309 +
+       310 +      # Prepare assignment lookup with only needed columns
+       311 +      assign_cols = ["PADDED_BADGE_NUMBER", "Proposed 4-Digit Format", "TEAM", "WG1", "WG2", "WG3",
+           + "WG4", "WG5", "POSS_CONTRACT_TYPE"]
+       312 +      right = assign_df[assign_cols].copy()
+       313 +      right = right.rename(columns={"Proposed 4-Digit Format": "OFFICER_DISPLAY_NAME_ASSIGN"})
+       314 +
+       315 +      # Drop any _ASSIGN columns that might already exist to avoid conflicts
+       316 +      cols_to_drop = [c for c in df.columns if c.endswith("_ASSIGN")]
+       317 +      if cols_to_drop:
+       318 +          df = df.drop(columns=cols_to_drop)
+       319 +
+       320        # Do the merge
+       321 -      right = assign_df.rename(columns={"Proposed 4-Digit Format": "OFFICER_DISPLAY_NAME_ASSIGN"})
+       321        merged = df.merge(
+       322            right,
+       323            how="left",
+       324            on="PADDED_BADGE_NUMBER",
+       325 -          suffixes=("", "_ASSIGN"),
+       326 -          copy=False
+       325 +          suffixes=("_ORIG", "_ASSIGN"),
+       326 +          validate="m:1"  # Many-to-one: ensures no Cartesian product
+       327        )
+       328
+       329 +      # Validate merge didn't create extra rows
+       330 +      if len(merged) != starting_rows:
+       331 +          if logger:
+       332 +              logger.error(f"MERGE ERROR: Row count changed from {starting_rows:,} to
+           + {len(merged):,}!") 333 +              logger.error("This indicates a Cartesian product - assignment data may have
+           + duplicates")
+       334 +          raise ValueError(f"Assignment merge created duplicate rows: {starting_rows:,} ->
+           + {len(merged):,}")
+       335 +
+       336        # Coalesce final columns from assign where fact missing
+       337        def _coalesce(dst: str, src: str):
+       338 -          dstv = merged[dst].astype(str)
+       339 -          srcv = merged[src].astype(str)
+       338 +          # Handle both _ORIG and non-suffixed versions
+       339 +          if dst + "_ORIG" in merged.columns:
+       340 +              dstv = merged[dst + "_ORIG"].astype(str)
+       341 +          elif dst in merged.columns:
+       342 +              dstv = merged[dst].astype(str)
+       343 +          else:
+       344 +              dstv = pd.Series([""] * len(merged), dtype=str)
+       345 +
+       346 +          if src in merged.columns:
+       347 +              srcv = merged[src].astype(str)
+       348 +          else:
+       349 +              srcv = pd.Series([""] * len(merged), dtype=str)
+       350 +
+       351            merged[dst] = np.where(dstv.str.strip().eq(""), srcv, dstv)
+       352
+       353        _coalesce("OFFICER_DISPLAY_NAME", "OFFICER_DISPLAY_NAME_ASSIGN")
+       354        for col in ["TEAM","WG1","WG2","WG3","WG4","WG5","POSS_CONTRACT_TYPE"]:
+       355 -          _coalesce(col, f"{col}")
+       355 +          _coalesce(col, f"{col}_ASSIGN")
+       356
+       357 -      # Drop temp assign-only column
+       358 -      if "OFFICER_DISPLAY_NAME_ASSIGN" in merged.columns:
+       359 -          merged.drop(columns=["OFFICER_DISPLAY_NAME_ASSIGN"], inplace=True)
+       357 +      # Drop all temporary columns (_ASSIGN and _ORIG suffixes)
+       358 +      cols_to_drop = [c for c in merged.columns if c.endswith("_ASSIGN") or c.endswith("_ORIG")]
+       359 +      merged = merged.drop(columns=cols_to_drop)
+       360
+       361        # Ensure audit flag exists
+       362        if "PEO_RULE_APPLIED" not in merged.columns:
+     ...
+       333
+       334        if logger:
+       335            no_match = int(merged["OFFICER_DISPLAY_NAME"].astype(str).str.strip().eq("").sum())
+       336 -          logger.info(f"Assignment merge completed. Rows without officer display after merge:
+           - {no_match:,}")
+       336 +          total_rows = len(merged)
+       337 +          match_pct = ((total_rows - no_match) / total_rows * 100) if total_rows > 0 else 0
+       338 +          logger.info(f"Assignment merge completed. Total rows: {total_rows:,}, Matched: {total_rows
+           + - no_match:,} ({match_pct:.1f}%), Unmatched: {no_match:,}")
+       339
+       340        return merged
+       341
+
+● Now let's update the summary aggregation logic to handle the new aggregate records properly and add a filter to
+  exclude aggregates from officer-level analysis:
+
+● Update(SummonsMaster_Transition.py)
+  ⎿  Updated SummonsMaster_Transition.py with 16 additions and 3 removals
+       1179
+       1180        # ===== Patrol Bureau movers/parkers summary =====
+       1181        # Use the pre-computed IS_PATROL boolean column for efficiency
+       1182 -      patrol = all_df[all_df["IS_PATROL"]].copy()
+       1182 +      # EXCLUDE aggregate records from officer-level analysis
+       1183 +      is_aggregate = all_df.get("IS_AGGREGATE", pd.Series([False] * len(all_df)))
+       1184 +      patrol = all_df[all_df["IS_PATROL"] & ~is_aggregate].copy()
+       1185
+       1186 +      log.info(f"Patrol Bureau records for officer analysis: {len(patrol):,} (excluding
+            + {is_aggregate.sum():,} aggregate records)")
+       1187 +
+       1188        # Overall counts (using observed=True for category optimization)
+       1189        overall = (
+       1190            patrol.groupby("TYPE", observed=True)
+     ...
+       1191        )
+       1192
+       1193        # Per-officer breakdown (OFFICER_DISPLAY_NAME + badge) for Movers (M) and Parkers (P)
+       1194 +      # Only include records with identifiable officers (not MULTIPLE OFFICERS or AGGREGATE)
+       1195 +      patrol_with_officers = patrol[
+       1196 +          (patrol["OFFICER_DISPLAY_NAME"].astype(str).str.strip() != "") &
+       1197 +          (patrol["OFFICER_DISPLAY_NAME"].astype(str) != "MULTIPLE OFFICERS") &
+       1198 +          (patrol["TEAM"].astype(str) != "AGGREGATE")
+       1199 +      ].copy()
+       1200 +
+       1201 +      log.info(f"Patrol Bureau records with identified officers: {len(patrol_with_officers):,}")
+       1202 +
+       1203        by_officer = (
+       1204 -          patrol
+            -  .pivot_table(index=["OFFICER_DISPLAY_NAME","PADDED_BADGE_NUMBER","TEAM","WG2","WG3","WG4"],
+       1204 +          patrol_with_officers
+            +  .pivot_table(index=["OFFICER_DISPLAY_NAME","PADDED_BADGE_NUMBER","TEAM","WG2","WG3","WG4"],
+       1205                               columns="TYPE", values="TICKET_NUMBER", aggfunc="count", fill_value=0,
+              observed=True)
+       1206                  .reindex(columns=["M","P"], fill_value=0)
+       1207                  .reset_index()
+     ...
+       1200
+       1201        # Optional: also include Month_Year for trend by officer
+       1202        by_officer_month = (
+       1203 -          patrol
+            -  .pivot_table(index=["Month_Year","OFFICER_DISPLAY_NAME","PADDED_BADGE_NUMBER","TEAM","WG2","WG3","
+            -  WG4"],
+       1203 +          patrol_with_officers
+            +  .pivot_table(index=["Month_Year","OFFICER_DISPLAY_NAME","PADDED_BADGE_NUMBER","TEAM","WG2","WG3","
+            +  WG4"],
+       1204                               columns="TYPE", values="TICKET_NUMBER", aggfunc="count", fill_value=0,
+              observed=True)
+       1205                  .reindex(columns=["M","P"], fill_value=0)
+       1206                  .reset_index()
+
+● Now let's also add a new sheet to track the historical aggregate data separately:
+
+● Update(SummonsMaster_Transition.py)
+  ⎿  Updated SummonsMaster_Transition.py with 10 additions
+       1176            (all_df["PEO_RULE_APPLIED"] == True),
+       1177            ["TICKET_NUMBER","ISSUE_DATE","PADDED_BADGE_NUMBER","OFFICER_DISPLAY_NAME","WG3","TYPE","V
+              IOLATION_NUMBER","VIOLATION_DESCRIPTION"]
+       1178        ].sort_values(["ISSUE_DATE","OFFICER_DISPLAY_NAME","TICKET_NUMBER"])
+       1179 +
+       1180 +      # Create Historical Aggregate Summary sheet
+       1181 +      historical_agg = all_df[all_df.get("IS_AGGREGATE", False)].copy()
+       1182 +      if not historical_agg.empty:
+       1183 +          historical_summary = historical_agg[
+       1184 +              ["Month_Year", "TYPE", "TICKET_COUNT", "VIOLATION_DESCRIPTION", "Year", "Month"]
+       1185 +          ].sort_values(["Year", "Month", "TYPE"])
+       1186 +          log.info(f"Historical aggregate records: {len(historical_summary):,} (representing
+            + {historical_summary['TICKET_COUNT'].sum():,} total tickets)")
+       1187 +      else:
+       1188 +          historical_summary = pd.DataFrame()
+       1189
+       1190        # ===== Patrol Bureau movers/parkers summary =====
+       1191        # Use the pre-computed IS_PATROL boolean column for efficiency
+
+● Now let's update the Excel output to include the historical summary sheet:
+
+● Update(SummonsMaster_Transition.py)
+  ⎿  Updated SummonsMaster_Transition.py with 2 additions
+       1259                by_officer.to_excel(w, sheet_name="PB_ByOfficer_MvsP", index=False)
+       1260                by_officer_month.to_excel(w, sheet_name="PB_ByOfficer_Month", index=False)
+       1261                peo_audit.to_excel(w, sheet_name="PEO_Flips_Audit", index=False)
+       1262 +              if not historical_summary.empty:
+       1263 +                  historical_summary.to_excel(w, sheet_name="Historical_Aggregate", index=False)
+       1264
+       1265            log.info(f"✓ Main output file written: {output_file}")
+       1266
+
+● Update(SummonsMaster_Transition.py)
+  ⎿  Updated SummonsMaster_Transition.py with 2 additions
+       1287                    by_officer.to_excel(w, sheet_name="PB_ByOfficer_MvsP", index=False)
+       1288                    by_officer_month.to_excel(w, sheet_name="PB_ByOfficer_Month", index=False)
+       1289                    peo_audit.to_excel(w, sheet_name="PEO_Flips_Audit", index=False)
+       1290 +                  if not historical_summary.empty:
+       1291 +                      historical_summary.to_excel(w, sheet_name="Historical_Aggregate", index=False)
+       1292
+       1293                log.info(f"✓ Archive file written: {out2}")
+       1294            except PermissionError as e:
+
+● Perfect! Now let's test the fixes by running the updated script:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && python
+      SummonsMaster_Transition.py 2>&1 | Select-String -Pattern "PHASE|records|…)
+  ⎿  Error: /usr/bin/bash: line 1: Select-String: command not found
+     /usr/bin/bash: line 1: Select-Object: command not found
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && python
+      SummonsMaster_Transition.py 2>&1 | grep -E "(PHASE|records|Assignment|Pat…)
+  ⎿  2025-10-14 13:22:01,090 - INFO - Assignment entries loaded: 163
+     2025-10-14 13:22:01,091 - INFO - PHASE 1: Loading Historical Data (pre-Sept 2025)
+     2025-10-14 13:22:01,112 - INFO - Processing individual court records from 25_08_ATS.csv
+     … +56 lines (ctrl+o to expand)
+
+● Excellent! The fixes are working. Let me check the rest of the output:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && tail -50
+      summons_transition_processing.log)
+  ⎿  2025-10-14 13:22:25,423 - INFO - PHASE 3: Combining and Processing Data
+     2025-10-14 13:22:25,423 - INFO - ------------------------------------------------------------
+     2025-10-14 13:22:25,425 - INFO - Combined records before deduplication: 8,812
+     … +49 lines (ctrl+o to expand)
+
+● Perfect! The script is now working correctly. Let me check if it completed successfully:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && tail -20
+      summons_transition_processing.log | grep -E "(Historical|Patrol Bureau|…)
+  ⎿  No matches found
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && tail -100
+      summons_transition_processing.log)
+  ⎿  2025-10-14 13:22:01,081 - INFO - ============================================================
+     2025-10-14 13:22:01,081 - INFO - Rolling 13-Month Window: 2024-09-01 to 2025-09-30
+     2025-10-14 13:22:01,090 - INFO - Assignment entries loaded: 163
+     … +112 lines (ctrl+o to expand)
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && tail -5
+      summons_transition_processing.log)
+  ⎿  2025-10-14 13:22:25,541 - INFO - ✓ All required columns present
+     2025-10-14 13:22:25,541 - INFO - ============================================================
+     2025-10-14 13:22:25,541 - INFO -
+     … +2 lines (ctrl+o to expand)
+
+● It looks like the script is still running. Let me wait a moment and check if the output file was created:
+
+● Bash(ls -lh "C:\Users\carucci_r\OneDrive - City of Hackensack\03_Staging\Summons\summons_powerbi_latest*.xlsx" 2>&1 |
+      head -5)
+  ⎿ ls: cannot access 'C:\Users\carucci_r\OneDrive - City of Hackensack\03_Staging\Summons\summons_powerbi_latest*. xlsx': No such file or directory
+
+
+● The script might still be running or may have an issue. Let me check if there's a Python process running and look
+  at the most recent complete log:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\03_Staging\Summons" && ls -lth summons_powerbi*.xlsx 2>&1 |
+      head -5)
+  ⎿  -rw-r--r-- 1 Carucci_R 1049089    0 Oct 14 13:18 summons_powerbi_latest.xlsx
+     -rw-r--r-- 1 Carucci_R 1049089  68M Oct 14 12:28 summons_powerbi_latest_backup.xlsx
+     -rw-r--r-- 1 Carucci_R 1049089  67M Oct 14 11:52 summons_powerbi_transition_2025_10.xlsx
+     … +2 lines (ctrl+o to expand)
+
+● Bash(wc -l "C:\Users\carucci_r\OneDrive - City of
+      Hackensack\02_ETL_Scripts\Summons\summons_transition_processing.log")
+  ⎿  509 C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons\summons_transition_processing.log
+
+● I see the output file is 0 bytes (empty) from the most recent run at 13:18. The script seems to have crashed or
+  stalled. Let me run it again with better error handling and check the complete log:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && python               timeout: 3m
+      SummonsMaster_Transition.py)                                                                          0s
+  ⎿  Error: --- Logging error ---
+     Traceback (most recent call last):
+       File "C:\Python313\Lib\logging\__init__.py", line 1154, in emit
+         stream.write(msg + self.terminator)
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+       File "C:\Python313\Lib\encodings\cp1252.py", line 19, in encode
+         return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+                ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 68: character maps to <undefined>
+     Call stack:
+     … +133 lines (ctrl+o to see all)
+
+● The script is running but there are logging errors due to Unicode characters (checkmarks and arrows). Let me wait
+  for it to complete and check the output:
+
+● Bash(sleep 30 && ls -lh "C:\Users\carucci_r\OneDrive - City of
+      Hackensack\03_Staging\Summons\summons_powerbi_latest.xlsx")
+  ⎿  Interrupted · What should Claude do instead? > the data from "C:\Users\carucci_r\OneDrive - City of
+Hackensack\02_ETL_Scripts\Summons\backfill_data\25_08_Hackensack Police Department - Summons Dashboard.csv" is to
+provide data for the moving and parking summons for 9/24 through 8/25. The script needs only process the data in
+"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_Summons\E_Ticket\25_09_e_ticketexport.csv". The
+assignment data is needed for the following m codes: "C:\Users\carucci_r\OneDrive - City of
+Hackensack\02_ETL_Scripts\Summons\m_code\Top_5_Moving_Violations.m", "C:\Users\carucci_r\OneDrive - City of
+Hackensack\02_ETL_Scripts\Summons\m_code\Top_5_Parking_Violations.m". Also the exported data badge number column
+needs to have zeros added to the front to padd and make the value 4-digits (be carefiul not to have flotting
+numbers)
+
+● Read(backfill_data\25_08_Hackensack Police Department - Summons Dashboard.csv)
+  ⎿  Read 26 lines
+
+● Read(m_code\Top_5_Moving_Violations.m)
+  ⎿  Read 98 lines
+
+● Read(m_code\Top_5_Parking_Violations.m)
+  ⎿  Read 98 lines
+
+● Perfect! Now I understand the requirements. Let me create a simplified script that:
+
+  1. Uses the backfill CSV for historical data (Sep 2024 - Aug 2025)
+  2. Only processes the September 2025 e-ticket data
+  3. Ensures badge numbers are properly padded to 4 digits (as text, not floats)
+  4. Outputs data compatible with the Power BI M code
+
+● Write(SummonsMaster_Simple.py)
+  ⎿  Wrote 1 lines to SummonsMaster_Simple.py
+     #!/usr/bin/env python3
+     """
+     SummonsMaster_Simple.py - Simplified Summons Processing
+     Processes:
+       - Historical backfill: Sep 2024 - Aug 2025 (from summary CSV)
+       - Current e-ticket: Sep 2025 only
+     Outputs: Clean data for Power BI with proper badge number formatting
+     """
+     import pandas as pd
+
+● Now let's test the simplified script:
+
+● Bash(cd "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons" && python SummonsMaster_Simple.py)
+  ⎿  Error: Traceback (most recent call last):
+       File "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons\SummonsMaster_Simple.py", line 470,
+     in <module>
+         sys.exit(0 if main() else 1)
+                       ~~~~^^
+       File "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons\SummonsMaster_Simple.py", line 402,
+     in main
+         eticket_df = load_eticket_data()
+       File "C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Summons\SummonsMaster_Simple.py", line 198,
+     in load_eticket_data
+         df = pd.read_csv(ETICKET_FILE, dtype=str, encoding="utf-8", na_filter=False)
+       File "C:\Users\carucci_r\AppData\Roaming\Python\Python313\site-packages\pandas\io\parsers\readers.py", line 1026,
+     in read_csv
+         return _read(filepath_or_buffer, kwds)
+     … +33 lines (ctrl+o to see all)
+
+● The September e-ticket file has a parsing error. Let me check the file and handle the error:
+
+● Bash(head -160 "C:\Users\carucci_r\OneDrive - City of
+      Hackensack\05_EXPORTS\_Summons\E_Ticket\25_09_e_ticketexport.csv" | tail -10)
+  ⎿ 0223;E25028041;ACTI;P;2025-09-02;2025-09-02T10:02:50.108;2025-09-02;1002;0223;0313;000000;P.O. ;A;IANNACONE;0223
+    ;HACKENSACK MUNICIPAL COURT;BERGEN;HACKENSACK CITY;NJ;HACKENSACK;07601;0000;215 STATE STREET;;2016463971;;;0223
+    ;170-8;PARKING  PROHIBITED DURING CERTAIN HOURS;0223;42 FAIRMOUNT AVENUE;50.0;2025-09-16;;;04;4 Door;2016;BLK;B
+    … +39 lines (ctrl+o to expand)
+
+
+
+
+● I see - the file is semicolon-delimited, not comma-delimited.

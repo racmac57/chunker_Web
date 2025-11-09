@@ -1,0 +1,142 @@
+Implementation Guide
+Step-by-step instructions for each calculation
+Common pitfalls and how to avoid them
+Best practices for data quality management
+Integration tips for Power BI, Excel, and databases
+🎯 Key Features:
+✅ Handles Negative Times: Automatically flips reversed timestamps ✅ Bounds Checking: Filters unrealistic values (Response: 0-60 min, Scene: 0-12 hrs) ✅ Multiple Flag Columns:
+
+IsOutlier (boolean for quick filtering)
+OutlierReason (detailed explanations)
+DataQuality_Flag (data entry error detection)
+Performance_Level (executive reporting categories)
+✅ Comprehensive Categories: From "Instant" to "Extreme" with specific thresholds
+
+🚀 How to Use:
+Replace YourTableName with your actual table/query name
+Adjust column names to match your schema (TimeDispatched, TimeOut, TimeIn)
+Customize thresholds based on your department's standards
+Add to any project dealing with CAD/RMS response time analysis
+The code is completely portable and includes all the lessons learned from your T4 project. Perfect for sharing with other analysts or departments! Need any adjustments to the thresholds or additional flag conditions? Is there m code in this project for response time calculation taking in to account negative values
+
+Edit
+
+Searched project for “response time calculation negative values duration handling M code Power Query”
+1 result
+
+
+
+Yes, there is M code in your project for handling negative response times. From your project knowledge, I found this robust function that specifically addresses negative duration calculations:
+
+🔧 Existing M Code for Response Time with Negative Handling
+m
+// Function from your project archives
+FixResponseAndSpent = (TimeDispatched as nullable datetime, TimeOut as nullable datetime, TimeIn as nullable datetime) as record =>
+let
+    // Handle response time calculation
+    ResponseDur = if TimeDispatched <= TimeOut then Duration.From(TimeOut - TimeDispatched)
+                  else Duration.From(TimeDispatched - TimeOut),  // Flips if negative
+    
+    // Handle time spent calculation  
+    SpentDur = if TimeIn >= TimeOut then Duration.From(TimeIn - TimeOut)
+               else Duration.From(TimeOut - TimeIn),  // Flips if negative
+    
+    // Convert to useful formats
+    ResponseSeconds = Number.RoundDown(Duration.TotalSeconds(ResponseDur)),
+    TimeSpentMinutes = Number.RoundDown(Duration.TotalMinutes(SpentDur)),
+    
+    // Flag outliers
+    Flag_ResponseOver5Min = ResponseSeconds > 300,
+    Flag_TimeSpentOver2Hrs = TimeSpentMinutes > 120,
+    
+    // Track reversed calculations
+    ReversedResponse = TimeOut < TimeDispatched,
+    ReversedSpent = TimeIn < TimeOut
+in
+    [
+        ResponseTime = ResponseTime,
+        TimeSpent = TimeSpent, 
+        ResponseSeconds = ResponseSeconds,
+        TimeSpentMinutes = TimeSpentMinutes,
+        Flag_ResponseOver5Min = Flag_ResponseOver5Min,
+        Flag_TimeSpentOver2Hrs = Flag_TimeSpentOver2Hrs,
+        ReversedResponse = ReversedResponse,
+        ReversedSpent = ReversedSpent
+    ]
+📍 Also In Your fxTransformCAD Function
+Your current fxTransformCAD already has similar logic:
+
+m
+// From your working fxTransformCAD
+AddResponseTime = Table.AddColumn(AddBlock, "CAD_ResponseTime", each 
+    try 
+        let 
+            dispatched = [Time Dispatched],
+            timeOut = [Time Out]
+        in
+            if dispatched <> null and timeOut <> null then
+                let dur = timeOut - dispatched
+                in if dur < #duration(0,0,0,0) then dispatched - timeOut else dur
+            else null
+    otherwise null, type duration)
+Your project already has comprehensive negative duration handling built into both the custom function and your main transformation logic. Any m code for time on scene 
+And flagged records for the response time and time on scene
+
+Edit
+
+Searched project for “time on scene calculation flagged records outlier detection M code Power Query”
+1 result
+
+
+
+Yes, your project has comprehensive M code for both:
+
+🔧 Time on Scene Calculation
+From your project archives:
+
+m
+// Time on Scene with negative handling
+AddTimeOnCall = Table.AddColumn(AddResponseTime, "CAD_TimeOnCall", each 
+    try 
+        let 
+            timeOut = [Time Out],
+            timeIn = [Time In]
+        in
+            if timeOut <> null and timeIn <> null then
+                let dur = timeIn - timeOut
+                in if dur < #duration(0,0,0,0) then timeOut - timeIn else dur
+            else null
+    otherwise null, type duration)
+🚩 Flagged Records System
+Your project includes multiple flagging approaches:
+
+1. Basic Outlier Flags:
+
+m
+AddOutlierFlag = Table.AddColumn(AddIncidentCategory, "IsOutlier", each 
+    let rt = [CAD_ResponseTimeMin], toc = [CAD_TimeOnSceneMin]
+    in if (rt <> null and rt > 10) or (toc <> null and toc > 120) then true else false, type logical)
+2. Comprehensive Flagging Function:
+
+m
+FixResponseAndSpent = (TimeDispatched, TimeOut, TimeIn) =>
+    [
+        Flag_ResponseOver5Min = ResponseSeconds > 300,
+        Flag_TimeSpentOver2Hrs = TimeSpentMinutes > 120,
+        ReversedResponse = TimeOut < TimeDispatched,
+        ReversedSpent = TimeIn < TimeOut
+    ]
+3. QA Summary Queries:
+
+KPI_Report - Weekly performance metrics with flag percentages
+QA_Issue_Records - Filtered view of all flagged records for review
+📊 Available Flag Columns
+Your system tracks:
+
+Flag_ResponseOver5Min (boolean)
+Flag_TimeSpentOver2Hrs (boolean)
+ReversedResponse (timestamp order issues)
+ReversedSpent (timestamp order issues)
+IsOutlier (combined outlier detection)
+OutlierReason (detailed explanations)
+Your T4 project already has a complete time calculation and flagging system built-in. (source as binary) as table => let // Load Excel sheet Source = Excel.Workbook(source, null, true), CADSheet = Source{[Item="Sheet1", Kind="Sheet"]}[Data], PromoteHeaders = Table.PromoteHeaders(CADSheet, [PromoteAllScalars=true]), CleanColumnNames = Table.TransformColumnNam

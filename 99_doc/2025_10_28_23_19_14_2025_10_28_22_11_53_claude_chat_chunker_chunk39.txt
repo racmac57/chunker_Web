@@ -1,0 +1,744 @@
+''', (
+            conv_uuid, name, summary, created_at, updated_at, model,
+            message_count, total_tokens, json.dumps(tags), json.dumps(conversation)
+        ))
+        
+        # Process messages
+        for msg_idx, message in enumerate(messages):
+            self.process_message(message, conv_uuid, tags)
+        
+        # Update tags table
+        for tag in tags:
+            cursor.execute('''
+                INSERT OR IGNORE INTO tags (tag_name, conversation_count, created_at)
+                VALUES (?, 0, ?) ''', (tag, datetime.now().isoformat()))
+            cursor.execute('''
+                UPDATE tags SET conversation_count = conversation_count + 1
+                WHERE tag_name = ? ''', (tag,))
+        
+        self.conn.commit()
+        logger.info(f"Processed conversation: '{name}' ({message_count} messages, {len(tags)} tags)")
+    
+    def process_message(self, message: Dict[str, Any], conv_uuid: str, conv_tags: List[str]):
+        """Process a single message and create chunks.""" msg_uuid = message.get('uuid')
+        if not msg_uuid:
+            return
+        
+        cursor = self.conn.cursor()
+        
+        # Extract message data
+        index_num = message.get('index', 0)
+        sender = message.get('sender', 'unknown')
+        text = message.get('text', '')
+        created_at = message.get('created_at', '')
+        model_slug = message.get('model_slug', 'unknown')
+        
+        # Check for special content
+        has_files = bool(message.get('files'))
+        has_artifacts = 'artifact' in text.lower() or 'tool_use' in str(message.get('content', []))
+        has_code = '```' in text
+        
+        # Insert message
+        cursor.execute('''
+            INSERT OR REPLACE INTO messages 
+            (uuid, conversation_uuid, index_num, sender, text, created_at, model_slug, 
+             has_files, has_artifacts, has_code, chunk_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', (
+            msg_uuid, conv_uuid, index_num, sender, text, created_at, model_slug,
+            has_files, has_artifacts, has_code, None  # chunk_id set later
+        ))
+        
+        # Create chunks from message text
+        chunks = self.chunk_text(text)
+        for chunk_idx, chunk_text in enumerate(chunks):
+            chunk_id = f"{msg_uuid}_chunk_{chunk_idx}"
+            chunk_hash = hashlib.sha256(chunk_text.encode()).hexdigest()[:16]
+            
+            # Count sentences and words
+            if HAS_NLTK:
+                sentence_count = len(sent_tokenize(chunk_text))
+            else:
+                sentence_count = len(re.split(r'[.!? ]+\s+', chunk_text))
+            word_count = len(chunk_text.split())
+            
+            # Insert chunk
+            cursor.execute('''
+                INSERT OR REPLACE INTO chunks 
+                (chunk_id, conversation_uuid, message_uuid, chunk_text, chunk_index,
+                 sentence_count, word_count, chunk_hash, embedding_vector, tags, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ''', (
+                chunk_id, conv_uuid, msg_uuid, chunk_text, chunk_idx,
+                sentence_count, word_count, chunk_hash, None, json.dumps(conv_tags), datetime.now().isoformat()
+            ))
+            
+            # Add to search index
+            cursor.execute('''
+                INSERT INTO search_index (conversation_uuid, message_uuid, chunk_id, content, tags)
+                VALUES (?, ?, ?, ?, ?) ''', (conv_uuid, msg_uuid, chunk_id, chunk_text, ' '.join(conv_tags)))
+        
+        # Process files/attachments
+        for file_obj in message.get('files', []):
+            if isinstance(file_obj, dict):
+                self.process_file(file_obj, conv_uuid, msg_uuid)
+        
+        self.conn.commit()
+    
+    def process_file(self, file_obj: Dict[str, Any], conv_uuid: str, msg_uuid: str):
+        """Process file/attachment metadata.""" cursor = self.conn.cursor()
+        
+        file_uuid = file_obj.get('file_uuid', '')
+        file_name = file_obj.get('file_name', '')
+        file_type = file_obj.get('file_type', '')
+        file_size = file_obj.get('file_size', 0)
+        extracted_content = file_obj.get('extracted_content', '')
+        created_at = file_obj.get('created_at', '')
+        
+        if file_uuid:
+            cursor.execute('''
+                INSERT OR REPLACE INTO files 
+                (file_uuid, conversation_uuid, message_uuid, file_name, file_type, file_size, extracted_content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?) ''', (file_uuid, conv_uuid, msg_uuid, file_name, file_type, file_size, extracted_content, created_at))
+            
+            # If file has extracted content, add to search index
+            if extracted_content:
+                cursor.execute('''
+                    INSERT INTO search_index (conversation_uuid, message_uuid, chunk_id, content, tags)
+                    VALUES (?, ?, ?, ?, ?) ''', (conv_uuid, msg_uuid, f"file_{file_uuid}", extracted_content, f'file {file_type}'))
+        
+        self.conn.commit()
+    
+    def search(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search the knowledge base using full-text search.""" cursor = self.conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                s.conversation_uuid,
+                c.name AS conversation_name,
+                s.message_uuid,
+                s.chunk_id,
+                snippet(search_index, 3, '<mark>', '</mark>', '...', 32) AS snippet,
+                s.tags,
+                c.created_at
+            FROM search_index s
+            JOIN conversations c ON s.conversation_uuid = c.uuid
+            WHERE search_index MATCH ? ORDER BY rank
+            LIMIT ? ''', (query, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            results.append({
+                'conversation_uuid': row[0],
+                'conversation_name': row[1],
+                'message_uuid': row[2],
+                'chunk_id': row[3],
+                'snippet': row[4],
+                'tags': row[5],
+                'created_at': row[6]
+            })
+        
+        return results
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get knowledge base statistics.""" cursor = self.conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) FROM conversations')
+        conv_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM messages')
+        msg_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM chunks')
+        chunk_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM files')
+        file_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM tags')
+        tag_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT SUM(total_tokens) FROM conversations')
+        total_tokens = cursor.fetchone()[0] or 0
+        
+        return {
+            'conversations': conv_count,
+            'messages': msg_count,
+            'chunks': chunk_count,
+            'files': file_count,
+            'tags': tag_count,
+            'total_tokens': total_tokens,
+            'database_size': Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0
+        }
+    
+    def close(self):
+        """Close database connection.""" if self.conn:
+            self.conn.close()
+            logger.info("Database connection closed")
+
+
+def build_knowledge_base(input_file: str, output_db: str = "claude_knowledge_base.db"):
+    """
+    Build knowledge base from Claude export JSON. Args:
+        input_file: Path to conversations.json or export ZIP
+        output_db: Path to output SQLite database
+    """
+    logger.info(f"Building knowledge base from: {input_file}")
+    logger.info(f"Output database: {output_db}")
+    
+    # Load conversations
+    if input_file.endswith('.zip'):
+        import zipfile
+        with zipfile.ZipFile(input_file) as zf:
+            with zf.open('conversations.json') as f:
+                data = json.load(f)
+    else:
+        with open(input_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    
+    # Handle both formats
+    if isinstance(data, list):
+        conversations = data
+    elif isinstance(data, dict) and 'conversations' in data:
+        conversations = data['conversations']
+    else:
+        raise ValueError("Unrecognized format")
+    
+    logger.info(f"Loaded {len(conversations)} conversations")
+    
+    # Build knowledge base
+    kb = ClaudeKnowledgeBase(output_db)
+    
+    for idx, conv in enumerate(conversations, 1):
+        try:
+            kb.process_conversation(conv)
+            if idx % 10 == 0:
+                logger.info(f"Processed {idx}/{len(conversations)} conversations")
+        except Exception as e:
+            logger.error(f"Error processing conversation {idx}: {e}")
+            continue
+    
+    # Show statistics
+    stats = kb.get_stats()
+    logger.info("\n" + "="*80)
+    logger.info("KNOWLEDGE BASE STATISTICS:")
+    logger.info("="*80)
+    for key, value in stats.items():
+        logger.info(f"  {key}: {value:,}")
+    logger.info("="*80)
+    
+    kb.close()
+    logger.info(f"\nKnowledge base created successfully: {output_db}")
+    return output_db
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python claude_knowledge_base.py <input_file> [output_db]")
+        print("  input_file: conversations.json or export.zip")
+        print("  output_db: output database path (default: claude_knowledge_base.db)")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    output_db = sys.argv[2] if len(sys.argv) > 2 else "claude_knowledge_base.db"
+    
+    build_knowledge_base(input_file, output_db)
+
+```
+
+Now let me create a Grok collaboration prompt and a query tool:
+
+```markdown
+# Grok AI: Claude Knowledge Base Enhancement Prompt
+
+## 🎯 Mission
+Help enhance the ClaudeExportFixer project by building an advanced knowledge base system that converts Claude conversation exports into a searchable, semantic database with chunking, tagging, and vector search capabilities. ## 📋 Context
+
+### Current Project State
+- **ClaudeExportFixer v1.2.0**: Successfully fixes Claude exports for osteele viewer compatibility
+- **Location**: `C:\Dev\ClaudeExportFixer`
+- **Integrated Chunker**: `C:\_chunker` - Enterprise-grade document chunking system with:
+  - NLTK sentence tokenization
+  - SQLite tracking database
+  - Parallel processing
+  - Tag extraction
+  - Notification system
+
+### New Component Created
+- **`claude_knowledge_base.py`**: Initial knowledge base builder
+  - Converts 401 conversations (~10,369 messages) into searchable SQLite database
+  - Creates semantic chunks (150 words max, sentence-aware)
+  - Extracts tags automatically (tech keywords, date-based, content-based)
+  - Full-text search with FTS5
+  - Tracks files/attachments with extracted content
+
+## 🔧 Your Tasks
+
+### 1. **Review & Enhance `claude_knowledge_base.py`**
+Please review the code and suggest improvements for:
+- **Performance**: Processing 401 conversations efficiently
+- **Search Quality**: Better semantic search and ranking
+- **Tag Extraction**: More intelligent auto-tagging based on content
+- **Chunking Strategy**: Optimal chunk sizes for Claude technical conversations
+- **Schema Design**: Any missing tables or indexes for better queries
+
+### 2. **Add Vector Embeddings** (Priority Feature)
+Integrate sentence transformers or OpenAI embeddings:
+```python
+# Suggested approach:
+from sentence_transformers import SentenceTransformer
+
+def generate_embedding(text: str) -> List[float]:
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    return model.encode(text).tolist()
+```
+
+**Requirements:**
+- Store embeddings in `chunks.embedding_vector` field
+- Add cosine similarity search
+- Support hybrid search (keyword + semantic)
+
+### 3. **Create Query Interface**
+Build `claude_kb_query.py` with:
+- **Command-line search**: `python claude_kb_query.py "power bi dax measures"`
+- **Interactive mode**: REPL for exploring conversations
+- **Export results**: Export search results to markdown/JSON
+- **Filters**: By date range, tags, sender, model, has-code, has-files
+
+### 4. **Advanced Analytics**
+Add analytics capabilities:
+- **Conversation clustering**: Group similar conversations
+- **Topic modeling**: Extract main topics across all conversations
+- **Timeline analysis**: Conversation trends over time
+- **Code extraction**: Extract all code snippets with language detection
+- **File content indexing**: Make attachment extracted_content searchable
+
+### 5. **Integration with Chunker Project**
+Leverage `C:\_chunker` components:
+- Use `chunker_db.py` database patterns
+- Integrate `notification_system.py` for processing alerts
+- Adopt parallel processing from `watcher_splitter.py`
+- Use existing NLTK setup and configurations
+
+## 📊 Data Structure Reference
+
+### Claude Export Format (Post v1.2.0 Fix)
+```json
+{
+  "conversations": [{
+    "uuid": "...",
+    "name": "...",
+    "summary": "...",
+    "created_at": "2025-10-27T...",
+    "updated_at": "2025-10-27T...",
+    "model": "claude-sonnet-3-5-20241022",
+    "chat_messages": [{
+      "uuid": "...",
+      "index": 0,
+      "sender": "human|assistant",
+      "text": "...",
+      "content": [{"type": "text", "text": "..."}],
+      "created_at": "...",
+      "updated_at": "...",
+      "model_slug": "...",
+      "files": [{
+        "file_uuid": "...",
+        "file_name": "...",
+        "file_type": "...",
+        "file_size": 12345,
+        "extracted_content": "...",
+        "created_at": "..."
+      }]
+    }]
+  }]
+}
+```
+
+### Knowledge Base Schema
+See `claude_knowledge_base.py` lines 35-100 for full schema:
+- `conversations`: Main conversation metadata
+- `messages`: Individual messages
+- `chunks`: Semantic text chunks (sentence-aware, 150 words max)
+- `files`: Attachments with extracted content
+- `tags`: Auto-extracted tags for organization
+- `search_index`: FTS5 full-text search
+
+## 🎯 Specific Enhancement Questions
+
+1. **Chunking Optimization**: 
+   - Is 150 words optimal for Claude technical conversations? - Should code blocks be chunked separately? - How to handle very long messages (>5000 words)? 2. **Tag Extraction**:
+   - Current tags: `python`, `javascript`, `database`, `power-bi`, `troubleshooting`, etc. - What other tags would be valuable? - Should we use NLP for topic extraction? 3. **Search Ranking**:
+   - How to rank results? (recency, relevance, message position)
+   - Should assistant responses rank higher than human questions? - How to handle multi-word queries? 4. **Performance**:
+   - Current: ~30 seconds to process 401 conversations
+   - Target: <10 seconds
+   - Should we use batch inserts? Thread pools? 5. **Export Formats**:
+   - What would be useful output formats? - Markdown summaries? JSON API? Web dashboard? ## 📁 Files to Review
+
+### Primary Files
+1. `C:\Dev\ClaudeExportFixer\claude_knowledge_base.py` - Main KB builder (NEW)
+2. `C:\Dev\ClaudeExportFixer\patch_conversations.py` - Export fixer (v1.2.0)
+3. `C:\_chunker\watcher_splitter.py` - Enterprise chunker reference
+4. `C:\_chunker\chunker_db.py` - Database patterns reference
+
+### Sample Data
+- Input: `C:\Users\carucci_r\OneDrive - City of Hackensack\06_Documentation\chat_logs\claude\data-FIXED-v1.2.0.zip`
+- Contains: 401 conversations, 10,369 messages, technical discussions about:
+  - Power BI, DAX, M code
+  - Python scripts, data processing
+  - ArcGIS mapping
+  - Police department systems
+
+## 🚀 Deliverables Requested
+
+### Code Enhancements
+1. **Enhanced `claude_knowledge_base.py`**:
+   - Add vector embeddings
+   - Improve chunking logic
+   - Better tag extraction
+   - Performance optimizations
+
+2. **New `claude_kb_query.py`**:
+   - CLI search interface
+   - Interactive mode
+   - Export functionality
+   - Advanced filtering
+
+3. **New `claude_kb_analytics.py`**:
+   - Conversation clustering
+   - Topic modeling
+   - Timeline visualization
+   - Code/file extraction
+
+### Documentation
+1. **Usage Guide**: How to build and query the knowledge base
+2. **API Reference**: All available search/filter options
+3. **Integration Guide**: How to use with existing chunker project
+
+### Testing
+1. **Test script**: Verify KB creation and search on sample data
+2. **Benchmark results**: Processing time, search performance
+3. **Example queries**: 10-15 example searches with expected results
+
+## 💡 Suggestions & Ideas
+
+Feel free to suggest:
+- Alternative database backends (Chroma, Weaviate, Qdrant)? - Web UI for browsing conversations? - Integration with Claude API for re-indexing? - Export to knowledge graph format? - RAG (Retrieval-Augmented Generation) use cases? ## 🔗 Resources
+
+- **ClaudeExportFixer**: Complete codebase at `C:\Dev\ClaudeExportFixer`
+- **Chunker Project**: Reference implementation at `C:\_chunker`
+- **Sample Export**: 401 real conversations in OneDrive location
+- **Dependencies**: `nltk`, `sqlite3`, `sentence-transformers` (optional)
+
+---
+
+## 📝 Response Format
+
+Please provide:
+1. **Code Review**: Feedback on `claude_knowledge_base.py`
+2. **Enhanced Code**: Improved version with vector search
+3. **Query Tool**: Complete `claude_kb_query.py` implementation
+4. **Usage Examples**: 5-10 example commands
+5. **Performance Tips**: How to optimize for large exports (1000+ conversations)
+
+Thank you for your collaboration! 🙏
+
+```
+
+---
+
+**User**
+
+should we keep the director C:\Dev\ClaudeExportFixer and just add to it? please update summary, readme and changelog
+
+---
+
+**Cursor**
+
+Yes, absolutely! Let's keep everything in `C:\Dev\ClaudeExportFixer` and make it a comprehensive Claude export toolkit. Let me update the documentation:
+
+```markdown
+# Changelog
+
+All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). ## [Unreleased]
+
+## [1.2.0] - 2025-10-27
+
+### Added - Knowledge Base System
+- **NEW: `claude_knowledge_base.py`** - Convert Claude exports to searchable SQLite database
+  - Semantic chunking with NLTK sentence tokenization (150 words max)
+  - Automatic tag extraction (tech keywords, date-based, content analysis)
+  - Full-text search with FTS5
+  - Files/attachments indexing with extracted content
+  - Conversation, message, chunk, and file tracking
+  - Statistics and analytics support
+- **NEW: `GROK_KNOWLEDGE_BASE_PROMPT.md`** - Collaboration prompt for Grok AI assistance
+  - Vector embeddings integration guidance
+  - Query interface specifications
+  - Analytics feature requests
+  - Integration with C:\_chunker project
+
+### Added - Schema Compliance (osteele viewer)
+- **CRITICAL**: Added `content` array to all messages (required by osteele viewer)
+  - Schema analysis from github.com/osteele/claude-chat-viewer/src/schemas/chat.ts
+  - Content array wraps message text: `[{"type": "text", "text": "..."}]`
+  - Fixes validation errors: "Message content is required"
+- Added `model` field to all conversations (defaults to `claude-sonnet-3-5-20241022`)
+- Added `index` field to all messages (message sequence number)
+- Added `model_slug` field to all messages (which Claude model was used)
+
+### Changed
+- Enhanced `process_conversation_data()` to add missing schema fields
+  - Automatically adds `model`, `index`, `model_slug`, and `content` if missing
+  - Ensures 100% compliance with osteele viewer schema requirements
+
+### Verified
+- Downloaded osteele viewer source code to `claude-chat-viewer-main/`
+- Analyzed Zod schema requirements in `src/schemas/chat.ts`
+- All 401 conversations now have required fields:
+  - 100% have `model` field
+  - 100% of messages have `index` field
+  - 100% of messages have `model_slug` field
+  - 100% of messages have `content` array
+
+## [1.1.2] - 2025-10-27
+
+### Fixed
+- **CRITICAL**: Added `created_at` timestamp to file objects (required by osteele viewer)
+  - File objects now inherit `created_at` from parent message
+  - Viewer requires this field to validate and display conversations correctly
+  - Fixes validation errors: "At 'chat_messages.X.files.Y.created_at': Required"
+  - 100% of file objects now have timestamps
+
+### Changed
+- Enhanced `merge_file_references()` to accept `message_timestamp` parameter
+- Updated `process_conversation_data()` to pass message timestamps to file merging
+
+### Verified
+- Real-world test: 401 conversations, 10,369 messages, 2,830 file objects
+- All file objects now have `created_at` field (100%)
+- osteele viewer validation: All conversations should now load successfully
+
+## [1.1.1] - 2025-10-27
+
+### Fixed
+- **CRITICAL**: Enhanced `merge_file_references()` to properly handle Claude's rich attachment format
+  - Now supports objects with `file_name`, `file_size`, `file_type`, `extracted_content` fields
+  - Deduplicates by file identifier (file_name, uuid, or file_uuid)
+  - Prioritizes richer attachment data over simpler file data when merging
+  - Maps `file_name` and `uuid` to `file_uuid` for osteele viewer compatibility
+  - Filters out empty file names
+  - Maintains backward compatibility with simple UUID format
+- **CRITICAL**: Fixed `process_conversation_data()` to handle Claude's list format (conversations as top-level array)
+  - Now supports both `{"conversations": [...]}` and `[...]` formats
+  - Ensures merge_file_references() is called for all Claude export formats
+- **CRITICAL**: Fixed `link_projects()` to handle list format conversations
+
+### Added
+- `tests/test_merge_rich_attachments.py` - Comprehensive test suite for rich attachment merging (10 tests)
+  - Tests backward compatibility with UUID format
+  - Tests Claude's rich attachment format
+  - Tests deduplication by file_name
+  - Tests empty file_name handling
+  - Tests mixed format support
+  - Tests extracted_content preservation
+- `LICENSE` - MIT License for open-source distribution
+- `.gitattributes` - Line ending enforcement (LF default, CRLF for .bat files)
+- `SECURITY.md` - Security policy and vulnerability reporting guidelines
+- `utils/` folder - Analysis and troubleshooting utilities
+  - `PROMPT_FOR_GROK.md` - Troubleshooting documentation
+  - `GROK_TROUBLESHOOTING_REPORT.md` - Detailed issue analysis
+  - `current_merge_function.py` - Code reference with test scenarios
+  - `claude_export_sample_structure.json` - Sample Claude export format
+  - `analyze_output.py` - Output validation tool
+  - `check_merging.py` - Attachment merging verification tool
+  - `detailed_analysis.py` - Detailed statistics analysis tool
+  - `verify_fix.py` - Fix verification tool
+  - `verify_rich_data.py` - Rich data preservation verification tool
+
+### Changed
+- `README.md` - Added License, Contributing sections, and utils/ folder documentation
+- `SUMMARY.md` - Updated status and added utils/ folder
+- Git repository initialized and configured
+- Version bumped to 1.1.1
+
+### Tested
+- ✅ 23/23 tests passing (13 original + 10 new rich attachment tests)
+- ✅ Successfully processed real Claude export with 401 conversations, 10,369 messages
+- ✅ 0 messages with both files and attachments (100% merge success rate)
+- ✅ Rich attachment data preserved (extracted_content, file_size, file_type)
+
+## [1.1.0] - 2025-10-26
+
+### Added
+- Optional Tkinter GUI interface in `gui.py`
+  - Browse input/output files with file dialogs
+  - Visual checkboxes for all CLI options
+  - Real-time log streaming in text area
+  - Progress bar during processing
+  - Auto-detection of projects.json
+  - "Open Output" button to view results
+  - Background threading for responsive UI
+  - Headless safety with graceful error handling
+- `--gui` flag in CLI to launch graphical interface
+- GUI test suite:
+  - `tests/test_gui_import.py` - GUI module import tests
+  - `tests/test_gui_utils.py` - GUI helper function tests (`_suggest_output_path`)
+  - `tests/test_gui_open_output.py` - GUI open output functionality tests (5 tests: Windows, macOS/Linux, error handling, edge cases)
+  - `tests/test_print_logging_bridge.py` - Logging completeness tests
+- Windows batch scripts:
+  - `run_gui.bat` - Launch GUI directly
+  - `build_exe_gui.bat` - Build windowed executable
+- PyInstaller instructions in README for both CLI and GUI builds
+- `*.log` pattern to .gitignore
+- Comprehensive project structure documentation in README
+
+### Changed
+- Version bumped to 1.1.0
+- README.md reorganized with GUI Mode, Building Executables, and Project Structure sections
+- CLI `input` argument now optional (required only if not using --gui)
+- CLI `-o/--output` argument now optional (required only if not using --gui)
+
+## [1.0.0] - 2025-10-26
+
+### Added
+- Full implementation of patch_conversations.py
+- Support for JSON and ZIP file processing
+- File/attachment reference merging
+- Project linking from projects.json
+- ZIP metadata preservation
+- Streaming support with ijson (optional)
+- Comprehensive CLI with argparse
+- CSV report generation
+- Backup creation for ZIP files
+- Typed Python code with type hints
+- Multiple processing modes (streaming, strict, verbose, quiet)
+- Auto-detection of projects.json
+- Initial project structure
+- README.md with quick start guide
+- .gitignore for Python projects
+- requirements.txt with ijson and pytest dependencies
+- requirements-build.txt for build-specific dependencies (pyinstaller)
+- Sample JSON files (conversations.example.json, projects.example.json)
+- Smoke tests in tests/test_smoke.py
+- Windows batch scripts for setup and execution
+  - create_venv.bat - Virtual environment setup
+  - run_tests.bat - Test runner
+  - run_example_json.bat - JSON processing example
+  - run_example_zip_stream.bat - ZIP streaming example
+  - build_exe.bat - PyInstaller build script
+- CHANGELOG.md for tracking project changes
+- SUMMARY.md for project overview
+- GitHub integration:
+  - .github/workflows/ci.yml - Continuous integration workflow
+  - .github/workflows/release.yml - Release automation workflow
+  - .github/ISSUE_TEMPLATE/bug_report.yml - Bug report template
+  - .github/ISSUE_TEMPLATE/feature_request.yml - Feature request template
+  - .github/PULL_REQUEST_TEMPLATE.md - Pull request template
+  - .github/CONTRIBUTING.md - Contributing guidelines
+
+## [0.1.0] - 2025-10-26
+
+### Added
+- Initial project scaffold created
+
+
+```
+
+Now update the README:
+
+```markdown
+# ClaudeExportFixer
+
+**Complete toolkit for Claude conversation exports:** Fix, validate, search, and build knowledge bases from your Claude.ai chat history. **Latest:** v1.2.0
+- ✅ Full osteele viewer compatibility (`content`, `model`, `index`, `model_slug` fields)
+- 🔍 NEW: Searchable knowledge base builder with semantic chunking
+- 📊 Tag extraction, full-text search, and analytics-ready SQLite database
+
+## Quick start (Windows)
+```bat
+cd C:\Dev\ClaudeExportFixer
+scripts\windows\create_venv.bat
+```
+
+## GUI Mode
+
+Launch a graphical interface (requires Tkinter, included in Python stdlib):
+
+```bat
+py patch_conversations.py --gui
+```
+
+Or directly:
+
+```bat
+py gui.py
+```
+
+Or use the convenient batch script:
+
+```bat
+scripts\windows\run_gui.bat
+```
+
+- Select input (`conversations.json` or `.zip`) and output paths. - Check options (e.g., `--pretty` is on by default). - Click "Run" to process; logs appear in real-time. - On success, output and report paths are shown; click "Open Output" to view the output file in your default application. - If Tkinter cannot initialize (e.g., headless environment), use CLI or run on a system with a display. ## CLI Mode
+
+Process a JSON:
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py sample\conversations.example.json -o fixed.json --pretty
+```
+
+Process a ZIP (streaming):
+
+```bat
+.venv\Scripts\python.exe patch_conversations.py export.zip -o export_patched.zip --zip-output --stream --pretty
+```
+
+Run tests:
+
+```bat
+scripts\windows\run_tests.bat
+```
+
+## Building Executables
+
+### CLI only
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe.bat
+```
+
+### GUI (windowed)
+
+```bat
+pip install pyinstaller
+pyinstaller --onefile --windowed patch_conversations.py
+```
+
+Or use the provided script:
+
+```bat
+scripts\windows\build_exe_gui.bat
+```
+
+Output: `dist/patch_conversations.exe`. Run GUI with `--gui` flag. **Note:** No additional dependencies required; Tkinter is part of Python stdlib. For GUI-only launch without console on Windows, build with `--windowed` and run `patch_conversations.exe --gui`. ## Updates
+
+### v1.1.1 (2025-10-27) - Critical Fix Release
+* **Fixed**: Attachment merging for Claude's rich attachment format (`file_name`, `file_size`, `file_type`, `extracted_content`)
+* **Fixed**: Support for Claude's list format conversations (top-level array)
+* **Added**: 10 comprehensive tests for rich attachment merging
+* **Result**: 100% merge success rate on real Claude exports with all metadata preserved
+* **Tests**: 23/23 passing
+
+## Notes
+
+* `ijson` is optional but required for `--stream` support. * Tkinter (for GUI) is included in Python stdlib on Windows and macOS. * See `CHANGELOG.md` for version history and changes. * See `SUMMARY.md` for project overview. * See `.github/CONTRIBUTING.md` for contribution guidelines.

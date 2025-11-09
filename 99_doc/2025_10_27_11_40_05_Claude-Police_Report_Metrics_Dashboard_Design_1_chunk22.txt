@@ -1,0 +1,206 @@
+** Now I can see exactly what we're dealing with. This is an **InfoCop summary report**, not the individual citation records we need. ## **🔍 WHAT I SEE:**
+
+**This file shows:**
+- **Officer:** PEO K. TORRES  
+- **Monthly totals:** M:342, P:3071, C:81 (Moving, Parking, Complaints)
+- **Daily breakdowns** by date and citation type
+- **Summary format** - not individual citation records
+
+## **❌ THE PROBLEM:**
+
+This isn't the detailed citation data we need for the dashboard. This is a **monthly summary report** showing totals by officer and date. **For the dashboard, we need individual records like:**
+```
+Officer Name | Date | Summons Type | Violation | Location
+Smith, John  | 5/15/25 | P | Meter Expired | Main St
+```
+
+## **🎯 SOLUTION OPTIONS:**
+
+### **OPTION 1: Find the Detailed Export (Recommended)**
+Look for InfoCop exports that have **individual citation records** instead of summaries. These might be in:
+- Different InfoCop report
+- Different export format
+- Different folder location
+
+### **OPTION 2: Work with What We Have**
+We can still build a basic dashboard using this summary data, but it will be limited to:
+- Officer totals by month
+- Daily citation counts
+- M/P/C breakdowns by officer
+
+### **OPTION 3: Use Court Data Instead**
+Start with just the `SUMMONS_COURT_MASTER` (which has individual citations) and build the dashboard around that. ## **💡 RECOMMENDATION:**
+
+**Let's start with the court data for now:**
+
+1. **Import these 3 queries successfully:**
+   - `SUMMONS_COURT_MASTER` 
+   - `SUMMONS_ASSIGNED_SHIFT`
+   - `Title39_Data`
+
+2. **Build the basic dashboard** with court citation data
+
+3. **Later find or request** the detailed InfoCop individual citation exports
+
+**The court data already has:**
+- Individual citations with dates
+- Officer names and badge numbers  
+- Violation types and revenue
+- Everything needed for the dashboard
+
+**Should we proceed with the court data approach, or do you have access to detailed InfoCop citation exports? **
+
+
+
+## Prompt:
+6/14/2025, 7:20:28 PM
+
+looks like to me that the data starts on row 7
+
+
+
+## Response:
+6/14/2025, 7:21:06 PM
+
+**EXCELLENT OBSERVATION! ** You're absolutely right! Looking at the Excel screenshot, I can see:
+
+- **Row 1-6:** Headers and summary info
+- **Row 7:** "Grand Total" with M:342 P:3071 C:81 Total:M:342 P:3071 C:81 Total:3494
+- **Row 8:** "PEO K. TORRES" (Officer name)
+- **Row 9+:** Individual daily records with dates and citation counts
+
+**This IS the detailed data we need! ** Let me create a fixed query that starts from row 7:
+
+**Fixed InfoCop Query - Starts from Row 7**
+
+````powerquery
+// 2025-06-14-19-36-17 (EST)
+// Police_Analytics/Fixed_InfoCop_Starting_Row7
+// Author: R. A. Carucci
+// Purpose: Extract officer citation data starting from row 7 where the actual data begins
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_MONTHLY_DATA\_EXPORTS\Summons\INFOCOP\Officer_Charge_Date_Case_Type"),
+    
+    // Filter to .xlsx files only
+    FilteredFiles = Table.SelectRows(Source, each 
+        [Attributes]?[Hidden]? <> true and 
+        Text.EndsWith([Name], ".xlsx")
+    ),
+    
+    // Transform each Excel file
+    TransformFiles = Table.AddColumn(FilteredFiles, "Data", each
+        try 
+            let
+                ExcelFile = Excel.Workbook([Content], null, true),
+                FirstSheet = ExcelFile{0}[Data],
+                
+                // Skip to row 7 where data starts and get officer name from row 8
+                DataFromRow7 = Table.Skip(FirstSheet, 6), // Skip first 6 rows (0-indexed, so row 7)
+                
+                // Row 1 of remaining data should be Grand Total, Row 2 should be officer name
+                OfficerNameRow = if Table.RowCount(DataFromRow7) >= 2 then 
+                    DataFromRow7{1}[Column1] else "Unknown Officer", // Row 2 = officer name
+                
+                // Skip Grand Total and Officer name rows to get to actual daily data
+                DailyData = Table.Skip(DataFromRow7, 2), // Skip Grand Total and Officer name rows
+                
+                // Filter out empty rows and keep only rows with actual dates
+                FilteredData = Table.SelectRows(DailyData, each 
+                    [Column1] <> null and 
+                    [Column1] <> "" and
+                    not Text.Contains(Text.From([Column1]), "Grand Total") and
+                    not Text.Contains(Text.From([Column1]), "PEO")
+                ),
+                
+                // Add officer name to each row and create proper structure
+                AddedOfficerName = Table.AddColumn(FilteredData, "Officer Name", each OfficerNameRow, type text),
+                
+                // Rename columns based on the structure we see
+                RenamedColumns = Table.RenameColumns(AddedOfficerName, {
+                    {"Column1", "Date_Text"},
+                    {"Column2", "Date"},
+                    {"Column3", "Total_Citations"}
+                }),
+                
+                // Clean up date column
+                CleanedDates = Table.TransformColumnTypes(RenamedColumns, {
+                    {"Date", type date},
+                    {"Total_Citations", Int64.Type}
+                }),
+                
+                // Add citation type based on the pattern we see in the data
+                AddedSummonsType = Table.AddColumn(CleanedDates, "Summons Type", each
+                    if Text.Contains(Text.From([Date_Text]), "P") then "P"
+                    else if Text.Contains(Text.From([Date_Text]), "M") then "M"
+                    else if Text.Contains(Text.From([Date_Text]), "C") then "C"
+                    else "Unknown", type text),
+                
+                // Add readable category
+                AddedCategory = Table.AddColumn(AddedSummonsType, "Summons Category", each
+                    if [Summons Type] = "P" then "Parking Violation"
+                    else if [Summons Type] = "M" then "Moving Violation"
+                    else if [Summons Type] = "C" then "Special Complaint"
+                    else "Other", type text),
+                
+                // Add date components
+                AddedMonth = Table.AddColumn(AddedCategory, "Month", each Date.Month([Date]), Int64.Type),
+                AddedYear = Table.AddColumn(AddedMonth, "Year", each Date.Year([Date]), Int64.Type),
+                AddedMonthName = Table.AddColumn(AddedYear, "Month Name", each Date.MonthName([Date]), type text),
+                AddedDayName = Table.AddColumn(AddedMonthName, "Day Name", each Date.DayOfWeekName([Date]), type text),
+                
+                // Select final columns
+                FinalColumns = Table.SelectColumns(AddedDayName, {
+                    "Officer Name", "Date", "Summons Type", "Summons Category", 
+                    "Total_Citations", "Month", "Year", "Month Name", "Day Name"
+                })
+            in
+                FinalColumns
+        otherwise null
+    ),
+    
+    // Remove failed files
+    SuccessfulFiles = Table.SelectRows(TransformFiles, each [Data] <> null),
+    
+    // Combine all successful files
+    FinalResult = if Table.RowCount(SuccessfulFiles) > 0 then
+        let
+            FirstFileColumns = Table.ColumnNames(SuccessfulFiles{0}[Data]),
+            ExpandedData = Table.ExpandTableColumn(SuccessfulFiles, "Data", FirstFileColumns),
+            CleanedResult = Table.RemoveColumns(ExpandedData, 
+                {"Name", "Extension", "Date accessed", "Date modified", "Date created", "Attributes", "Folder Path", "Content"}, 
+                MissingField.Ignore)
+        in
+            CleanedResult
+    else
+        Table.FromRows({}, {"Officer Name", "Date", "Summons Type", "Summons Category", "Total_Citations", "Month", "Year", "Month Name", "Day Name"})
+in
+    FinalResult
+````
+
+## **🎯 KEY CHANGES:**
+
+**1. Starts from Row 7:** `Table.Skip(FirstSheet, 6)`
+**2. Extracts Officer Name:** From row 8 (PEO K. TORRES)  
+**3. Processes Daily Records:** Starting from row 9+
+**4. Handles Date and Citation Count:** From the columns we can see
+**5. Determines Citation Type:** Based on "P" indicators in the data
+
+## **💡 THIS SHOULD GIVE US:**
+
+```
+Officer Name    | Date     | Summons Type | Total_Citations
+PEO K. TORRES   | 5/31/25  | P           | 64
+PEO K. TORRES   | 5/30/25  | P           | 47
+PEO K. TORRES   | 5/29/25  | P           | 44
+...
+```
+
+## **✅ TRY THIS:**
+
+1. **Replace** your current `INFOCOP_OFFICER_CHARGE_TYPE` query
+2. **Paste** the fixed code above
+3. **See if it loads the daily citation data**
+
+**This should extract the individual daily records for each officer from all your InfoCop files! ** Perfect for building the day-of-week analysis and division performance metrics. ---
+Powered by [Claude Exporter](https://www.claudexporter.com)

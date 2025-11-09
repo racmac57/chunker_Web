@@ -1,0 +1,48 @@
+# Executive Summary Final Mcode
+
+**Processing Date:** 2025-10-27 19:15:31
+**Source File:** executive_summary_final_mcode.txt
+**Total Chunks:** 1
+
+---
+
+let
+    OvertimeData = Excel.CurrentWorkbook(){[Name="OVERTIME_MASTER"]}[Content],
+    TimeOffData = Excel.CurrentWorkbook(){[Name="TIME_OFF_MASTER"]}[Content],
+    
+    // Rolling 12 months for both datasets
+    CurrentDate = Date.From(DateTime.LocalNow()),
+    TwelveMonthsAgo = Date.AddMonths(CurrentDate, -12),
+    
+    CurrentYearOT = Table.SelectRows(OvertimeData, each Date.From([Date]) >= TwelveMonthsAgo),
+    CurrentYearTO = Table.SelectRows(TimeOffData, each Date.From([Date]) >= TwelveMonthsAgo),
+    
+    TotalCompTime = List.Sum(Table.SelectRows(CurrentYearOT, each [Pay Type] = "1.0 Comp Time" or [Pay Type] = "1.5 Comp Time")[Hours]),
+    TotalCashOT = List.Sum(Table.SelectRows(CurrentYearOT, each [Pay Type] = "1.5 Cash" or [Pay Type] = "2.0 Cash")[Hours]),
+    TotalOTCost = List.Sum(Table.AddColumn(CurrentYearOT, "Cost", each [Rate] * [Hours])[Cost]),
+    
+    TotalInjuredDuty = List.Sum(Table.SelectRows(CurrentYearTO, each Text.Contains(Text.Upper([Reason]), "INJUR") or Text.Contains(Text.Upper([Reason]), "DUTY") or Text.Contains(Text.Upper([Reason]), "IOD"))[Hours]),
+    TotalMilitaryTime = List.Sum(Table.SelectRows(CurrentYearTO, each [Reason] = "Military Leave")[Hours]),
+    TotalSLEOSick = List.Sum(Table.SelectRows(CurrentYearTO, each [Reason] = "SLEO III Sick (Hours)")[Hours]),
+    TotalPEOSick = List.Sum(Table.SelectRows(CurrentYearTO, each [Reason] = "PEO Sick (Hours)")[Hours]),
+    TotalSickDays = Table.RowCount(Table.SelectRows(CurrentYearTO, each [Reason] = "Sick (Days)")),
+    
+    ActiveOfficers = Table.RowCount(Table.Distinct(CurrentYearOT, {"Employee"})),
+    
+    Result = #table(
+        {"Metric", "Value"},
+        {
+            {"Accrued Comp Time (Hours)", TotalCompTime},
+            {"Accrued Overtime (Hours)", TotalCashOT},
+            {"Total Overtime Cost YTD", TotalOTCost},
+            {"Injured on Duty (Hours)", TotalInjuredDuty},
+            {"Military Leave (Hours)", TotalMilitaryTime},
+            {"SLEO III Sick (Hours)", TotalSLEOSick},
+            {"PEO Sick (Hours)", TotalPEOSick},
+            {"Sick Days (Count)", TotalSickDays},
+            {"Members with OT Activity", ActiveOfficers}
+        }
+    )
+in
+    Result
+

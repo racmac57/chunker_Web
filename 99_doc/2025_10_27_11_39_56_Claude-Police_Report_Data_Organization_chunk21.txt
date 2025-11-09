@@ -1,0 +1,58 @@
+Now I can see the exact issue. The ASSIGNMENT_MASTER.xlsx file doesn't have a column called **"PATROL_MEMBER"** - it has different column names. Let me create a simple query to first inspect the actual column structure, then fix the integration:
+
+**Assignment Master Inspector - Check Column Names**
+
+````powerquery
+// 2025-06-15-20-30-00 (EST)
+// Police_Analytics/Assignment_Master_Inspector
+// Author: R. A. Carucci
+// Purpose: Inspect the actual column names in ASSIGNMENT_MASTER.xlsx
+
+let
+    // Load the assignment file
+    AssignmentSource = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\ASSIGNED_SHIFT\ASSIGNMENT_MASTER.xlsx"), null, true),
+    
+    // Get the first sheet (or try different sheet names)
+    AssignmentSheet = try AssignmentSource{[Item="Sheet1",Kind="Sheet"]}[Data] 
+                     otherwise try AssignmentSource{[Item="Assignments",Kind="Sheet"]}[Data]
+                     otherwise try AssignmentSource{[Item="ASSIGNMENTS",Kind="Sheet"]}[Data]
+                     otherwise AssignmentSource{0}[Data],
+    
+    // Promote headers to see actual column names
+    AssignmentHeaders = Table.PromoteHeaders(AssignmentSheet, [PromoteAllScalars=true]),
+    
+    // Take first 10 rows to see the data structure
+    SampleData = Table.FirstN(AssignmentHeaders, 10),
+    
+    // Add a column showing the column names for reference
+    ColumnNames = Table.ColumnNames(AssignmentHeaders),
+    
+    // Create a summary table showing column names
+    ColumnSummary = Table.FromList(ColumnNames, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    RenamedColumnSummary = Table.RenameColumns(ColumnSummary, {{"Column1", "Available_Columns"}}),
+    
+    // Add index to column summary
+    IndexedColumns = Table.AddIndexColumn(RenamedColumnSummary, "Column_Index", 1, 1)
+in
+    IndexedColumns
+````
+
+**Run this inspector query first** to see what the actual column names are in your ASSIGNMENT_MASTER.xlsx file. Once you run it, it will show you a list like:
+```
+Column_Index | Available_Columns
+1           | Officer_Name
+2           | Assignment  
+3           | Rank
+4           | Badge_Number
+5           | Platoon
+```
+
+Then I can create the correct integration query using the **actual column names** from your file. ## 🔍 **What This Will Tell Us:**
+- **Exact column names** in your assignment file
+- **Sheet structure** and data format
+- **Officer name format** (how names are stored)
+
+Once you see the results, share the column names with me and I'll create a working integration query that matches your actual data structure! This is much better than guessing at column names - we'll see exactly what's available in your assignment file. ## Prompt:
+6/15/2025, 1:42:47 AM
+
+!

@@ -1,0 +1,465 @@
+**Proper folder structure** (crime-specific organization)
+
+**SCRPA Complete Integration - Charts, Maps, and Statistics**
+
+````python
+# 🕒 2025-07-01-17-00-00
+# SCRPA_Complete_Integration/scrpa_complete_system
+# Author: R. A. Carucci
+# Purpose: Complete SCRPA system with charts, maps, statistics, and proper folder structure
+
+import os
+import sys
+import logging
+import time
+import glob
+import shutil
+from datetime import datetime, date
+import arcpy
+
+# Import your existing working modules
+try:
+    from config import (
+        get_crime_type_folder, get_7day_period_dates, CRIME_FOLDER_MAPPING, 
+        POWERPOINT_TEMPLATES, CRIME_TYPES, get_correct_folder_name, 
+        get_standardized_filename, get_output_folder
+    )
+    from map_export import export_maps
+    from chart_export import export_chart
+    from incident_table_automation import export_incident_table_data_with_autofit, create_incident_table_placeholder
+    from scrpa_statistical_fixed import generate_statistical_exports_fixed
+    print("✅ All modules imported successfully")
+except ImportError as e:
+    print(f"❌ Module import failed: {e}")
+    sys.exit(1)
+
+def run_complete_scrpa_system(report_date_str=None, generate_all=True):
+    """
+    Run the complete SCRPA system with proper folder structure
+    
+    Args:
+        report_date_str (str): Date in YYYY_MM_DD format
+        generate_all (bool): Generate all components (maps, charts, tables, stats)
+    
+    Returns:
+        bool: True if successful
+    """
+    start_time = time.time()
+    
+    if report_date_str is None:
+        report_date_str = date.today().strftime("%Y_%m_%d")
+    
+    print(f"\n🚀 SCRPA COMPLETE SYSTEM")
+    print("=" * 60)
+    print(f"Report Date: {report_date_str}")
+    print(f"Generate All Components: {generate_all}")
+    
+    try:
+        # Parse report date
+        report_date = datetime.strptime(report_date_str, "%Y_%m_%d").date()
+        
+        # Create main output folder with proper naming
+        main_output_folder = get_output_folder(report_date_str)
+        os.makedirs(main_output_folder, exist_ok=True)
+        
+        # Copy PowerPoint template
+        template_success = setup_powerpoint_template(main_output_folder, report_date_str)
+        
+        # Process each crime type
+        results = {}
+        total_crimes = len(CRIME_TYPES)
+        
+        print(f"\n📊 PROCESSING {total_crimes} CRIME TYPES")
+        print("=" * 50)
+        
+        for i, crime_type in enumerate(CRIME_TYPES, 1):
+            print(f"\n[{i}/{total_crimes}] Processing {crime_type}...")
+            
+            # Create crime-specific folder
+            crime_folder = get_crime_type_folder(crime_type, report_date_str)
+            os.makedirs(crime_folder, exist_ok=True)
+            
+            crime_results = {
+                'folder_created': True,
+                'map': False,
+                'chart': False,
+                'table': False
+            }
+            
+            if generate_all:
+                # Generate map
+                print(f"  🗺️ Generating map...")
+                try:
+                    map_success = export_maps(crime_type, crime_folder, [
+                        'main.py', 'true', 'true', 'false', '30', 'false', report_date_str
+                    ])
+                    crime_results['map'] = map_success
+                    print(f"    {'✅' if map_success else '❌'} Map: {'Success' if map_success else 'Failed'}")
+                except Exception as e:
+                    print(f"    ❌ Map failed: {e}")
+                
+                # Generate chart (crime-specific time-of-day)
+                print(f"  📈 Generating chart...")
+                try:
+                    chart_success = export_chart(crime_type)
+                    crime_results['chart'] = chart_success
+                    print(f"    {'✅' if chart_success else '❌'} Chart: {'Success' if chart_success else 'Failed'}")
+                except Exception as e:
+                    print(f"    ❌ Chart failed: {e}")
+                
+                # Generate incident table
+                print(f"  📋 Generating incident table...")
+                try:
+                    table_success = export_incident_table_data_with_autofit(crime_type, report_date)
+                    if not table_success:
+                        # Create placeholder if no incidents
+                        filename_prefix = get_standardized_filename(crime_type)
+                        placeholder_path = os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+                        table_success = create_incident_table_placeholder(crime_type, placeholder_path)
+                    
+                    crime_results['table'] = table_success
+                    print(f"    {'✅' if table_success else '❌'} Table: {'Success' if table_success else 'Failed'}")
+                except Exception as e:
+                    print(f"    ❌ Table failed: {e}")
+            
+            results[crime_type] = crime_results
+            
+            # Show crime summary
+            success_count = sum(1 for result in crime_results.values() if result)
+            print(f"  📊 {crime_type}: {success_count}/4 components successful")
+        
+        # Generate statistical reports
+        if generate_all:
+            print(f"\n📊 GENERATING STATISTICAL REPORTS")
+            print("-" * 40)
+            try:
+                stats_success = generate_statistical_exports_fixed(report_date)
+                print(f"{'✅' if stats_success else '❌'} Statistical reports: {'Success' if stats_success else 'Failed'}")
+            except Exception as e:
+                print(f"❌ Statistical reports failed: {e}")
+                stats_success = False
+        else:
+            stats_success = True
+        
+        # Assemble PowerPoint
+        if generate_all and template_success:
+            print(f"\n🎯 ASSEMBLING POWERPOINT PRESENTATION")
+            print("-" * 40)
+            try:
+                ppt_success = assemble_powerpoint_presentation(main_output_folder, results, report_date_str)
+                print(f"{'✅' if ppt_success else '❌'} PowerPoint assembly: {'Success' if ppt_success else 'Failed'}")
+            except Exception as e:
+                print(f"❌ PowerPoint assembly failed: {e}")
+                ppt_success = False
+        else:
+            ppt_success = template_success
+        
+        # Calculate overall success
+        crime_success_count = sum(1 for crime_results in results.values() 
+                                if sum(1 for result in crime_results.values() if result) >= 2)
+        overall_success = (crime_success_count >= len(CRIME_TYPES) * 0.6 and 
+                          stats_success and ppt_success)
+        
+        # Summary
+        total_time = time.time() - start_time
+        print(f"\n🎉 SCRPA SYSTEM COMPLETE")
+        print("=" * 60)
+        print(f"Processing time: {total_time:.1f} seconds")
+        print(f"Overall success: {'✅ SUCCESS' if overall_success else '❌ PARTIAL SUCCESS'}")
+        print(f"Crime types processed: {crime_success_count}/{len(CRIME_TYPES)}")
+        print(f"Statistical reports: {'✅' if stats_success else '❌'}")
+        print(f"PowerPoint assembly: {'✅' if ppt_success else '❌'}")
+        print(f"Output folder: {main_output_folder}")
+        
+        # Detailed results
+        print(f"\n📋 DETAILED RESULTS:")
+        for crime_type, crime_results in results.items():
+            success_components = [comp for comp, success in crime_results.items() if success]
+            print(f"  {crime_type}: {len(success_components)}/4 - {', '.join(success_components)}")
+        
+        return overall_success
+        
+    except Exception as e:
+        print(f"❌ SCRPA system failed: {e}")
+        logging.error(f"SCRPA system failed: {e}", exc_info=True)
+        return False
+
+def setup_powerpoint_template(output_folder, report_date_str):
+    """Setup PowerPoint template in output folder"""
+    try:
+        # Get template path
+        template_path = POWERPOINT_TEMPLATES.get("7day") or POWERPOINT_TEMPLATES.get("main")
+        
+        if not template_path or not os.path.exists(template_path):
+            print(f"⚠️ PowerPoint template not found: {template_path}")
+            return False
+        
+        # Create destination file
+        folder_name = get_correct_folder_name(report_date_str)
+        dest_ppt = os.path.join(output_folder, f"{folder_name}.pptx")
+        
+        # Copy template
+        shutil.copy2(template_path, dest_ppt)
+        print(f"✅ PowerPoint template copied: {os.path.basename(dest_ppt)}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ PowerPoint template setup failed: {e}")
+        return False
+
+def assemble_powerpoint_presentation(output_folder, results, report_date_str):
+    """Assemble PowerPoint presentation with all components"""
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches
+        
+        # Find PowerPoint file
+        ppt_files = glob.glob(os.path.join(output_folder, "*.pptx"))
+        if not ppt_files:
+            print(f"❌ No PowerPoint file found in: {output_folder}")
+            return False
+        
+        ppt_file = ppt_files[0]
+        prs = Presentation(ppt_file)
+        
+        print(f"📝 Assembling {len(prs.slides)} slides...")
+        
+        # PowerPoint coordinates (from your working system)
+        coords = {
+            'chart': {'left': 0.5, 'top': 2.8, 'width': 5.84, 'height': 4.00},
+            'map': {'left': 6.8, 'top': 2.8, 'width': 5.60, 'height': 4.03},
+            'table': {'left': 6.8, 'top': 0.8, 'width': 8.33, 'height': 1.98}
+        }
+        
+        slides_processed = 0
+        for i, crime_type in enumerate(CRIME_TYPES):
+            if i >= len(prs.slides):
+                print(f"⚠️ No slide for {crime_type}")
+                continue
+            
+            slide = prs.slides[i]
+            crime_folder = get_crime_type_folder(crime_type, report_date_str)
+            filename_prefix = get_standardized_filename(crime_type)
+            
+            # Add chart
+            chart_path = os.path.join(crime_folder, f"{filename_prefix}_Chart.png")
+            if os.path.exists(chart_path):
+                try:
+                    slide.shapes.add_picture(
+                        chart_path,
+                        Inches(coords['chart']['left']),
+                        Inches(coords['chart']['top']),
+                        Inches(coords['chart']['width']),
+                        Inches(coords['chart']['height'])
+                    )
+                    print(f"  ✅ Added chart for {crime_type}")
+                except Exception as e:
+                    print(f"  ❌ Chart addition failed for {crime_type}: {e}")
+            
+            # Add map
+            map_path = os.path.join(crime_folder, f"{filename_prefix}_Map.png")
+            if os.path.exists(map_path):
+                try:
+                    slide.shapes.add_picture(
+                        map_path,
+                        Inches(coords['map']['left']),
+                        Inches(coords['map']['top']),
+                        Inches(coords['map']['width']),
+                        Inches(coords['map']['height'])
+                    )
+                    print(f"  ✅ Added map for {crime_type}")
+                except Exception as e:
+                    print(f"  ❌ Map addition failed for {crime_type}: {e}")
+            
+            # Add incident table
+            table_paths = [
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_AutoFit.png"),
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable.png"),
+                os.path.join(crime_folder, f"{filename_prefix}_IncidentTable_Placeholder.png")
+            ]
+            
+            for table_path in table_paths:
+                if os.path.exists(table_path):
+                    try:
+                        slide.shapes.add_picture(
+                            table_path,
+                            Inches(coords['table']['left']),
+                            Inches(coords['table']['top']),
+                            Inches(coords['table']['width']),
+                            Inches(coords['table']['height'])
+                        )
+                        print(f"  ✅ Added table for {crime_type}")
+                        break
+                    except Exception as e:
+                        print(f"  ❌ Table addition failed for {crime_type}: {e}")
+            
+            slides_processed += 1
+        
+        # Save presentation
+        prs.save(ppt_file)
+        print(f"✅ PowerPoint saved: {os.path.basename(ppt_file)}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ PowerPoint assembly failed: {e}")
+        return False
+
+def check_folder_structure(report_date_str):
+    """Check and display current folder structure"""
+    print(f"\n📁 CHECKING FOLDER STRUCTURE")
+    print("=" * 50)
+    
+    try:
+        main_output = get_output_folder(report_date_str)
+        print(f"Main output: {main_output}")
+        
+        if os.path.exists(main_output):
+            print(f"✅ Main folder exists")
+            
+            for crime_type in CRIME_TYPES:
+                crime_folder = get_crime_type_folder(crime_type, report_date_str)
+                folder_name = os.path.basename(crime_folder)
+                
+                if os.path.exists(crime_folder):
+                    files = os.listdir(crime_folder)
+                    print(f"✅ {folder_name}: {len(files)} files")
+                    
+                    # Check for specific files
+                    filename_prefix = get_standardized_filename(crime_type)
+                    expected_files = [
+                        f"{filename_prefix}_Chart.png",
+                        f"{filename_prefix}_Map.png",
+                        f"{filename_prefix}_IncidentTable.png"
+                    ]
+                    
+                    for expected_file in expected_files:
+                        if expected_file in files:
+                            print(f"    ✅ {expected_file}")
+                        else:
+                            print(f"    ❌ Missing: {expected_file}")
+                else:
+                    print(f"❌ {folder_name}: Folder not found")
+        else:
+            print(f"❌ Main folder not found")
+            
+    except Exception as e:
+        print(f"❌ Error checking folders: {e}")
+
+# Command-line interface
+def main():
+    """Main entry point"""
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+        
+        if command == "check":
+            # Check folder structure
+            date_str = sys.argv[2] if len(sys.argv) > 2 else date.today().strftime("%Y_%m_%d")
+            check_folder_structure(date_str)
+            
+        elif command == "run":
+            # Run complete system
+            date_str = sys.argv[2] if len(sys.argv) > 2 else date.today().strftime("%Y_%m_%d")
+            success = run_complete_scrpa_system(date_str, generate_all=True)
+            sys.exit(0 if success else 1)
+            
+        elif command == "charts":
+            # Generate only charts
+            date_str = sys.argv[2] if len(sys.argv) > 2 else date.today().strftime("%Y_%m_%d")
+            print("📈 Generating charts only...")
+            
+            for crime_type in CRIME_TYPES:
+                try:
+                    success = export_chart(crime_type)
+                    print(f"{'✅' if success else '❌'} {crime_type} chart")
+                except Exception as e:
+                    print(f"❌ {crime_type} chart failed: {e}")
+        
+        else:
+            print(f"Unknown command: {command}")
+            print("Usage: python scrpa_complete_integration.py [run|check|charts] [YYYY_MM_DD]")
+    else:
+        # Default: run complete system
+        success = run_complete_scrpa_system()
+        sys.exit(0 if success else 1)
+
+if __name__ == "__main__":
+    main()
+````
+
+## 🔧 **Complete SCRPA Integration Solution**
+
+I've created a comprehensive integration script that combines all your working components:
+
+### **📊 What This Fixes:**
+
+1. **Crime-Specific Time Charts** - Uses your working `export_chart()` function
+2. **Proper Folder Structure** - Creates crime-specific folders with all components
+3. **ArcGIS Maps** - Uses your working `export_maps()` function  
+4. **Incident Tables** - Includes placeholders for zero-incident crime types
+5. **Statistical Reports** - Integrates the fixed statistical exports
+6. **PowerPoint Assembly** - Automated slide creation
+
+### **🚀 How to Use:**
+
+Save the code above as: `scrpa_complete_integration.py`
+
+#### **Run Complete System:**
+```cmd
+cd C:\Users\carucci_r\SCRPA_LAPTOP\scripts
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" scrpa_complete_integration.py run 2025_07_01
+```
+
+#### **Check Current Folder Structure:**
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" scrpa_complete_integration.py check 2025_07_01
+```
+
+#### **Generate Only Charts:**
+```cmd
+"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe" scrpa_complete_integration.py charts 2025_07_01
+```
+
+### **📁 Expected Output Structure:**
+
+```
+C:\Users\carucci_r\SCRPA_LAPTOP\projects\output\C07W27_2025_07_01_7Day\
+├── C07W27_2025_07_01_7Day.pptx
+├── MV_Theft/
+│   ├── MV_Theft_Chart.png           # ✅ Crime-specific time chart
+│   ├── MV_Theft_Map.png             # ✅ ArcGIS map with symbology
+│   ├── MV_Theft_IncidentTable.png   # ✅ Incident table or placeholder
+│   └── MV_Theft_Manual_Entry.csv    # ✅ CSV for manual completion
+├── Burglary_Auto/
+├── Burglary_Comm_And_Res/
+├── Robbery/
+├── Sexual_Offenses/
+└── Statistical_Reports/             # ✅ Your working statistical exports
+```
+
+### **🎯 Key Features:**
+
+- ✅ **Uses your existing working functions** (export_chart, export_maps, etc.) - ✅ **Creates proper crime-specific folders** with standardized naming
+- ✅ **Integrates statistical reports** seamlessly  
+- ✅ **Automated PowerPoint assembly** with all components
+- ✅ **Error handling and progress tracking**
+- ✅ **Flexible command-line interface**
+
+This should resolve both the chart issue (crime-specific time charts) and the missing folder structure. The system will create the complete setup you need with all components properly organized! Try running it and let me know what results you get! 🚀
+
+
+
+## Prompt:
+7/1/2025, 5:14:27 AM
+
+> File: paste.txt
+
+
+
+
+
+## Response:
+7/1/2025, 5:15:11 AM
+
+I see the issue! There's a datetime import conflict. The problem is we're importing the `datetime` module but trying to use `datetime.datetime.strptime()`.

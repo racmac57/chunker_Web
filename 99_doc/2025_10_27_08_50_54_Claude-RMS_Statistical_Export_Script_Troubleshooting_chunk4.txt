@@ -1,0 +1,611 @@
+# Try to work with whatever we have
+            print("🔄 Attempting alternative column detection...")
+            
+            # Look for date columns specifically
+            date_columns = [col for col in df.columns if any(word in col.lower() for word in ['date']) and 'incident' in col.lower()]
+            time_columns = [col for col in df.columns if any(word in col.lower() for word in ['time']) and 'incident' in col.lower()]
+            
+            if date_columns:
+                column_map['incident_date'] = date_columns[0]
+                print(f"   ✅ Using '{date_columns[0]}' as incident date")
+            
+            if time_columns:
+                column_map['incident_time'] = time_columns[0]
+                print(f"   ✅ Using '{time_columns[0]}' as incident time")
+            
+            # If no incident-specific date/time, look for any date/time column
+            if not date_columns and not time_columns:
+                general_datetime_columns = [col for col in df.columns if any(word in col.lower() for word in ['time', 'date', 'when', 'occurred'])]
+                if general_datetime_columns:
+                    column_map['call_time'] = general_datetime_columns[0]
+                    print(f"   ✅ Using '{general_datetime_columns[0]}' as call time")
+            
+            # Look for any incident/crime column
+            crime_columns = [col for col in df.columns if any(word in col.lower() for word in ['incident', 'crime', 'offense', 'charge', 'type'])]
+            if crime_columns:
+                column_map['incident'] = crime_columns[0]
+                print(f"   ✅ Using '{crime_columns[0]}' as incident type")
+        
+        # Create standardized dataframe
+        cleaned_df = pd.DataFrame()
+        
+        # Handle datetime columns - intelligent parsing
+        if column_map.get('incident_date') and column_map.get('incident_time'):
+            # RMS style: separate date and time columns
+            print(f"📅 Combining separate date/time columns: '{column_map['incident_date']}' + '{column_map['incident_time']}'")
+            
+            # Parse date and time separately
+            date_col = pd.to_datetime(df[column_map['incident_date']], errors='coerce')
+            time_col = pd.to_datetime(df[column_map['incident_time']], errors='coerce')
+            
+            # Combine date from first column with time from second column
+            combined_datetimes = []
+            for i in range(len(df)):
+                try:
+                    if pd.notna(date_col.iloc[i]) and pd.notna(time_col.iloc[i]):
+                        # Extract date part from date_col and time part from time_col
+                        date_part = date_col.iloc[i].date()
+                        time_part = time_col.iloc[i].time()
+                        combined_dt = pd.Timestamp.combine(date_part, time_part)
+                        combined_datetimes.append(combined_dt)
+                    elif pd.notna(date_col.iloc[i]):
+                        # Use just the date if time is missing
+                        combined_datetimes.append(pd.Timestamp.combine(date_col.iloc[i].date(), pd.Timestamp.min.time()))
+                    else:
+                        combined_datetimes.append(pd.NaT)
+                except Exception as e:
+                    print(f"⚠️ Date combination error at row {i}: {e}")
+                    combined_datetimes.append(pd.NaT)
+            
+            cleaned_df['ReportDate'] = combined_datetimes
+            
+        elif column_map.get('call_time'):
+            # CAD style: single datetime column
+            print(f"📅 Using single datetime column: '{column_map['call_time']}'")
+            cleaned_df['ReportDate'] = pd.to_datetime(df[column_map['call_time']], errors='coerce')
+            
+        elif column_map.get('incident_date'):
+            # Fallback: use just incident date
+            print(f"📅 Using incident date only: '{column_map['incident_date']}'")
+            cleaned_df['ReportDate'] = pd.to_datetime(df[column_map['incident_date']], errors='coerce')
+            
+        else:
+            print("⚠️ No date/time columns found - using current date")
+            cleaned_df['ReportDate'] = pd.Timestamp.now()
+        
+        # Handle incident type - check for multiple incident type columns
+        if column_map.get('incident'):
+            incident_col = column_map['incident']
+            if 'Incident Type_1' in df.columns:
+                # Use Incident Type_1 as primary
+                cleaned_df['CrimeType'] = df['Incident Type_1'].fillna('Unknown').astype(str).str.strip()
+            else:
+                cleaned_df['CrimeType'] = df[incident_col].fillna('Unknown').astype(str).str.strip()
+        else:
+            cleaned_df['CrimeType'] = 'Unknown Incident'
+        
+        # Handle zone with safe formatting
+        if column_map.get('zone'):
+            zone_data = df[column_map['zone']].copy()
+            cleaned_df['Zone'] = zone_data.apply(safe_zone_format)
+        else:
+            cleaned_df['Zone'] = 'Unknown'
+        
+        # Handle address
+        if column_map.get('address'):
+            cleaned_df['Address'] = df[column_map['address']].fillna('Address Not Available').astype(str)
+        else:
+            cleaned_df['Address'] = 'Address Not Available'
+        
+        # Handle report number
+        if column_map.get('report_number'):
+            cleaned_df['ReportNumber'] = df[column_map['report_number']].fillna('N/A').astype(str)
+        else:
+            cleaned_df['ReportNumber'] = df.index.astype(str)
+        
+        # Handle disposition
+        if column_map.get('disposition'):
+            cleaned_df['Disposition'] = df[column_map['disposition']].fillna('Unknown').astype(str)
+        else:
+            cleaned_df['Disposition'] = 'Unknown'
+        
+        # Add derived fields
+        cleaned_df['Hour'] = cleaned_df['ReportDate'].dt.hour
+        cleaned_df['DayName'] = cleaned_df['ReportDate'].dt.day_name()
+        cleaned_df['IsCleared'] = cleaned_df['Disposition'].str.contains('report|closed|cleared', case=False, na=False)
+        
+        # Filter out invalid dates
+        valid_dates = cleaned_df['ReportDate'].notna()
+        cleaned_df = cleaned_df[valid_dates].copy()
+        
+        print(f"📅 After processing: {len(cleaned_df)} records with valid dates")
+        if not cleaned_df.empty:
+            print(f"📊 Date range: {cleaned_df['ReportDate'].min()} to {cleaned_df['ReportDate'].max()}")
+        
+        return cleaned_df, column_map
+        
+    except Exception as e:
+        print(f"❌ Error loading RMS data: {e}")
+        print(f"❌ Exception details: {type(e).__name__}: {str(e)}")
+        return None, None
+
+def filter_data_by_period(df, period_days):
+    """Filter data by number of days"""
+    now = datetime.now()
+    if period_days == "YTD":
+        start_date = datetime(now.year, 1, 1)
+        period_name = "Year-to-Date"
+    else:
+        start_date = now - timedelta(days=period_days)
+        period_name = f"{period_days}-Day"
+    
+    # Ensure timezone awareness is consistent or removed
+    if df['ReportDate'].dt.tz is not None:
+        start_date = pd.to_datetime(start_date).tz_localize(df['ReportDate'].dt.tz)
+
+    filtered = df[df['ReportDate'] >= start_date].copy()
+    print(f"📅 {period_name} filter: {len(filtered)} records from {start_date.strftime('%Y-%m-%d')}")
+    return filtered
+
+def calculate_enhanced_stats(df):
+    """Calculate comprehensive statistics with safe formatting - FIXED PANDAS SERIES ISSUES"""
+    if df.empty:
+        return {
+            'total_incidents': 0,
+            'zones_affected': 0,
+            'top_crime': 'None',
+            'top_crime_count': 0,
+            'clearance_rate': 0,
+            'crime_distribution': pd.Series(dtype='int64'),
+            'zone_distribution': pd.Series(dtype='int64'),
+            'hour_distribution': pd.Series(dtype='int64'),
+            'day_distribution': pd.Series(dtype='int64')
+        }
+    
+    total_incidents = len(df)
+    
+    zones_affected = df['Zone'].nunique() if 'Zone' in df.columns else 1
+    
+    crime_counts = df['CrimeType'].value_counts()
+    if not crime_counts.empty:
+        top_crime = str(crime_counts.index[0])
+        top_crime_count = int(crime_counts.iloc[0])
+    else:
+        top_crime = "None"
+        top_crime_count = 0
+    
+    if 'IsCleared' in df.columns and not df['IsCleared'].empty:
+        cleared_count = df['IsCleared'].sum()
+        clearance_rate = (cleared_count / total_incidents * 100) if total_incidents > 0 else 0
+    else:
+        clearance_rate = 0
+    
+    return {
+        'total_incidents': total_incidents,
+        'zones_affected': zones_affected,
+        'top_crime': top_crime,
+        'top_crime_count': top_crime_count,
+        'clearance_rate': round(clearance_rate, 1),
+        'crime_distribution': crime_counts,
+        'zone_distribution': df['Zone'].value_counts() if 'Zone' in df.columns else pd.Series(dtype='int64'),
+        'hour_distribution': df['Hour'].value_counts().sort_index() if 'Hour' in df.columns else pd.Series(dtype='int64'),
+        'day_distribution': df['DayName'].value_counts() if 'DayName' in df.columns else pd.Series(dtype='int64')
+    }
+
+def create_markdown_table(data_series, title, limit=10):
+    """Create a markdown table from pandas Series - FIXED SERIES AMBIGUITY"""
+    if data_series.empty:
+        return f"\n### {title}\n\nNo data available for this period.\n"
+    
+    table = f"\n### {title}\n\n"
+    table += "| Item | Count | Percentage |\n"
+    table += "|------|-------|------------|\n"
+    
+    # FIXED: Use .sum() method for pandas Series
+    total = data_series.sum()
+    if total == 0:
+        return f"\n### {title}\n\nNo data available for this period.\n"
+    
+    # Convert to list to avoid Series boolean ambiguity
+    items_list = list(data_series.head(limit).items())
+    
+    for item, count in items_list:
+        safe_count = safe_int_format(count)
+        percentage = (count / total * 100) if total > 0 else 0
+        
+        display_item = str(item).replace(' - 2C:', ' (2C:').replace('2C:', '').strip()
+        if not display_item.endswith(')') and ' (2C:' in display_item:
+            display_item += ')'
+        
+        table += f"| {display_item} | {safe_count} | {percentage:.1f}% |\n"
+    
+    return table
+
+def generate_executive_narrative(stats, period_name):
+    """Generate intelligent executive summary - FIXED SERIES HANDLING"""
+    if stats['total_incidents'] == 0:
+        return f"\n## Executive Summary\n\nNo incidents were recorded during the {period_name} reporting period.\n\n"
+    
+    narrative = f"\n## Executive Summary\n\n"
+    narrative += f"During the {period_name} reporting period, the department responded to **{stats['total_incidents']} incidents** "
+    narrative += f"across **{stats['zones_affected']} zones**. " if stats['top_crime'] != 'None':
+        narrative += f"**{stats['top_crime']}** was the most frequent incident type with {stats['top_crime_count']} occurrences "
+        if stats['total_incidents'] > 0:
+            narrative += f"({stats['top_crime_count']/stats['total_incidents']*100:.1f}% of total activity). " if stats['clearance_rate'] > 0:
+        narrative += f"The department achieved a **{stats['clearance_rate']}% clearance rate** during this period. " if stats['clearance_rate'] >= 75:
+            narrative += "This clearance rate demonstrates effective case resolution and investigative follow-through.\n\n"
+        elif stats['clearance_rate'] >= 50:
+            narrative += "This clearance rate indicates satisfactory case management with room for improvement.\n\n"
+        else:
+            narrative += "Current clearance rates suggest opportunities for enhanced investigative protocols.\n\n"
+    
+    # FIXED: Check if Series is empty before processing
+    if not stats['zone_distribution'].empty:
+        top_zones = stats['zone_distribution'].head(3).index.tolist()
+        if len(top_zones) > 1:
+            zone_list = ', '.join([f"Zone {z}" for z in top_zones[:-1]]) + f" and Zone {top_zones[-1]}"
+        elif len(top_zones) == 1:
+            zone_list = f"Zone {top_zones[0]}"
+        else:
+            zone_list = "Unknown Zones"
+        narrative += f"**Geographic Focus:** Primary activity was concentrated in {zone_list}.\n\n"
+    
+    # FIXED: Check if Series is empty before processing
+    if not stats['hour_distribution'].empty:
+        peak_hours = stats['hour_distribution'].nlargest(3)
+        if not peak_hours.empty:
+            hour_indices = peak_hours.index.tolist()
+            hour_list = "various"
+            if len(hour_indices) >= 1:
+                hour_list = ', '.join([f"{safe_int_format(h):02d}:00" for h in hour_indices])
+            narrative += f"**Peak Activity:** Highest incident volumes occurred during {hour_list} hours.\n\n"
+    
+    return narrative
+
+def generate_markdown_report(df, period_name, period_days, output_filename, column_map):
+    """Generate comprehensive markdown report - FIXED SERIES ISSUES"""
+    
+    filtered_df = filter_data_by_period(df, period_days)
+    
+    stats = calculate_enhanced_stats(filtered_df)
+    
+    report = f"# SCRPA Crime Analysis - {period_name} Executive Summary\n\n"
+    report += f"**Period:** {period_name} Ending {datetime.now().strftime('%B %d, %Y')}\n"
+    report += f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    report += f"**Total Records Analyzed:** {len(filtered_df)}\n"
+    report += f"**Data Source:** RMS Export with Auto-Detection\n\n"
+    
+    report += "**Column Mappings Detected:**\n"
+    for field, column in column_map.items():
+        if column:
+            report += f"- {field.replace('_', ' ').title()}: `{column}`\n"
+    report += "\n---\n"
+    
+    report += generate_executive_narrative(stats, period_name)
+    
+    report += "## Key Metrics\n\n"
+    report += "| Metric | Value |\n"
+    report += "|--------|-------|\n"
+    report += f"| Total Incidents | {safe_int_format(stats['total_incidents'])} |\n"
+    report += f"| Zones Affected | {safe_int_format(stats['zones_affected'])} |\n"
+    report += f"| Primary Incident Type | {stats['top_crime']} ({safe_int_format(stats['top_crime_count'])}) |\n"
+    if stats['clearance_rate'] > 0:
+        report += f"| Clearance Rate | {stats['clearance_rate']}% |\n"
+    report += "\n"
+    
+    # FIXED: Check if Series is empty before creating tables
+    if not stats['crime_distribution'].empty:
+        report += create_markdown_table(stats['crime_distribution'], "Incident Type Distribution")
+    
+    if not stats['zone_distribution'].empty:
+        report += create_markdown_table(stats['zone_distribution'], "Zone Activity Distribution")
+    
+    # FIXED: Temporal analysis with proper Series handling
+    if not stats['hour_distribution'].empty:
+        report += "\n### Hourly Distribution\n\n"
+        report += "| Hour | Incidents | Percentage |\n"
+        report += "|------|-----------|------------|\n"
+        
+        total_incidents = stats['hour_distribution'].sum()
+        # Convert to list to avoid Series issues
+        sorted_hours = sorted(list(stats['hour_distribution'].items()), key=lambda x: x[0])
+        
+        for hour, count in sorted_hours:
+            percentage = (count / total_incidents * 100) if total_incidents > 0 else 0
+            report += f"| {safe_int_format(hour):02d}:00 | {safe_int_format(count)} | {percentage:.1f}% |\n"
+        report += "\n"
+    
+    if not stats['day_distribution'].empty:
+        report += "\n### Day of Week Distribution\n\n"
+        report += "| Day | Incidents | Percentage |\n"
+        report += "|-----|-----------|------------|\n"
+        
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        total_incidents = stats['day_distribution'].sum()
+        
+        for day in day_order:
+            # FIXED: Use .get() method for Series with default value
+            count = stats['day_distribution'].get(day, 0)
+            percentage = (count / total_incidents * 100) if total_incidents > 0 else 0
+            report += f"| {day} | {safe_int_format(count)} | {percentage:.1f}% |\n"
+        report += "\n"
+    
+    # Recent incidents section
+    if not filtered_df.empty:
+        report += "## Recent Significant Incidents\n\n"
+        recent = filtered_df.nlargest(5, 'ReportDate')
+        
+        for _, incident in recent.iterrows():
+            report_num = incident.get('ReportNumber', 'N/A')
+            crime_type = incident.get('CrimeType', 'Unknown')
+            date_str = incident['ReportDate'].strftime('%m/%d/%Y %H:%M') if pd.notna(incident['ReportDate']) else 'Date Unknown'
+            
+            address = incident.get('Address', 'Address Not Available')
+            sanitized = "Location Withheld"
+            if isinstance(address, str) and len(address) > 10:
+                sanitized = re.sub(r'\d{2,}', 'XXX', str(address))
+            
+            report += f"- **{report_num}** - {crime_type} - {sanitized} - {date_str}\n"
+        report += "\n"
+    
+    report += "---\n\n"
+    report += "*Report generated by SCRPA Statistical Export System with Auto-Detection*\n"
+    
+    os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+    report_path = os.path.join(OUTPUT_FOLDER, output_filename)
+    
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    
+    print(f"✅ Report saved: {output_filename}")
+    
+    return {
+        'file_path': report_path,
+        'stats': stats,
+        'period': period_name
+    }
+
+def main():
+    """Main execution function"""
+    print("🚀 Starting Robust RMS Statistical Export...")
+    
+    rms_file = get_latest_rms_file()
+    if not rms_file:
+        return False
+    
+    df, column_map = load_and_analyze_rms_data(rms_file)
+    if df is None or df.empty:
+        print("❌ No usable data found - exiting")
+        return False
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    periods = [
+        ("7-Day", 7, f"SCRPA_7Day_Executive_Summary_{timestamp}.md"),
+        ("28-Day", 28, f"SCRPA_28Day_Executive_Summary_{timestamp}.md"),
+        ("YTD", "YTD", f"SCRPA_YTD_Executive_Summary_{timestamp}.md")
+    ]
+    
+    results = {}
+    
+    for period_name, period_days, filename in periods:
+        print(f"\n📊 Generating {period_name} report...")
+        try:
+            result = generate_markdown_report(df.copy(), period_name, period_days, filename, column_map)
+            results[period_name] = result
+        except Exception as e:
+            print(f"❌ Error generating {period_name} report: {e}")
+            import traceback
+            traceback.print_exc()
+            results[period_name] = None
+    
+    summary_path = os.path.join(OUTPUT_FOLDER, f"System_Summary_{timestamp}.md")
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        f.write("# SCRPA RMS Statistical Export - System Summary\n\n")
+        f.write(f"**Execution Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"**RMS Source:** {os.path.basename(rms_file)}\n")
+        f.write(f"**Total Records Processed:** {len(df)}\n")
+        f.write(f"**Output Location:** {OUTPUT_FOLDER}\n\n")
+        
+        f.write("## Column Mappings Detected\n\n")
+        for field, column in column_map.items():
+            status = "✅" if column else "❌"
+            f.write(f"- {status} **{field.replace('_', ' ').title()}**: {column or 'Not Found'}\n")
+        
+        f.write("\n## Generated Reports\n\n")
+        for period, result in results.items():
+            f.write(f"### {period}\n")
+            if result:
+                stats = result['stats']
+                f.write(f"- **File:** {os.path.basename(result['file_path'])}\n")
+                f.write(f"- **Incidents:** {stats['total_incidents']}\n")
+                f.write(f"- **Top Crime:** {stats['top_crime']} ({stats['top_crime_count']})\n")
+                f.write(f"- **Clearance Rate:** {stats['clearance_rate']}%\n\n")
+            else:
+                f.write("- **Status:** Generation Failed\n\n")
+    
+    print(f"✅ System summary saved: {os.path.basename(summary_path)}")
+    
+    successful_reports = sum(1 for result in results.values() if result is not None)
+    print("\n" + "="*60)
+    print("📊 EXECUTION SUMMARY")
+    print("="*60)
+    print(f"📂 RMS File Processed: {os.path.basename(rms_file)}")
+    print(f"📅 Total Records: {len(df)}")
+    print(f"📋 Column Detection: {len([v for v in column_map.values() if v])} of {len(column_map)} fields found")
+    print(f"📄 Reports Generated: {successful_reports}/{len(periods)}")
+    print(f"💾 Output Folder: {OUTPUT_FOLDER}")
+    
+    if successful_reports < len(periods):
+        print(f"⚠️  {len(periods) - successful_reports} reports failed to generate")
+        return False
+    else:
+        print("✅ All reports generated successfully!") ````
+
+
+
+## Prompt:
+7/29/2025, 1:44:48 PM
+
+Continue
+
+
+
+## Response:
+7/29/2025, 1:45:56 PM
+
+
+
+**RMS_Statistical_Export_PANDAS_FIXED** ∙ Version 2
+
+````python
+#!/usr/bin/env python3
+# 🕒 2025-07-29-16-45-00
+# SCRPA_Statistics/RMS_Statistical_Export_PANDAS_FIXED
+# Author: R. A. Carucci
+# Purpose: Generate Markdown reports with automatic column detection - PANDAS SERIES ISSUES FIXED
+
+import os
+import sys
+import pandas as pd
+import numpy as np
+import glob
+from datetime import date, datetime, timedelta
+from collections import Counter
+import re
+
+# Safe formatting functions to prevent all type errors
+def safe_int_format(value):
+    """Safely convert value to int for string formatting"""
+    if pd.isna(value):
+        return 0
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return 0
+
+def safe_str_format(value):
+    """Safely convert value to string"""
+    if pd.isna(value):
+        return 'Unknown'
+    return str(value)
+
+def safe_zone_format(value):
+    """Safely format zone numbers"""
+    if pd.isna(value):
+        return 'Unknown'
+    try:
+        return str(int(float(value)))
+    except (ValueError, TypeError):
+        return str(value)
+
+print("=== SCRPA RMS STATISTICAL EXPORT SYSTEM ===")
+print("Generating executive summaries from RMS data with auto-detection")
+
+# Configuration
+RMS_FOLDER = r"C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA"
+OUTPUT_FOLDER = r"C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\SCRPA_ArcPy\06_Output"
+
+# Column mapping patterns - multiple possible names for each field
+COLUMN_PATTERNS = {
+    'call_time': ['Time of Call', 'Call Time', 'TimeOfCall', 'CallTime', 'Reported Time', 'Report Time'],
+    'incident_date': ['Incident Date', 'IncidentDate', 'Date of Incident', 'Offense Date'],
+    'incident_time': ['Incident Time', 'IncidentTime', 'Time of Incident', 'Offense Time'],
+    'incident': ['Incident', 'Crime Type', 'CrimeType', 'Offense', 'Charge', 'Incident Type', 'Incident Type_1'],
+    'zone': ['PDZone', 'Zone', 'District', 'Beat', 'Sector', 'Area'],
+    'address': ['FullAddress2', 'Address', 'Location', 'Full Address', 'Street Address', 'FullAddress'],
+    'report_number': ['ReportNumberNew', 'Report Number', 'ReportNumber', 'Case Number', 'CaseNumber', 'RMS Number'],
+    'disposition': ['Disposition', 'Status', 'Case Status', 'Resolution', 'Case_Status'],
+    'response_time': ['Time Response', 'Response Time', 'ResponseTime'],
+    'officer': ['Officer', 'Responding Officer', 'Primary Officer', 'Assigned Officer', 'Officer of Record']
+}
+
+def get_latest_rms_file():
+    """Find the most recent RMS Excel file"""
+    try:
+        patterns = [
+            os.path.join(RMS_FOLDER, "*RMS*.xlsx"),
+            os.path.join(RMS_FOLDER, "*SCRPA*.xlsx"),
+            os.path.join(RMS_FOLDER, "*.xlsx")
+        ]
+        
+        files = []
+        for pattern in patterns:
+            files.extend(glob.glob(pattern))
+        
+        if not files:
+            print(f"❌ No Excel files found in {RMS_FOLDER}")
+            return None
+        
+        # Remove duplicates and sort by modification time
+        files = list(set(files))
+        latest_file = max(files, key=os.path.getmtime)
+        print(f"✅ Using latest RMS file: {os.path.basename(latest_file)}")
+        return latest_file
+        
+    except Exception as e:
+        print(f"❌ Error finding RMS file: {e}")
+        return None
+
+def detect_columns(df):
+    """Automatically detect column mappings"""
+    print("🔍 Detecting column structure...")
+    
+    available_columns = df.columns.tolist()
+    print(f"📋 Available columns ({len(available_columns)}):")
+    for i, col in enumerate(available_columns, 1):
+        print(f"   {i:2d}. '{col}'")
+    
+    column_map = {}
+    
+    for field, possible_names in COLUMN_PATTERNS.items():
+        found_column = None
+        
+        # Exact match first
+        for col_name in available_columns:
+            if col_name in possible_names:
+                found_column = col_name
+                break
+        
+        # If no exact match, try case-insensitive partial matching
+        if not found_column:
+            for col_name in available_columns:
+                for pattern in possible_names:
+                    if pattern.lower() in col_name.lower() or col_name.lower() in pattern.lower():
+                        found_column = col_name
+                        break
+                if found_column:
+                    break
+        
+        column_map[field] = found_column
+        status = "✅" if found_column else "❌"
+        print(f"   {status} {field}: {found_column or 'NOT FOUND'}")
+    
+    return column_map
+
+def load_and_analyze_rms_data(file_path):
+    """Load RMS data with robust column detection"""
+    try:
+        print(f"📊 Loading RMS data from: {os.path.basename(file_path)}")
+        
+        # Read Excel file
+        df = pd.read_excel(file_path)
+        print(f"✅ Loaded {len(df)} records")
+        
+        # Detect column structure
+        column_map = detect_columns(df)
+        
+        # Check if we have minimum required columns
+        has_datetime = (column_map.get('call_time') or 
+                       (column_map.get('incident_date') and column_map.get('incident_time')) or
+                       column_map.get('incident_date'))
+        
+        required_fields = ['incident']
+        missing_required = [field for field in required_fields if not column_map.get(field)]
+        
+        if not has_datetime:
+            missing_required.append('date/time (need call_time, incident_date+incident_time, or incident_date)')
+        
+        if missing_required:
+            print(f"❌ Missing required columns for: {missing_required}")
+            print("Available columns suggest this might not be a standard RMS export.")

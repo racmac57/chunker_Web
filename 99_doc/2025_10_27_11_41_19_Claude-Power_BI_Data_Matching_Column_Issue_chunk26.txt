@@ -1,0 +1,301 @@
+Looking at the visible addresses, I can identify the patterns that need to be added. Let me update the code to catch these specific addresses:
+
+**Updated Arrest Data Processing Query** ∙ Version 3
+
+````m
+// 2025-06-13-15-30-00
+// ARREST_DATA_ANALYTICS/arrest_geographic_processing
+// Author: R. A. Carucci
+// Purpose: Load and process arrest data with comprehensive geographic mapping and municipality lookup
+
+let
+    // === CONFIGURATION ===
+    folderPath = Param_ArrestFolder,
+    assignmentPath = Param_AssignmentFile,
+    countiesPath = Param_CountyFile,
+
+    // === FILE LOADING ===
+    Source = Folder.Files(folderPath),
+    // Filter out files in Archive subfolder and only get _Arrests.xlsx files
+    FilteredFiles = Table.SelectRows(Source, each 
+        Text.EndsWith([Name], "_Arrests.xlsx") and 
+        not Text.Contains([Folder Path], "Archive")
+    ),
+    AddFileDate = Table.AddColumn(FilteredFiles, "file_year_month", each Text.Start([Name], 7)),
+
+    GetSheet1 = (fileBinary as binary) =>
+        let
+            raw = try Excel.Workbook(fileBinary, null, true) otherwise null,
+            sheet = try raw{[Item="Sheet1", Kind="Sheet"]}[Data] otherwise null,
+            promoted = if sheet <> null then 
+                try Table.PromoteHeaders(sheet, [PromoteAllScalars=true]) 
+                otherwise #table({}, {})
+            else #table({}, {}),
+            // Get column names and remove any that conflict with file metadata
+            colNames = Table.ColumnNames(promoted),
+            conflictingCols = List.Intersect({colNames, {"Name", "Content", "Extension"}}),
+            cleaned = Table.RemoveColumns(promoted, conflictingCols, MissingField.Ignore)
+        in cleaned,
+
+    AddData = Table.AddColumn(AddFileDate, "Data", each GetSheet1([Content])),
+    ValidData = Table.SelectRows(AddData, each Table.RowCount([Data]) > 0),
+    
+    // Get all available column names from the first valid data table
+    SampleData = ValidData{0}[Data],
+    AvailableColumns = Table.ColumnNames(SampleData),
+    
+    // Only expand columns that actually exist in the data
+    ColumnsToExpand = List.Intersect({AvailableColumns, {
+        "Case Number", "Name", "DOB", "SS#Calc", "Age", "Address", "Race", "Sex",
+        "Arrest Date", "Place of Arrest", "Charge", "Officer of Record", 
+        "ReportCalcSummary", "JuvenileFlag", "UCR #", "Reviewed"
+    }}),
+    
+    Expanded = Table.ExpandTableColumn(ValidData, "Data", ColumnsToExpand),
+
+    Renamed = Table.RenameColumns(Expanded, {
+        {"Case Number", "case_number"},
+        {"Name", "name"},
+        {"DOB", "dob"},
+        {"SS#Calc", "ssn_calc"},
+        {"Age", "age"},
+        {"Address", "address"},
+        {"Race", "race"},
+        {"Sex", "sex"},
+        {"Arrest Date", "arrest_date"},
+        {"Place of Arrest", "place_of_arrest"},
+        {"Charge", "charge"},
+        {"Officer of Record", "officer_of_record"},
+        {"ReportCalcSummary", "report_calc_summary"},
+        {"JuvenileFlag", "juvenile_flag"},
+        {"UCR #", "ucr_code"},
+        {"Reviewed", "reviewed"}
+    }),
+
+    Cleaned = Table.TransformColumns(Renamed, {
+        {"name", Text.Trim, type nullable text},
+        {"address", Text.Trim, type nullable text},
+        {"charge", Text.Trim, type nullable text},
+        {"officer_of_record", Text.Trim, type nullable text},
+        {"place_of_arrest", Text.Trim, type nullable text}
+    }),
+
+    Parsed = Table.TransformColumns(Cleaned, {
+        {"arrest_date", each try Date.From(_) otherwise null, type nullable date}
+    }),
+
+    // === MUNICIPALITY LOOKUP - FIXED VERSION ===
+    // Load and safely promote headers for lookup tables
+    LoadLookupTable = Table.AddColumn(
+    Table.Combine({
+        Table.PromoteHeaders(Excel.Workbook(File.Contents(countiesPath)){[Item="NJCounties", Kind="Sheet"]}[Data]),
+        Table.PromoteHeaders(Excel.Workbook(File.Contents(countiesPath)){[Item="NewYorkCounty", Kind="Sheet"]}[Data])
+    }), 
+    "municipality_lower", 
+    each Text.Lower(Text.Trim([Municipality])), 
+    type text
+),
+
+    NJPromoted = Table.PromoteHeaders(Excel.Workbook(File.Contents(countiesPath)){[Item="NJCounties", Kind="Sheet"]}[Data], [PromoteAllScalars=true]),
+    NYPromoted = let
+    promoted = Table.PromoteHeaders(Excel.Workbook(File.Contents(countiesPath)){[Item="NewYorkCounty", Kind="Sheet"]}[Data], [PromoteAllScalars=true]),
+    cleanedMunicipality = Table.ReplaceValue(promoted, each [Municipality], each 
+        let
+            muni = [Municipality],
+            suffixes = {" City", " Borough", " Township", " Town", " Village"},
+            cleaned = List.Accumulate(suffixes, muni, (state, suffix) => Text.Replace(state, suffix, "")),
+            final = Text.Trim(cleaned)
+        in final, Replacer.ReplaceText, {"Municipality"})
+in cleanedMunicipality,
+
+    CombinedLookup = let
+    combined = Table.Combine({NJPromoted, NYPromoted}),
+    cleanedMunicipality = Table.TransformColumns(combined, {
+        {"Municipality", each 
+            let
+                muni = _,
+                suffixes = {" City", " Borough", " Township", " Town", " Village"},
+                cleaned = List.Accumulate(suffixes, muni, (state, suffix) => Text.Replace(state, suffix, "")),
+                final = Text.Trim(cleaned)
+            in final, type text}
+    }),
+    removedMunicipalityType = Table.RemoveColumns(cleanedMunicipality, {"Municipality Type"}, MissingField.Ignore)
+in removedMunicipalityType,
+    CleanLookup = Table.SelectRows(CombinedLookup, each [Municipality] <> null and [State] <> null),
+    LowerLookup = Table.AddColumn(CleanLookup, "municipality_lower", each 
+    let
+        cleaned = Text.Lower(Text.Trim([Municipality])),
+        // Remove only municipal type suffixes
+        withoutSuffix = List.Accumulate(
+            {" city", " borough", " township", " town", " village"},
+            cleaned,
+            (state, suffix) => Text.Replace(state, suffix, "")
+        ),
+        final = Text.Trim(withoutSuffix)
+    in final, type text),
+    #"Filtered Rows" = Table.SelectRows(LowerLookup, each true),
+
+    LoweredAddresses = Table.AddColumn(Parsed, "address_lower", each Text.Lower([address] ? ? ""), type text),
+
+    MatchCity = Table.AddColumn(LoweredAddresses, "matched_municipality", each
+    let
+        addr = [address_lower],
+        // Sort by length descending to match longer names first ("new york" before "york")
+        sortedMunicipalities = List.Sort(#"Filtered Rows"[municipality_lower], (x, y) => Text.Length(y) - Text.Length(x)),
+        match = try List.First(
+            List.Select(sortedMunicipalities, each Text.Contains(addr, _)),
+            null
+        ) otherwise null
+    in match, type text),
+
+    // === GEOGRAPHIC MAPPING ===
+    County_State_Added = Table.AddColumn(MatchCity, "County_State", each 
+        if [matched_municipality] <> null then 
+            // Bergen County, NJ
+            if [matched_municipality] = "hackensack" then "Bergen, NJ"
+            else if [matched_municipality] = "hacknesack" then "Bergen, NJ"
+            else if [matched_municipality] = "teaneck" then "Bergen, NJ"
+            else if [matched_municipality] = "ridgefield park" then "Bergen, NJ"
+            else if [matched_municipality] = "east rutherford" then "Bergen, NJ"
+            else if [matched_municipality] = "moonachie" then "Bergen, NJ"
+            else if [matched_municipality] = "fort lee" then "Bergen, NJ"
+            else if [matched_municipality] = "rochelle park" then "Bergen, NJ"
+            else if [matched_municipality] = "garfield" then "Bergen, NJ"
+            else if [matched_municipality] = "hasbrouck heights" then "Bergen, NJ"
+            else if [matched_municipality] = "wood ridge" then "Bergen, NJ"
+            else if [matched_municipality] = "bergenfield" then "Bergen, NJ"
+            else if [matched_municipality] = "saddle brook" then "Bergen, NJ"
+            else if [matched_municipality] = "river edge" then "Bergen, NJ"
+            else if [matched_municipality] = "oradell" then "Bergen, NJ"
+            else if [matched_municipality] = "new milford" then "Bergen, NJ"
+            else if [matched_municipality] = "upper saddle river" then "Bergen, NJ"
+            else if [matched_municipality] = "wallington" then "Bergen, NJ"
+            else if [matched_municipality] = "little ferry" then "Bergen, NJ"
+            else if [matched_municipality] = "south hackensack" then "Bergen, NJ"
+            else if [matched_municipality] = "irvington" then "Bergen, NJ"
+            else if [matched_municipality] = "lodi" then "Bergen, NJ"
+            else if [matched_municipality] = "maywood" then "Bergen, NJ"
+            else if [matched_municipality] = "bogota" then "Bergen, NJ"
+            else if [matched_municipality] = "fair lawn" then "Bergen, NJ"
+            else if [matched_municipality] = "ridgewood" then "Bergen, NJ"
+            else if [matched_municipality] = "paramus" then "Bergen, NJ"
+            
+            // Essex County, NJ
+            else if [matched_municipality] = "newark" then "Essex, NJ"
+            else if [matched_municipality] = "east orange" then "Essex, NJ"
+            else if [matched_municipality] = "west orange" then "Essex, NJ"
+            else if [matched_municipality] = "bloomfield" then "Essex, NJ"
+            else if [matched_municipality] = "belleville" then "Essex, NJ"
+            
+            // Passaic County, NJ
+            else if [matched_municipality] = "paterson" then "Passaic, NJ"
+            else if [matched_municipality] = "passaic" then "Passaic, NJ"
+            else if [matched_municipality] = "clifton" then "Passaic, NJ"
+            else if [matched_municipality] = "wayne" then "Passaic, NJ"
+            else if [matched_municipality] = "hawthorne" then "Passaic, NJ"
+            else if [matched_municipality] = "berkshire" then "Passaic, NJ"
+            
+            // Hudson County, NJ
+            else if [matched_municipality] = "jersey city" then "Hudson, NJ"
+            else if [matched_municipality] = "jersey" then "Hudson, NJ"
+            else if [matched_municipality] = "hoboken" then "Hudson, NJ"
+            
+            // Union County, NJ
+            else if [matched_municipality] = "elizabeth" then "Union, NJ"
+            else if [matched_municipality] = "linden" then "Union, NJ"
+            else if [matched_municipality] = "scotch plains" then "Union, NJ"
+            
+            // Other NJ Counties
+            else if [matched_municipality] = "raritan" then "Somerset, NJ"
+            else if [matched_municipality] = "thompson" then "Somerset, NJ"
+            else if [matched_municipality] = "phillipsburg" then "Warren, NJ"
+            else if [matched_municipality] = "camden" then "Camden, NJ"
+            else if [matched_municipality] = "clementon" then "Camden, NJ"
+            
+            // New York Counties
+            else if [matched_municipality] = "manhattan" then "New York, NY"
+            else if [matched_municipality] = "york" then "New York, NY"
+            else if [matched_municipality] = "bronx" then "Bronx, NY"
+            else if [matched_municipality] = "staten island" then "Richmond, NY"
+            else if [matched_municipality] = "spring valley" then "Rockland, NY"
+            else if [matched_municipality] = "mount vernon" then "Westchester, NY"
+            else if [matched_municipality] = "queens" then "Queens, NY"
+            else if [matched_municipality] = "brooklyn" then "Kings, NY"
+            else if [matched_municipality] = "poughkeepsie" then "Dutchess, NY"
+            
+            // Pennsylvania Counties
+            else if [matched_municipality] = "reading" then "Berks, PA"
+            else if [matched_municipality] = "chambersburg" then "Franklin, PA"
+            
+            else "Unmatched"
+            
+        // Handle addresses where parsing completely failed - ADDRESS-BASED FALLBACKS
+        else if Text.Contains(Text.Lower([address] ? ? ""), "wayne") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "lodi") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "hackensack") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "hacknesack") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "paterson") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "garfield") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "newark") then "Essex, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "maywood") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "bronx") then "Bronx, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "fair lawn") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "hawthorne") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "ridgewood") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "bogota") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "poughkeepsie") then "Dutchess, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "paramus") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "scotch plains") then "Union, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "brooklyn") then "Kings, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "manhattan") then "New York, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "teaneck") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "east orange") then "Essex, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "camden") then "Camden, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "phillipsburg") then "Warren, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "spring valley") then "Rockland, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "staten island") then "Richmond, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "edgewood") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "east rutherford") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "fort lee") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "passaic") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "elizabeth") then "Union, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "ridgefield park") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "treasy avenue") and Text.Contains(Text.Lower([address] ? ? ""), "newark") then "Essex, NJ"
+        // Additional specific address patterns that were missed
+        else if Text.Contains(Text.Lower([address] ? ? ""), "south river street") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "washington avenue") and Text.Contains(Text.Lower([address] ? ? ""), "paterson") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "cambridge avenue") and Text.Contains(Text.Lower([address] ? ? ""), "garfield") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "davenport avenue") and Text.Contains(Text.Lower([address] ? ? ""), "newark") then "Essex, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "marion avenue") and Text.Contains(Text.Lower([address] ? ? ""), "bronx") then "Bronx, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "washington ave") and Text.Contains(Text.Lower([address] ? ? ""), "hawthorne") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "washington place") and Text.Contains(Text.Lower([address] ? ? ""), "ridgewood") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "mount hope") and Text.Contains(Text.Lower([address] ? ? ""), "bronx") then "Bronx, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "clinton place") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "5th st") and Text.Contains(Text.Lower([address] ? ? ""), "newark") then "Essex, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "kansas street") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "maple avenue") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "state street") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "hudson st") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "lander ave") then "Richmond, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "bethune blvd") then "Rockland, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "23rd st") then "Essex, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "euclid ave") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "selwyn avenue") then "Bronx, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "jefferson st") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "lawrence street") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "hillman street") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "east 23rd street") then "Passaic, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "bayview") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "south broad street") then "Camden, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "academy street") then "New York, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "second street") then "Bergen, NJ"
+        // Special handling for homeless individuals - they reside in Hackensack
+        else if Text.Contains(Text.Lower([address] ? ? ""), "homeless") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "transient") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "no fixed address") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "nfa") then "Bergen, NJ"
+        
+        // Other address-based mappings
+        else if Text.Contains(Text.Lower([address] ? ? ""), "spring valley") then "Rockland, NY"
+        else if Text.Contains(Text.Lower([address] ? ? ""), "wood ridge") then "Bergen, NJ"
+        else if Text.Contains(Text.Lower([address] ?

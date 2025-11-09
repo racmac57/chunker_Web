@@ -1,0 +1,732 @@
+""), "SEE REPORT"))
+    else
+        AddCrimeCategory
+in
+    FinalFiltered
+
+// =============================================================================
+// MOTOR VEHICLE THEFT QUERY (Fixed)
+// =============================================================================
+let
+    Source = ALL_CRIMES, // Reference the unpivoted master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Motor Vehicle Theft")
+in
+    Filtered
+
+// =============================================================================
+// BURGLARY AUTO QUERY (Fixed)
+// =============================================================================
+let
+    Source = ALL_CRIMES, // Reference the unpivoted master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Burglary Auto")
+in
+    Filtered
+
+// =============================================================================
+// BURGLARY COMMERCIAL/RESIDENTIAL QUERY (Fixed)
+// =============================================================================
+let
+    Source = ALL_CRIMES, // Reference the unpivoted master query
+    Filtered = Table.SelectRows(Source, each 
+        [Crime_Category] = "Burglary Commercial" or [Crime_Category] = "Burglary Residence"
+    )
+in
+    Filtered
+
+// =============================================================================
+// ROBBERY QUERY (Fixed)
+// =============================================================================
+let
+    Source = ALL_CRIMES, // Reference the unpivoted master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Robbery")
+in
+    Filtered
+
+// =============================================================================
+// SEXUAL OFFENSES QUERY (Fixed)
+// =============================================================================
+let
+    Source = ALL_CRIMES, // Reference the unpivoted master query
+    Filtered = Table.SelectRows(Source, each [Crime_Category] = "Sexual Offenses")
+in
+    Filtered
+
+// =============================================================================
+// ALTERNATIVE: DIRECT TEXT FILTERING (If you prefer more control)
+// =============================================================================
+
+// Motor Vehicle Theft - Direct Text Filtering
+let
+    Source = ALL_CRIMES,
+    Filtered = Table.SelectRows(Source, each 
+        let
+            UpperIncident = Text.Upper([IncidentType] ? ? "") in
+            Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") or
+            Text.Contains(UpperIncident, "AUTO THEFT") or
+            Text.Contains(UpperIncident, "MV THEFT")
+    )
+in
+    Filtered
+
+// Burglary Auto - Direct Text Filtering  
+let
+    Source = ALL_CRIMES,
+    Filtered = Table.SelectRows(Source, each
+        let
+            UpperIncident = Text.Upper([IncidentType] ? ? "") ````
+
+````plaintext
+SCRPA_Place_Time_Master_Transcript.txt
+Previous session covered: Successfully diagnosed and fixed query structure issues - identified that individual crime .txt files don't exist, corrected 7-Day sheet naming, and established proper master-filtered query relationship. Current focus: Replace basic ALL_CRIMES query in Power BI with enhanced version that includes Crime_Category column and reference table lookup from attached All_Crimes.md M Code (specifically lines 117-126). This will populate the 5 filtered crime queries (Motor_Vehicle_Theft, Burglary_Auto, etc.) that are currently empty. Key data from prior work:
+* Master file: 2025_06_24_10_32_17_ALL_RMS.xlsx (Sheet1)
+* 7-Day cycle: _7Day_28Day_250414_ sheet name (fixed)
+* Project: C:\Users\carucci_r\OneDrive - City of Hackensack\04_PowerBI\SCRPA_Time_Project
+* Crime categorization uses: CallTypeUpdatedWithCategories.csv reference table
+* Data structure: Incident_Type_1/2/3 columns → Crime_Category logic → filtered tables
+Immediate next step: Update ALL_CRIMES M Code with crime categorization logic to enable filtered crime analysis for SCRPA compliance reporting. Session Summary - SCRPA Power BI Time Analysis Project
+Key Accomplishments
+* ✅ Identified root cause: Individual .txt crime files don't exist - only master RMS Excel export exists
+* ✅ Fixed 7-Day query: Corrected sheet name from "7Day_28Day_250414" to "7Day_28Day_250414"
+* ✅ Established proper query structure: Master ALL_CRIMES query with filtered crime queries referencing it
+* ✅ Resolved reference errors: Updated filtered queries to use #"ALL_CRIMES" instead of Crimes
+* ✅ Provided complete M Code: All 7 query codes ready for implementation
+Current State
+* Data Structure: RMS export has Incident_Type_1, Incident_Type_2, Incident_Type_3 columns (not single "Incident" column)
+* Working Queries: _7Day_28Day_250414 loads successfully, ALL_CRIMES basic structure works
+* Problem Identified: Current Power BI ALL_CRIMES query missing crime categorization logic and Crime_Category column
+* Filtered Tables Empty: Because Crime_Category column doesn't exist for filtering
+Pending Tasks
+* CRITICAL: Replace Power BI ALL_CRIMES query with enhanced version from attached All_Crimes.md (lines 117-126)
+* Add Crime_Category column: Using reference table lookup logic from attached M Code
+* Verify categorization: Test that Crime_Category properly identifies "Motor Vehicle Theft", "Burglary Auto", etc. ````
+
+````plaintext
+Fixed M Code Queries for SCRPA Power BI.txt
+// 🕒 2025-07-23-06-00-00
+// SCRPA_Time_v2/PowerBI_MCode_Fixed_Queries
+// Author: R. A. Carucci
+// Purpose: Fixed M Code queries with case-insensitive filtering and proper unpivot handling
+
+// =============================================================================
+// MAIN ALL_CRIMES QUERY (Master - Reference this in all child queries)
+// =============================================================================
+let
+    // Load from your CAD export file
+    Source = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_EXPORTS\_LawSoft_EXPORT\CAD\latest_cad_export.xlsx"), null, true),
+    Data = Source{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(Data, [PromoteAllScalars=true]),
+    ChangedType = Table.TransformColumnTypes(PromotedHeaders,{}, "en-US"),
+    
+    // Remove excluded case (as per your current logic)
+    FilteredRows = Table.SelectRows(ChangedType, each ([Case Number] <> "25-057654")),
+    
+    // Unpivot incident types - adjust column names based on your actual data
+    IncidentColumns = {"Incident_Type_1", "Incident_Type_2", "Incident_Type_3"}, // Adjust these names
+    KeepColumns = Table.ColumnNames(FilteredRows),
+    IdColumns = List.Difference(KeepColumns, IncidentColumns),
+    
+    Unpivoted = Table.UnpivotOtherColumns(FilteredRows, IdColumns, "IncidentColumn", "IncidentType"),
+    
+    // Remove null/empty incident types
+    CleanedIncidents = Table.SelectRows(Unpivoted, each [IncidentType] <> null and [IncidentType] <> ""),
+    
+    // Add case-insensitive crime categorization
+    AddCrimeCategory = Table.AddColumn(CleanedIncidents, "Crime_Category", each
+        let
+            UpperIncident = Text.Upper([IncidentType])
+        in
+            if Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") or Text.Contains(UpperIncident, "AUTO THEFT") or Text.Contains(UpperIncident, "MV THEFT") then "Motor Vehicle Theft"
+            else if Text.Contains(UpperIncident, "BURGLARY") and (Text.Contains(UpperIncident, "AUTO") or Text.Contains(UpperIncident, "VEHICLE")) then "Burglary Auto"
+            else if Text.Contains(UpperIncident, "BURGLARY - COMMERCIAL") then "Burglary Commercial"
+            else if Text.Contains(UpperIncident, "BURGLARY - RESIDENCE") then "Burglary Residence"
+            else if Text.Contains(UpperIncident, "ROBBERY") then "Robbery"
+            else if Text.Contains(UpperIncident, "SEXUAL") then "Sexual Offenses"
+            else "Other"
+    ),
+    
+    // Add disposition filtering (if Disposition column exists)
+    FinalFiltered = if Table.HasColumns(AddCrimeCategory, "Disposition") then
+        Table.SelectRows(AddCrimeCategory, each Text.Contains(Text.Upper([Disposition] ? ? ````
+
+````plaintext
+Fixed M Code Queries for SCRPA Power BI.txt
+? ""), "ROBBERY")
+    )
+in
+    Filtered
+
+// Sexual Offenses - Direct Text Filtering
+let
+    Source = ALL_CRIMES,
+    Filtered = Table.SelectRows(Source, each
+        Text.Contains(Text.Upper([IncidentType] ? ? ""), "SEXUAL")
+    )
+in
+    Filtered
+
+// =============================================================================
+// VALIDATION QUERY - Compare Counts Before/After Filtering
+// =============================================================================
+let
+    Source = ALL_CRIMES,
+    
+    // Count total records
+    TotalCount = Table.RowCount(Source),
+    
+    // Count by crime category
+    MotorVehicleCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Motor Vehicle Theft")),
+    BurglaryAutoCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Burglary Auto")),
+    BurglaryCommCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Burglary Commercial")),
+    BurglaryResCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Burglary Residence")),
+    RobberyCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Robbery")),
+    SexualCount = Table.RowCount(Table.SelectRows(Source, each [Crime_Category] = "Sexual Offenses")),
+    
+    // Create validation table
+    ValidationTable = #table(
+        {"Crime_Type", "Count", "Percentage"},
+        {
+            {"Total Records", TotalCount, 100.0},
+            {"Motor Vehicle Theft", MotorVehicleCount, Number.Round(MotorVehicleCount / TotalCount * 100, 2)},
+            {"Burglary Auto", BurglaryAutoCount, Number.Round(BurglaryAutoCount / TotalCount * 100, 2)},
+            {"Burglary Commercial", BurglaryCommCount, Number.Round(BurglaryCommCount / TotalCount * 100, 2)},
+            {"Burglary Residence", BurglaryResCount, Number.Round(BurglaryResCount / TotalCount * 100, 2)},
+            {"Robbery", RobberyCount, Number.Round(RobberyCount / TotalCount * 100, 2)},
+            {"Sexual Offenses", SexualCount, Number.Round(SexualCount / TotalCount * 100, 2)},
+            {"Other", TotalCount - MotorVehicleCount - BurglaryAutoCount - BurglaryCommCount - BurglaryResCount - RobberyCount - SexualCount, 0}
+        }
+    )
+in
+    ValidationTable
+
+// =============================================================================
+// IMPLEMENTATION NOTES
+// =============================================================================
+/*
+1. UPDATE COLUMN NAMES: 
+   - Adjust "Incident_Type_1", "Incident_Type_2", "Incident_Type_3" to match your actual column names
+   - Update "Case Number" and "Disposition" column names if different
+
+2. FILE PATH:
+   - Update the file path in ALL_CRIMES query to point to your actual CAD export location
+
+3. TESTING APPROACH:
+   - Start with ALL_CRIMES query first
+   - Verify the unpivot works correctly 
+   - Test one filtered query at a time
+   - Run the validation query to check counts
+
+4. ````
+
+````plaintext
+SCRPA_Place_Time_Master_Transcript.txt
+Recommended Implementation Strategy
+For Multiple Charts on One Page:
+Use Option B (Slicer Table) for interactive filtering
+Single set of universal DAX measures
+Users can switch between crime types via slicer
+For Dedicated Crime-Specific Reports:
+Use Option A (Page-Level Filters)
+One page per crime type
+Universal DAX measures work automatically with page context
+For Dashboard Overview:
+Use Option C (Specific Measures) for summary cards
+Show all crime types simultaneously
+Key Benefits:
+✅ Single DAX codebase - no duplication
+✅ Works across all crime types - universal measures
+✅ Flexible filtering - multiple approaches available
+✅ Maintains performance - proper filter context
+✅ Easy maintenance - update once, works everywhere
+Quick Start:
+Replace your current DAX with the universal versions above
+Choose filtering method (Page filters recommended for simplicity)
+Test with one crime type first
+Scale to all crime types once working
+Bottom line: Yes, one set of DAX + proper filtering = works for all queries efficiently. use the sql filter used in the arc gis pro project for filtering the incident types
+Edit
+Searched project for “ArcGIS Pro SQL filter crime types calltype disposition patterns”
+6 results
+Perfect! Based on your ArcGIS Pro project's SQL filters, here's the exact DAX implementation using those same patterns:
+PowerBI DAX with ArcGIS Pro SQL Patterns
+Code
+Key Implementation Strategy:
+1. Use the Slicer Approach (Recommended)
+Single DAX codebase - matches your ArcGIS Pro SQL exactly
+Crime Types Slicer controls all visuals dynamically
+No page filters needed - everything controlled by slicer selection
+2. SQL Pattern Matching
+Your ArcGIS Pro uses these exact patterns:
+sql
+-- Motor Vehicle Theft
+calltype LIKE '%AUTO THEFT%' AND disposition LIKE '%See Report%'
+-- Robbery
+calltype LIKE '%ROBBERY%' AND disposition LIKE '%See Report%'
+--- END OF claude_chatlog_02_Chunk074.txt ---
+
+
+--- START OF claude_chatlog_02_Chunk075.txt ---
+-- Burglary Commercial/Residential
+(calltype LIKE '%BURGLARY COMMERCIAL%' OR calltype LIKE '%BURGLARY RESIDENTIAL%')
+AND disposition LIKE '%See Report%'
+3. PowerBI DAX Equivalent
+dax
+-- Motor Vehicle Theft
+SEARCH("AUTO THEFT", 'ALL_CRIMES'[Incident]) > 0
+AND SEARCH("See Report", 'ALL_CRIMES'[Disposition]) > 0
+-- Robbery
+SEARCH("ROBBERY", 'ALL_CRIMES'[Incident]) > 0
+AND SEARCH("See Report", 'ALL_CRIMES'[Disposition]) > 0
+-- Burglary Comm/Res
+OR(
+SEARCH("BURGLARY COMMERCIAL", 'ALL_CRIMES'[Incident]) > 0,
+SEARCH("BURGLARY RESIDENTIAL", 'ALL_CRIMES'[Incident]) > 0
+)
+AND SEARCH("See Report", 'ALL_CRIMES'[Disposition]) > 0
+4. Quick Setup Steps
+Create the "Crime Types Slicer" calculated table
+Add slicer visual to your reports
+Replace existing measures with the dynamic ones
+Test each crime type selection
+5. ````
+
+Based on your project knowledge and Power BI best practices, I strongly recommend using **ONE master query with dynamic filtering** rather than duplicating queries. Here's why and how:
+
+**Power BI Crime Data Filtering Strategy**
+
+````markdown
+# 🎯 Power BI Crime Data Filtering Strategy
+
+*// 🕒 2025-07-23-16-30-00*  
+*// Project: SCRPA_Time_v2/PowerBI_Crime_Filtering_Strategy*  
+*// Author: R. A. Carucci*  
+*// Purpose: Optimal approach for visualizing 6 crime categories in Power BI*
+
+---
+
+## 🚀 **Recommended Approach: ONE Master Query + Dynamic Filtering**
+
+### **✅ Why Use Single Query Approach:**
+
+**Performance Benefits:**
+- **Faster refresh times** - One query loads faster than 6 separate queries
+- **Less memory usage** - No data duplication in model
+- **Simplified relationships** - Single table easier to manage
+- **Better compression** - Power BI optimizes single large table
+
+**Maintenance Benefits:**
+- **Single source of truth** - Update logic once, applies everywhere
+- **Easier debugging** - One place to fix data issues
+- **Consistent calculations** - All measures work across all crime types
+- **Version control** - Simpler to track changes
+
+**User Experience Benefits:**
+- **Interactive filtering** - Users can switch between crime types dynamically
+- **Cross-filtering** - Related visuals update automatically
+- **Flexible analysis** - Can compare multiple crime types simultaneously
+- **Responsive dashboards** - Faster visual updates
+
+---
+
+## 🔧 **Implementation Strategy**
+
+### **Option A: Page-Level Filters (Recommended for Reports)**
+
+**Setup:**
+1. **Single ALL_CRIMES query** with Crime_Category column
+2. **Page-level filter** on Crime_Category for each report page
+3. **Universal DAX measures** that work across all crime types
+
+**Benefits:**
+- ✅ Clean, focused reports per crime type
+- ✅ Easy navigation between crime types
+- ✅ Automatic filtering of all visuals on page
+- ✅ No complex DAX required
+
+### **Option B: Slicer-Based Filtering (Recommended for Dashboards)**
+
+**Setup:**
+1. **Crime Types slicer** controlling all visuals
+2. **Dynamic DAX measures** that respond to slicer selection
+3. **Single dashboard** showing all crime types as needed
+
+**Benefits:**
+- ✅ Interactive user experience
+- ✅ Real-time crime type switching
+- ✅ Space-efficient dashboard design
+- ✅ Cross-crime type analysis capability
+
+---
+
+## 📊 **DAX Implementation Using ArcGIS Pro SQL Patterns**
+
+Based on your existing ArcGIS Pro filters, here's the Power BI equivalent:
+
+### **Universal Crime Filter Measure:**
+```dax
+Selected_Crime_Records = 
+VAR SelectedCrime = SELECTEDVALUE('Crime Types'[Crime_Type], "All")
+VAR FilteredTable = 
+    SWITCH(
+        SelectedCrime,
+        "Motor Vehicle Theft", 
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("AUTO THEFT", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        "Robbery",
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("ROBBERY", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        "Burglary - Auto",
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("BURGLARY", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                (SEARCH("AUTO", ALL_CRIMES[IncidentType], 1, 0) > 0 ||
+                 SEARCH("VEHICLE", ALL_CRIMES[IncidentType], 1, 0) > 0) &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        "Burglary - Commercial",
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("BURGLARY COMMERCIAL", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        "Burglary - Residence",
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("BURGLARY RESIDENTIAL", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        "Sexual Offenses",
+            FILTER(
+                ALL_CRIMES,
+                SEARCH("SEXUAL", ALL_CRIMES[IncidentType], 1, 0) > 0 &&
+                SEARCH("See Report", ALL_CRIMES[Disposition], 1, 0) > 0
+            ),
+        ALL_CRIMES
+    )
+RETURN
+    COUNTROWS(FilteredTable)
+```
+
+### **Crime Types Slicer Table:**
+```dax
+Crime Types = 
+DATATABLE(
+    "Crime_Type", STRING,
+    {
+        {"Motor Vehicle Theft"},
+        {"Robbery"},
+        {"Burglary - Auto"},
+        {"Burglary - Commercial"},
+        {"Burglary - Residence"},
+        {"Sexual Offenses"}
+    }
+)
+```
+
+---
+
+## 🎯 **Recommended Setup Steps**
+
+### **Step 1: Enhance ALL_CRIMES Query (5 minutes)**
+```powerquery-m
+// Add to your existing ALL_CRIMES M Code
+AddCrimeCategory = Table.AddColumn(CleanedIncidents, "Crime_Category", each
+    let
+        UpperIncident = Text.Upper([IncidentType] ? ? "") in
+        if Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") or Text.Contains(UpperIncident, "AUTO THEFT") then "Motor Vehicle Theft"
+        else if Text.Contains(UpperIncident, "BURGLARY") and (Text.Contains(UpperIncident, "AUTO") or Text.Contains(UpperIncident, "VEHICLE")) then "Burglary - Auto"
+        else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "COMMERCIAL") then "Burglary - Commercial"
+        else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "RESIDENCE") then "Burglary - Residence"
+        else if Text.Contains(UpperIncident, "ROBBERY") then "Robbery"
+        else if Text.Contains(UpperIncident, "SEXUAL") then "Sexual Offenses"
+        else "Other"
+)
+```
+
+### **Step 2: Create Universal DAX Measures (10 minutes)**
+```dax
+// Total Crime Count
+Total_Crimes = 
+CALCULATE(
+    COUNTROWS(ALL_CRIMES),
+    ALL_CRIMES[Crime_Category] <> "Other"
+)
+
+// Average Response Time
+Avg_Response_Time = 
+CALCULATE(
+    AVERAGE(ALL_CRIMES[Time_Response_Minutes]),
+    ALL_CRIMES[Time_Response_Minutes] > 0
+)
+
+// 7-Day Count
+7Day_Crimes = 
+CALCULATE(
+    COUNTROWS(ALL_CRIMES),
+    ALL_CRIMES[Period] = "7-Day",
+    ALL_CRIMES[Crime_Category] <> "Other"
+)
+```
+
+### **Step 3: Build Visualizations (15 minutes)**
+
+**For Each Crime Type Report Page:**
+1. **Add page-level filter** on Crime_Category = "Motor Vehicle Theft" etc. 2. **Use universal measures** - they automatically filter to page context
+3. **Add standard visuals**: Map, time series, grid analysis, etc. **For Interactive Dashboard:**
+1. **Add Crime Types slicer** from the calculated table
+2. **Use universal measures** - they respond to slicer selection
+3. **Single set of visuals** works for all crime types
+
+---
+
+## 💡 **Performance Comparison**
+
+### **❌ Multiple Individual Queries Approach:**
+- **6 separate data loads** - slower refresh
+- **6x memory usage** - larger file size
+- **6 sets of relationships** - complex model
+- **Maintenance nightmare** - update 6 places for changes
+
+### **✅ Single Query + Dynamic Filtering:**
+- **1 data load** - fast refresh
+- **Optimal memory usage** - compressed single table
+- **Simple relationships** - easy to manage
+- **Update once** - applies everywhere
+
+---
+
+## 🚀 **Quick Start Implementation**
+
+### **Priority 1: Test with One Crime Type (Today)**
+1. **Update your ALL_CRIMES query** with Crime_Category column
+2. **Create one test report page** with page-level filter
+3. **Add basic visuals** (count card, map, time chart)
+4. **Verify filtering works** correctly
+
+### **Priority 2: Scale to All Crime Types (Tomorrow)**
+1. **Duplicate report page** for each crime type
+2. **Update page-level filters** for each crime category
+3. **Test navigation** between pages
+4. **Validate data consistency** across all reports
+
+### **Priority 3: Add Interactive Dashboard (Next Week)**
+1. **Create Crime Types slicer table**
+2. **Build universal dashboard** with slicer control
+3. **Add advanced analytics** (trends, comparisons, heat maps)
+4. **Test user experience** with stakeholders
+
+---
+
+## 🎯 **Bottom Line Recommendation**
+
+**Use ONE master ALL_CRIMES query with Crime_Category column + page-level filters or slicers for visualization control. **
+
+This approach gives you:
+- ✅ **Better performance** than multiple queries
+- ✅ **Easier maintenance** than duplicated logic  
+- ✅ **More flexibility** for analysis
+- ✅ **Consistent results** across all reports
+- ✅ **Professional user experience** for command staff
+
+**Your existing M Code already has most of the logic - just need to add the Crime_Category column and implement proper filtering in the visuals! **
+````
+
+## 🎯 **Direct Answer: Use ONE Master Query**
+
+**Recommendation**: Use your existing **ALL_CRIMES** query with a **Crime_Category** column, then filter visually in Power BI rather than creating 6 separate queries. ### **✅ Key Benefits:**
+
+**Performance:**
+- **Faster refresh** - One query loads faster than 6
+- **Less memory** - No data duplication 
+- **Better compression** - Power BI optimizes single tables
+
+**Maintenance:**
+- **Single source of truth** - Update logic once
+- **Easier debugging** - One place to fix issues
+- **Consistent calculations** - All DAX works across crime types
+
+### **🔧 Implementation Steps:**
+
+**1. Add Crime_Category to ALL_CRIMES Query:**
+```powerquery-m
+// Add this after your data cleaning steps
+AddCrimeCategory = Table.AddColumn(YourData, "Crime_Category", each
+    let
+        UpperIncident = Text.Upper([IncidentType] ? ? "") in
+        if Text.Contains(UpperIncident, "MOTOR VEHICLE THEFT") then "Motor Vehicle Theft"
+        else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "AUTO") then "Burglary - Auto"
+        else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "COMMERCIAL") then "Burglary - Commercial"
+        else if Text.Contains(UpperIncident, "BURGLARY") and Text.Contains(UpperIncident, "RESIDENCE") then "Burglary - Residence"  
+        else if Text.Contains(UpperIncident, "ROBBERY") then "Robbery"
+        else if Text.Contains(UpperIncident, "SEXUAL") then "Sexual Offenses"
+        else "Other"
+)
+```
+
+**2. Create Visuals with Page-Level Filters:**
+- **Page 1**: Motor Vehicle Theft (filter Crime_Category = "Motor Vehicle Theft")
+- **Page 2**: Burglary Auto (filter Crime_Category = "Burglary - Auto")
+- **Page 3**: Etc. for each crime type
+
+**3. Use Universal DAX Measures:**
+```dax
+Total_Crimes = COUNTROWS(ALL_CRIMES)
+Avg_Response_Time = AVERAGE(ALL_CRIMES[Time_Response_Minutes])
+```
+
+These measures automatically filter based on the page context - no need for crime-specific versions! ### **🚀 Result:**
+- **One data model** serving all 6 crime types
+- **Consistent visualizations** across all reports
+- **Easy maintenance** and updates
+- **Professional performance** for your 115+ member department
+
+This approach eliminates the need for duplicate queries while providing better functionality and easier maintenance. ## Prompt:
+7/24/2025, 2:36:02 PM
+
+> File: paste.txt
+
+attached is the current m code for CAD_RMS_Match
+I added the geo json from arcgis and dax_scrpa_time.txt to the project knowledge. I want to use the CAD_RMS_Matched query for setting up visuals. the dashboard will not be viewed online rather I will be exporting to a pdf. I need to set up a page for each of the following 
+Burglary - Auto
+Burglary - Commercial and Burglary - Residence combined data on same page and visuals
+Robbery
+Motor Vehicle Theft
+Sexual Offenses (any incident that contains "Sexual")
+I will only be mapping incidents that have a Period value of 7-Day
+
+I have DAX Studio installed, would this allow more complex DAX? Would this allow for bulk import of DAX? if bulk import is not possible with the software can we use TMDL
+
+
+
+## Response:
+7/24/2025, 2:37:19 PM
+
+Looking at your requirements and the M Code you've provided, I can help you set up an efficient dashboard structure for PDF export with the specific crime category pages you need. **project_knowledge_search**
+
+*Request*
+
+````javascript
+{
+  "query": "DAX Studio TMDL bulk import measures Power BI crime categories Period 7-Day"
+}
+````
+
+*Response*
+
+````plaintext
+SCRPA_Place_Time_Master_Transcript.txt
+hours of debugging
+✅ Maintains workflow: PowerPoint integration works with either source
+✅ Status visibility: Always know which charts are available
+This way you can deliver reports on time while still fixing the ArcGIS integration in the background! Walk me through adding the DAX
+Edit
+I'll walk you through adding the DAX measures step by step in Power BI. 📊 STEP-BY-STEP DAX SETUP
+Step 1: Open Your Power BI File and Access DAX
+Open your Power BI file: Time_SCRPA_Master_Macro.pbix
+Go to Data view (table icon on left sidebar) or Report view
+Look at the Fields panel on the right side
+Find your ALL_CRIMES table (should show your Crime_Category column now)
+Step 2: Create the Time Period DAX Measure
+Right-click on ALL_CRIMES table in the Fields panel
+Select "New measure"
+Type this DAX formula in the formula bar:
+DAX
+Time Period =
+VAR HourValue = HOUR('ALL_CRIMES'[Incident Time])
+RETURN
+SWITCH(
+TRUE(),
+HourValue >= 0 && HourValue <= 3, "00:00-03:59 Early Morning",
+HourValue >= 4 && HourValue <= 7, "04:00-07:59 Morning",
+HourValue >= 8 && HourValue <= 11, "08:00-11:59 Midday",
+HourValue >= 12 && HourValue <= 15, "12:00-15:59 Afternoon",
+HourValue >= 16 && HourValue <= 19, "16:00-19:59 Evening",
+HourValue >= 20 && HourValue <= 23, "20:00-23:59 Night",
+"Unknown"
+)
+Press Enter to save the measure
+You should see "Time Period" appear under ALL_CRIMES with a calculator icon (📊)
+Step 3: Create the Period Classification DAX Measure
+Right-click on ALL_CRIMES table again
+Select "New measure"
+Type this DAX formula:
+DAX
+Period Classification =
+VAR IncidentDate = 'ALL_CRIMES'[Incident Date]
+VAR Today = TODAY()
+VAR DaysFromToday = DATEDIFF(IncidentDate, Today, DAY)
+VAR StartOfYear = DATE(YEAR(Today), 1, 1)
+RETURN
+SWITCH(
+TRUE(),
+IncidentDate >= Today - 6, "7-Day",
+IncidentDate >= Today - 27, "28-Day",
+IncidentDate >= StartOfYear, "YTD",
+"Historical"
+)
+Press Enter to save
+You should see "Period Classification" appear under ALL_CRIMES
+Step 4: Test the Measures
+Go to Report view (report icon on left sidebar)
+Add a Table visual:
+Drag Crime_Category to Values
+Drag Time Period to Values
+Drag Period Classification to Values
+You should see data showing the time periods and classifications
+Step 5: Create Your First Chart
+Add a Clustered Column Chart
+Configure the chart:
+X-Axis: Drag Time Period here
+Y-Axis: Drag Case Number here (or any ID field for count)
+Legend: Drag Period Classification here
+Filters: Drag Crime_Category to Filters pane
+Filter to one crime type:
+Click the Crime_Category filter
+Check only "Motor Vehicle Theft" (or whichever you want to test)
+Click Apply filter
+Step 6: Format the Chart to Match Your Style
+Select the chart and go to Format pane (paint roller icon)
+Da
+````
+
+````plaintext
+SCRPA_Place_Time_Master_Transcript.txt
+COUNTROWS('ALL_CRIMES'), 'ALL_CRIMES'[Period Classification] = "7-Day")
+VAR IncidentText = IF(IncidentCount = 1, "incident", "incidents")
+RETURN IncidentCount & " " & IncidentText & " recorded (7-day period)"
+🎨 Visual Configuration Instructions
+For Pattern Offenders/Suspects (8.33" W × 1.98" H)
+Add Text Box visuals for each measure
+Use these hex colors:
+Title:
+#0c233D (dark blue)
+Status text:
+#666666 (gray)
+Analysis period:
+#0c233D (dark blue)
+Font sizes:
+Title: 16pt, Bold
+Status: 12pt, Regular
+Analysis period: 10pt, Regular
+Pattern text: 10pt, Italic
+For Crime Title Card (5.29" W × 4.09" H)
+Add Text Box visuals
+Use hex color:
+#0c233D for title
+Font sizes:
+Crime Title: 24pt, Bold
+Subtitle: 14pt, Regular
+Count: 16pt, Bold
+Center align all text
+🔧 Implementation Steps
+Create each DAX measure in your ALL_CRIMES table
+Add Card visuals and assign each measure
+Format the cards to remove borders and backgrounds
+Position and size according to your specifications
+Apply the hex color #0c233D to titles
+These measures will automatically update based on your current date and selected crime type filter!

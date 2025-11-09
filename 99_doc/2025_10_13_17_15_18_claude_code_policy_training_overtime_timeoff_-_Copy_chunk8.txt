@@ -1,0 +1,671 @@
+141 +          df2 = df_like.replace({r"[\$,]": ""}, regex=True)
+       142 +          return df2.apply(pd.to_numeric,
+           + errors="coerce").fillna(0.0)
+       143 +
+       144 +      summary_lines = []
+       145 +
+       146 +      # 1) Delivery (Cost by Delivery Method)
+       147        try:
+       148            samp_del =
+             pd.read_csv(cfg["samples"]["delivery_csv"])
+       149            samp_del = samp_del.set_index("Delivery_Type")
+       150            out_del  = delivery.copy()
+       151 -          # Align common columns only
+       152 -          common
+           -   = [c for c in samp_del.columns if c in out_del.columns]
+       153 -          diff = (out_del[common].round(2) - samp_del[commo
+           - n].replace("$","",regex=True).applymap(lambda x:
+           - float(str(x).replace(",","")) if str(x).strip()!="$0" else
+           -  0.0)).abs()
+       154 -          diff_sum = diff.to_numpy().sum()
+       155 -          diff.to_csv(qc_dir/"diff_delivery.csv")
+       151 +
+       152 +          common_cols
+           +   = [c for c in samp_del.columns if c in out_del.columns]
+       153 +          base = out_del[common_cols].round(2)
+       154 +          comp = _to_numeric_frame(samp_del[common_cols])
+       155 +
+       156 +          diff = (base - comp).abs()
+       157 +          diff_sum = float(diff.to_numpy().sum())
+       158 +          diff.to_csv(qc_dir / "diff_delivery.csv",
+           + index=True)
+       159 +          summary_lines.append(f"Delivery diff (sum abs):
+           + {diff_sum:.2f}")
+       160            if strict and diff_sum > 0.01:
+       161 -              raise AssertionError(f"Delivery backfill
+           -  mismatch (sum abs diff={diff_sum})")
+       161 +              raise AssertionError(f"Delivery backfill
+           +  mismatch (sum abs diff={diff_sum:.2f})")
+       162        except Exception as e:
+       163 -          (qc_dir/
+           -  "_warning_delivery.txt").write_text(str(e),
+           -  encoding="utf-8")
+       163 +          (qc_dir /
+           +  "_warning_delivery.txt").write_text(str(e),
+           +  encoding="utf-8")
+       164 +          summary_lines.append(f"Delivery check warning:
+           + {e}")
+       165
+       166 -      # 2) Metrics
+       166 +      # 2) Metrics (Training Metrics Comprehensive Report)
+       167        try:
+       168            samp_met =
+             pd.read_csv(cfg["samples"]["metrics_csv"])
+       169 -          samp_met = samp_met.rename(columns={samp_met.colu
+           - mns[0]:"Training"}).set_index("Training")
+       169 +          # First column is the training row label;
+           + normalize its header to 'Training'
+       170 +          samp_met =
+           + samp_met.rename(columns={samp_met.columns[0]:
+           + "Training"}).set_index("Training")
+       171            out_met  = metrics.set_index("Training")
+       172 -          common = [c for c in samp_met.columns if c in
+           - out_met.columns]
+       173 -          d2 = (out_met[common].round(2) - samp_met[common]
+           - .replace("$","",regex=True).applymap(lambda x:
+           - float(str(x).replace(",","")) if str(x).strip()!="$0" else
+           -  0.0)).abs()
+       174 -          d2_sum = d2.to_numpy().sum()
+       175 -          d2.to_csv(qc_dir/"diff_metrics.csv")
+       176 -          if strict and d2_sum > 0.01:
+       177 -              raise AssertionError(f"Metrics backfill
+           - mismatch (sum abs diff={d2_sum})")
+       172 +
+       173 +          common_cols = [c for c in samp_met.columns if c
+           + in out_met.columns]
+       174 +          base = out_met[common_cols].round(2)
+       175 +          comp = _to_numeric_frame(samp_met[common_cols])
+       176 +
+       177 +          diff2 = (base - comp).abs()
+       178 +          diff2_sum = float(diff2.to_numpy().sum())
+       179 +          diff2.to_csv(qc_dir / "diff_metrics.csv",
+           + index=True)
+       180 +          summary_lines.append(f"Metrics diff (sum abs):
+           + {diff2_sum:.2f}")
+       181 +          if strict and diff2_sum > 0.01:
+       182 +              raise AssertionError(f"Metrics backfill
+           + mismatch (sum abs diff={diff2_sum:.2f})")
+       183        except Exception as e:
+       184 -          (qc_dir/
+           -  "_warning_metrics.txt").write_text(str(e),
+           -  encoding="utf-8")
+       184 +          (qc_dir /
+           +  "_warning_metrics.txt").write_text(str(e),
+           +  encoding="utf-8")
+       185 +          summary_lines.append(f"Metrics check warning:
+           + {e}")
+       186
+       187        # Acceptance checks (optional)
+       188        acc = cfg.get("acceptance", {})
+       189        target = acc.get("check_handgun_qual_0925_equals")
+       190        if target is not None and "09-25" in metrics.columns:
+       191 -          val = metrics.loc[metrics["Training"]==
+           -  "Handgun Qual Attendees","09-25"].sum()
+       192 -          if strict and float(val) != float(target):
+       191 +          val = float(metrics.loc[metrics["Training"] ==
+           +  "Handgun Qual Attendees", "09-25"].sum())
+       192 +          summary_lines.append(f"Handgun Qual Attendees
+           + 09-25: {val} (target {target})")
+       193 +          if strict and val != float(target):
+       194                raise AssertionError(f"Expected Handgun Qual
+             Attendees 09-25 == {target}, got {val}")
+       195
+       196 +      # Write a small summary file
+       197 +      (qc_dir /
+           + "_summary.txt").write_text("\n".join(summary_lines),
+           + encoding="utf-8")
+       198 +
+       199        # -------------------
+       200        # Write outputs
+       201        # -------------------
+
+● Done! The QC block has been updated in
+  policy_training_etl.py:src/policy_training_etl.py:134-197
+
+  Changes:
+  - Replaced deprecated applymap() with apply(pd.to_numeric, ...) in the
+  _to_numeric_frame() helper
+  - Added summary_lines list to collect QC results
+  - Enhanced error messages with .2f formatting
+  - Creates qc/_summary.txt with all diff totals and acceptance checks
+
+  Run run_etl.bat to execute the pipeline without FutureWarning messages. > Cursor AI — Add Prior-Month Exports + Freeze Period + Acceptance Suite
+
+Files to modify:
+
+configs\config.yaml
+
+src\policy_training_etl.py
+
+1) Patch configs\config.yaml (add these keys)
+
+Append under your existing settings:
+
+# Testing / control
+freeze_to_period: null     # e.g., "09-25" to lock the window + "prior
+month" to a fixed period
+accept_tolerance: 0.01     # numeric tolerance for acceptance checks
+
+# Additional acceptance tests (optional)
+# Check specific TRAINING rows for a period in the metrics sheet
+acceptance_rows:
+  - period: "09-25"
+    training: "Handgun Qual Attendees"
+    equals: 28
+
+# Check specific DELIVERY rows for a period in the delivery sheet (costs)
+# Example below is just a template; add real numbers if desired
+acceptance_delivery: []
+#  - period: "08-25"
+#    delivery_type: "In-Person"
+#    equals: 12345.67
+
+# Extra output sheets (names)
+sheets_extra:
+  delivery_prior: "Delivery_Prior_Month"
+  metrics_prior:  "Training_Metrics_Prior_Month"
+  inperson_prior: "InPerson_Prior_Month_List"
+
+2) Patch src\policy_training_etl.py
+
+Task A — Compute window with optional freeze_to_period
+
+Find where end_m / start_m are computed (rolling window). Replace that
+section with:
+
+# -------------------
+# Rolling window (supports freeze_to_period)
+# -------------------
+freeze = cfg.get("freeze_to_period")  # e.g., "09-25" or None
+if freeze:
+    mm = int(freeze[:2]); yy = int(freeze[-2:])
+    yy = 2000 + yy if yy < 70 else 1900 + yy
+    end_m = pd.Timestamp(year=yy, month=mm, day=1)  # last completed month
+ = frozen
+else:
+    end_m = last_completed_month() if excl_curr else
+pd.Timestamp.today().normalize().replace(day=1)
+
+start_m = end_m - pd.offsets.DateOffset(months=roll_n-1)
+
+def in_window(p):
+    if not isinstance(p, str) or len(p) != 5:
+        return False
+    m = int(p[:2]); y = int(p[-2:])
+    y = 2000 + y if y < 70 else 1900 + y
+    d = pd.Timestamp(year=y, month=m, day=1)
+    return (d >= start_m) and (d <= end_m)
+
+df = df[df["Period"].apply(in_window)]
+prior_period = f"{end_m.month:02d}-{str(end_m.year)[-2:]}"  # used for
+prior-month-only exports
+
+
+Task B — Add prior-month-only exports
+
+Right after you build the three main outputs (log_clean, delivery,
+metrics) and before “Regression checks”, insert:
+
+# -------------------
+# Prior-month-only slices (for visuals that must mirror previous month
+exactly)
+# -------------------
+# 1) Delivery prior month — keep just prior_period column
+if prior_period in delivery.columns:
+    delivery_prior = delivery[[prior_period]].copy()
+    delivery_prior = delivery_prior.rename(columns={prior_period:
+prior_period})  # same name
+else:
+    delivery_prior = delivery.copy()  # fallback (should include at least
+something)
+
+# 2) Metrics prior month — single column for prior_period
+if prior_period in metrics.columns:
+    metrics_prior = metrics[["Training", prior_period]].copy()
+else:
+    metrics_prior = metrics[["Training"]].copy()
+
+# 3) In-Person prior month list — detail list for visual 1 (if you ever
+want to bind to ETL output)
+inperson_prior = (
+    log_clean.loc[
+        (log_clean["Period"] == prior_period) &
+(log_clean["Delivery_Type"] == "In-Person"),
+        ["Course Name", "Course Duration", "Total Cost", "Course
+Attendees"]
+    ]
+    .rename(columns={
+        "Course Duration": "CourseDuration",
+        "Total Cost": "TotalCost",
+        "Course Attendees": "AttendeesCount"
+    })
+    .copy()
+)
+
+
+Task C — Extend acceptance checks (rows + delivery + tolerance)
+
+In the QC / acceptance section, after you read acc = cfg.get("acceptance",
+ {}), add:
+
+tol = float(cfg.get("accept_tolerance", 0.01))
+
+# Acceptance: list of specific training rows per period (metrics sheet)
+for rule in cfg.get("acceptance_rows", []):
+    per = rule.get("period")
+    trn = rule.get("training")
+    exp = rule.get("equals")
+    if per and trn and (per in metrics.columns):
+        got = float(metrics.loc[metrics["Training"] == trn, per].sum())
+        summary_lines.append(f"[ACCEPT] Metrics '{trn}' {per}: got
+{got:.2f}, target {exp}")
+        if strict and abs(got - float(exp)) > tol:
+            raise AssertionError(f"Acceptance fail (metrics): {trn} {per}
+got {got} != {exp} (tol {tol})")
+
+# Acceptance: delivery by period (costs)
+for rule in cfg.get("acceptance_delivery", []):
+    per = rule.get("period")
+    dty = rule.get("delivery_type")
+    exp = rule.get("equals")
+    if per and dty and (per in delivery.columns):
+        # delivery is indexed by Delivery_Type
+        if dty in delivery.index:
+            got = float(delivery.loc[dty, per])
+            summary_lines.append(f"[ACCEPT] Delivery '{dty}' {per}: got
+{got:.2f}, target {exp}")
+            if strict and abs(got - float(exp)) > tol:
+                raise AssertionError(f"Acceptance fail (delivery): {dty}
+{per} got {got} != {exp} (tol {tol})")
+
+
+Task D — Write the extra sheets to the workbook
+
+In the final write_excel_multi(...) call, add these frames (use the names
+from sheets_extra in config):
+
+sheets = cfg["sheets"]
+extra = cfg.get("sheets_extra", {})
+write_excel_multi(cfg["output_excel"], {
+    sheets["log_clean"]: log_clean,
+    sheets["delivery"]:  delivery.reset_index(),
+    sheets["metrics"]:   metrics,
+    # Extra prior-month sheets:
+    extra.get("delivery_prior", "Delivery_Prior_Month"):
+delivery_prior.reset_index(),
+    extra.get("metrics_prior",  "Training_Metrics_Prior_Month"):
+metrics_prior,
+    extra.get("inperson_prior", "InPerson_Prior_Month_List"):
+inperson_prior
+})
+
+3) (Optional) Tiny README note for Power BI
+
+Add to README.md under Power BI:
+
+- Visual 2 (Cost by Delivery Method): use either
+  - Delivery_Cost_By_Month (history), or
+  - Delivery_Prior_Month (single-month mirror of the latest completed
+month). - Visual 3 (Training Metrics Comprehensive): use either
+  - Training_Metrics_Matrix (history), or
+  - Training_Metrics_Prior_Month (single-month mirror). - Visual 1 (In-Person list): you can keep your existing workbook query, or
+ bind to
+  InPerson_Prior_Month_List from the ETL outputs. ● I'll patch both files to add the prior-month exports, freeze period
+  functionality, and enhanced acceptance suite. ● Read(configs\config.yaml)
+  ⎿  Read 26 lines (ctrl+o to expand)
+
+● Update(configs\config.yaml)
+  ⎿  Updated configs\config.yaml with 24 additions
+       23      log_clean: "Training_Log_Clean"
+       24      delivery:  "Delivery_Cost_By_Month"
+       25      metrics:   "Training_Metrics_Matrix"
+       26 +
+       27 +  # Testing / control
+       28 +  freeze_to_period: null     # e.g., "09-25" to lock the
+          + window + "prior month" to a fixed period
+       29 +  accept_tolerance: 0.01     # numeric tolerance for
+          + acceptance checks
+       30 +
+       31 +  # Additional acceptance tests (optional)
+       32 +  # Check specific TRAINING rows for a period in the metrics
+          +  sheet
+       33 +  acceptance_rows:
+       34 +    - period: "09-25"
+       35 +      training: "Handgun Qual Attendees"
+       36 +      equals: 28
+       37 +
+       38 +  # Check specific DELIVERY rows for a period in the
+          + delivery sheet (costs)
+       39 +  # Example below is just a template; add real numbers if
+          + desired
+       40 +  acceptance_delivery: []
+       41 +  #  - period: "08-25"
+       42 +  #    delivery_type: "In-Person"
+       43 +  #    equals: 12345.67
+       44 +
+       45 +  # Extra output sheets (names)
+       46 +  sheets_extra:
+       47 +    delivery_prior: "Delivery_Prior_Month"
+       48 +    metrics_prior:  "Training_Metrics_Prior_Month"
+       49 +    inperson_prior: "InPerson_Prior_Month_List"
+
+● Update(src\policy_training_etl.py)
+  ⎿  Updated src\policy_training_etl.py with 13 additions and 3 removals
+       53        )
+       54
+       55        # -------------------
+       56 -      # Rolling window
+       56 +      # Rolling window (supports freeze_to_period)
+       57        # -------------------
+       58 -      end_m = last_completed_month() if excl_curr else
+          - pd.Timestamp.today().normalize().replace(day=1)
+       58 +      freeze = cfg.get("freeze_to_period")  # e.g., "09-25"
+          + or None
+       59 +      if freeze:
+       60 +          mm = int(freeze[:2]); yy = int(freeze[-2:])
+       61 +          yy = 2000 + yy if yy < 70 else 1900 + yy
+       62 +          end_m = pd.Timestamp(year=yy, month=mm, day=1)  #
+          + last completed month = frozen
+       63 +      else:
+       64 +          end_m = last_completed_month() if excl_curr else
+          + pd.Timestamp.today().normalize().replace(day=1)
+       65 +
+       66        start_m = end_m -
+            pd.offsets.DateOffset(months=roll_n-1)
+       67 +
+       68        def in_window(p):
+       69 -          if not isinstance(p, str): return False
+       69 +          if not isinstance(p, str) or len(p) != 5:
+       70 +              return False
+       71            m = int(p[:2]); y = int(p[-2:])
+       72            y = 2000 + y if y < 70 else 1900 + y
+       73            d = pd.Timestamp(year=y, month=m, day=1)
+       74            return (d >= start_m) and (d <= end_m)
+       75
+       76        df = df[df["Period"].apply(in_window)]
+       77 +      prior_period =
+          + f"{end_m.month:02d}-{str(end_m.year)[-2:]}"  # used for
+          + prior-month-only exports
+       78
+       79        # ===============================
+       80        # Output 1: Training_Log_Clean
+
+● Update(src\policy_training_etl.py)
+  ⎿  Updated src\policy_training_etl.py with 30 additions
+       141        metrics = pd.concat(rows,
+             ignore_index=True).fillna(0.0)
+       142        metrics["Total"] =
+             metrics.drop(columns=["Training"]).sum(axis=1)
+       143
+       144 +      # -------------------
+       145 +      # Prior-month-only slices (for visuals that must
+           + mirror previous month exactly)
+       146 +      # -------------------
+       147 +      # 1) Delivery prior month — keep just prior_period
+           + column
+       148 +      if prior_period in delivery.columns:
+       149 +          delivery_prior = delivery[[prior_period]].copy()
+       150 +          delivery_prior =
+           + delivery_prior.rename(columns={prior_period:
+           + prior_period})  # same name
+       151 +      else:
+       152 +          delivery_prior = delivery.copy()  # fallback
+           + (should include at least something)
+       153 +
+       154 +      # 2) Metrics prior month — single column for
+           + prior_period
+       155 +      if prior_period in metrics.columns:
+       156 +          metrics_prior = metrics[["Training",
+           + prior_period]].copy()
+       157 +      else:
+       158 +          metrics_prior = metrics[["Training"]].copy()
+       159 +
+       160 +      # 3) In-Person prior month list — detail list for
+           + visual 1 (if you ever want to bind to ETL output)
+       161 +      inperson_prior = (
+       162 +          log_clean.loc[
+       163 +              (log_clean["Period"] == prior_period) &
+           + (log_clean["Delivery_Type"] == "In-Person"),
+       164 +              ["Course Name", "Course Duration", "Total
+           + Cost", "Course Attendees"]
+       165 +          ]
+       166 +          .rename(columns={
+       167 +              "Course Duration": "CourseDuration",
+       168 +              "Total Cost": "TotalCost",
+       169 +              "Course Attendees": "AttendeesCount"
+       170 +          })
+       171 +          .copy()
+       172 +      )
+       173 +
+       174        # ===============================
+       175        # Regression checks vs 08-25 CSVs
+       176        # ===============================
+
+● Update(src\policy_training_etl.py)
+  ⎿  Updated src\policy_training_etl.py with 27 additions
+       226
+       227        # Acceptance checks (optional)
+       228        acc = cfg.get("acceptance", {})
+       229 +      tol = float(cfg.get("accept_tolerance", 0.01))
+       230 +
+       231 +      # Legacy acceptance check
+       232        target = acc.get("check_handgun_qual_0925_equals")
+       233        if target is not None and "09-25" in metrics.columns:
+       234            val = float(metrics.loc[metrics["Training"] ==
+             "Handgun Qual Attendees", "09-25"].sum())
+     ...
+       233            if strict and val != float(target):
+       234                raise AssertionError(f"Expected Handgun Qual
+             Attendees 09-25 == {target}, got {val}")
+       235
+       236 +      # Acceptance: list of specific training rows per
+           + period (metrics sheet)
+       237 +      for rule in cfg.get("acceptance_rows", []):
+       238 +          per = rule.get("period")
+       239 +          trn = rule.get("training")
+       240 +          exp = rule.get("equals")
+       241 +          if per and trn and (per in metrics.columns):
+       242 +              got = float(metrics.loc[metrics["Training"]
+           + == trn, per].sum())
+       243 +              summary_lines.append(f"[ACCEPT] Metrics
+           + '{trn}' {per}: got {got:.2f}, target {exp}")
+       244 +              if strict and abs(got - float(exp)) > tol:
+       245 +                  raise AssertionError(f"Acceptance fail
+           + (metrics): {trn} {per} got {got} != {exp} (tol {tol})")
+       246 +
+       247 +      # Acceptance: delivery by period (costs)
+       248 +      for rule in cfg.get("acceptance_delivery", []):
+       249 +          per = rule.get("period")
+       250 +          dty = rule.get("delivery_type")
+       251 +          exp = rule.get("equals")
+       252 +          if per and dty and (per in delivery.columns):
+       253 +              # delivery is indexed by Delivery_Type
+       254 +              if dty in delivery.index:
+       255 +                  got = float(delivery.loc[dty, per])
+       256 +                  summary_lines.append(f"[ACCEPT] Delivery
+           + '{dty}' {per}: got {got:.2f}, target {exp}")
+       257 +                  if strict and abs(got - float(exp)) >
+           + tol:
+       258 +                      raise AssertionError(f"Acceptance
+           + fail (delivery): {dty} {per} got {got} != {exp} (tol
+           + {tol})")
+       259 +
+       260        # Write a small summary file
+       261        (qc_dir /
+             "_summary.txt").write_text("\n".join(summary_lines),
+             encoding="utf-8")
+       262
+
+● Update(src\policy_training_etl.py)
+  ⎿  Updated src\policy_training_etl.py with 6 additions and 1 removal
+       267        # Write outputs
+       268        # -------------------
+       269        sheets = cfg["sheets"]
+       270 +      extra = cfg.get("sheets_extra", {})
+       271        write_excel_multi(cfg["output_excel"], {
+       272            sheets["log_clean"]: log_clean,
+       273            sheets["delivery"]:  delivery.reset_index(),
+       274 -          sheets["metrics"]:   metrics
+       274 +          sheets["metrics"]:   metrics,
+       275 +          # Extra prior-month sheets:
+       276 +          extra.get("delivery_prior",
+           + "Delivery_Prior_Month"): delivery_prior.reset_index(),
+       277 +          extra.get("metrics_prior",
+           + "Training_Metrics_Prior_Month"): metrics_prior,
+       278 +          extra.get("inperson_prior",
+           + "InPerson_Prior_Month_List"): inperson_prior
+       279        })
+       280
+       281    if __name__ == "__main__":
+
+● Read(README.md)
+  ⎿  Read 108 lines (ctrl+o to expand)
+
+● Update(README.md)
+  ⎿  Updated README.md with 6 additions and 3 removals
+        3    **Source of truth:** `Policy_Training_Monthly.xlsx` (sheet
+             `Training_Log`)
+        4
+        5    **Outputs (single Excel):**
+            `output/policy_training_outputs.xlsx`
+        6 -  - `Training_Log_Clean`
+        7 -  - `Delivery_Cost_By_Month`
+        8 -  - `Training_Metrics_Matrix`
+        6 +  - `Training_Log_Clean` - Full cleaned log for all periods
+        7 +  - `Delivery_Cost_By_Month` - Historical costs by delivery
+          + method (13 months)
+        8 +  - `Training_Metrics_Matrix` - Historical training metrics
+          + (13 months)
+        9 +  - `Delivery_Prior_Month` - Single-month snapshot (prior
+          + completed month only)
+       10 +  - `Training_Metrics_Prior_Month` - Single-month snapshot
+          + (prior completed month only)
+       11 +  - `InPerson_Prior_Month_List` - Detail list of In-Person
+          + courses for prior month
+       12
+       13    **Behavior**
+       14    - Rolling **13 full months**, **excludes current month**. ● Update(README.md)
+  ⎿  Updated README.md with 2 additions and 1 removal
+       11    - `InPerson_Prior_Month_List` - Detail list of In-Person
+            courses for prior month
+       12
+       13    **Behavior**
+       14 -  - Rolling **13 full months**, **excludes current month**. 14 +  - Rolling **13 full months**, **excludes current month**
+          +   (configurable with `freeze_to_period`). 15    - Normalizes Delivery (Online/In-Person), Platform
+            (Handgun/Rifle/Sub-Gun/Taser), and Qualification. 16    - Recomputes `Total Cost` from `Course per Attendee ×
+            Course Attendees` when missing. 17    - **Regression checks** against provided **08-25** CSVs;
+            diffs in `qc/`. 18 +  - **Acceptance tests** for specific metrics/delivery
+          + values with configurable tolerance. 19
+       20    **Run**
+       21    ```
+
+● Update(README.md)
+  ⎿  Updated README.md with 9 additions and 3 removals
+       23    ```
+       24
+       25    **Power BI**
+       26 -  - Point Visual 2 (Cost by Delivery Method) to sheet
+          - `Delivery_Cost_By_Month`. 27 -  - Point Visual 3 (Training Metrics Comprehensive Report)
+          - to sheet `Training_Metrics_Matrix`. 28 -  - Keep Visual 1 as is, or bind to `Training_Log_Clean`
+          - filtered to prior month + In-Person. 26 +  - **Visual 1** (In-Person Training List): Use either:
+       27 +    - Your existing workbook query, or
+       28 +    - `InPerson_Prior_Month_List` sheet from ETL outputs
+       29 +  - **Visual 2** (Cost by Delivery Method): Use either:
+       30 +    - `Delivery_Cost_By_Month` (13-month historical view),
+          + or
+       31 +    - `Delivery_Prior_Month` (single-month mirror of latest
+          + completed month)
+       32 +  - **Visual 3** (Training Metrics Comprehensive): Use
+          + either:
+       33 +    - `Training_Metrics_Matrix` (13-month historical view),
+          + or
+       34 +    - `Training_Metrics_Prior_Month` (single-month mirror of
+          +  latest completed month)
+       35
+       36    ---
+       37
+
+● Update(README.md)
+  ⎿  Updated README.md with 4 additions and 2 removals
+        99
+       100    Edit `configs/config.yaml` to:
+       101    - Change source workbook path
+       102 -  - Adjust rolling months window
+       103 -  - Add more acceptance checks
+       102 +  - Adjust rolling months window (default: 13)
+       103 +  - Set `freeze_to_period` (e.g., `"09-25"`) to lock window
+           +  to a specific month for testing
+       104 +  - Configure `accept_tolerance` for numeric acceptance
+           + checks (default: 0.01)
+       105 +  - Add acceptance tests in `acceptance_rows` (metrics) or
+           + `acceptance_delivery` (costs)
+       106    - Modify output paths
+       107
+       108    ## Lookup Tables
+
+● Perfect! All patches completed successfully. Here's what was added:
+
+  ✅ Summary of Changes
+
+  1. configs/config.yaml - New Settings
+
+  - freeze_to_period: null - Lock window to specific period (e.g.,
+  "09-25") for testing
+  - accept_tolerance: 0.01 - Numeric tolerance for acceptance checks
+  - acceptance_rows - List of metrics acceptance tests
+  - acceptance_delivery - List of delivery cost acceptance tests
+  - sheets_extra - Names for 3 new prior-month sheets
+
+  2. src/policy_training_etl.py - Enhanced ETL
+
+  Task A - Freeze Period Logic (lines 55-77)
+  - Supports freeze_to_period to lock window to a specific month
+  - Computes prior_period for single-month exports
+  - Enhanced validation for period format
+
+  Task B - Prior-Month Exports (lines 144-172)
+  - Delivery_Prior_Month - Single column for prior month costs
+  - Training_Metrics_Prior_Month - Single column for prior month metrics
+  - InPerson_Prior_Month_List - Detail rows for In-Person training
+
+  Task C - Enhanced Acceptance Suite (lines 227-261)
+  - Configurable tolerance via accept_tolerance
+  - List-based acceptance tests for metrics rows
+  - List-based acceptance tests for delivery costs
+  - Summary includes all acceptance check results
+
+  Task D - Write Extra Sheets (lines 266-279)
+  - Outputs now include 6 sheets total (3 historical + 3 prior-month)
+
+  3. README.md - Updated Documentation
+
+  - Lists all 6 output sheets with descriptions
+  - Power BI guidance for historical vs. single-month views
+  - Configuration section explains new freeze/acceptance features
+
+  🎯 Output Sheets Summary
+
+  Historical (13 months):
+  1. Training_Log_Clean - Full detail log
+  2. Delivery_Cost_By_Month - Costs over time
+  3. Training_Metrics_Matrix - Metrics over time
+
+  Prior Month Only:
+  4. Delivery_Prior_Month - Single-month cost snapshot
+  5. Training_Metrics_Prior_Month - Single-month metrics snapshot
+  6. InPerson_Prior_Month_List - In-Person detail list
+
+  Run run_etl.bat to test! > Patch for column aliases (fix “missing data”)
+
+File:
+C:\Users\carucci_r\OneDrive - City of Hackensack\02_ETL_Scripts\Policy_Tra
+ining_Monthly\src\policy_training_etl.py
+
+Goal:
+Add robust alias mapping so we always find the real columns (e.g., Start
+Date vs Start date). This will let the ETL compute Period, keep rows in
+the 13-month window, and populate all sheets. Instructions:
+Open policy_training_etl.py. Right after we load the Excel (the line that
+reads df = pd.read_excel(...)) and before any conversions or the
+rolling-window filter, insert the block below. Then adjust the few lines
+noted further down.

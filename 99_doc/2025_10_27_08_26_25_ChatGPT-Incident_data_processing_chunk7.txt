@@ -1,0 +1,103 @@
+(${reg}${regState?, ${regState}:''}):''].filter(Boolean).join(' '))}</li>:''}
+          ${suspect?<li><strong>Suspect Description:</strong> ${suspect}</li>:<li><strong>Suspect Description:</strong> <span class="badge-incomplete">Data Incomplete</span></li>}
+          ${victim?<li><strong>Victim:</strong> ${victim}</li>:''}
+          ${entry?<li><strong>Point/Means of Entry:</strong> ${entry}</li>:''}
+          ${method?<li><strong>Method:</strong> ${method}</li>:''}
+          ${bullets?<li><strong>Narrative (key points):</strong><ul>${bullets}</ul></li>:''}
+          ${lossHigh.length?<li><strong>Loss (highlights):</strong><ul>${lossHigh.map(x=><li>${x}</li>).join('')}</ul></li>:''}
+          <li><strong>Loss (total):</strong> ${totalStr}</li>
+          <li><strong>Status:</strong> ${safe(status,'Data Incomplete')}</li>
+        </ul>;
+      container.appendChild(card);
+    });
+  });
+
+  // Summary table (computed totals)
+  const tbody=document.querySelector('#summaryTable tbody'); tbody.innerHTML='';
+  inWindow.forEach(r=>{
+    const caseNum=(r['Case Number']||r['Case_Number']||r['Case #']||'').trim()||'—';
+    const dt=r.__dt?fmtDT(r.__dt):'—';
+    const total = computeLossTotal(r);
+    const totalStr = (total==null ? (isNaN(+r['Total Value Stolen']) ? (r['Total Value Stolen']||'N/A') : fmtMoney(r['Total Value Stolen'])) : '$'+total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+    const status=r['Case_Status']||r['Status']||'';
+    const tr=document.createElement('tr');
+    tr.innerHTML=
+      <td>${caseNum}</td>
+      <td>${CONFIG.cycleName}</td>
+      <td>${r.__type}</td>
+      <td>${dt}</td>
+      <td class="money">${totalStr}</td>
+      <td>${status||'—'}</td>;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('summaryTable').style.display='';
+
+  // Remove loader so it won't appear in saved/printed output
+  const b=document.getElementById('builder'); if(b) b.remove();
+}
+
+/* Hook up loader */
+document.getElementById('csvFile').addEventListener('change', async (e)=>{
+  const f=e.target.files?. [0]; if(!f) return;
+  const text=await f.text(); buildBriefing(text);
+});
+</script>
+</body>
+</html>
+
+## Response:
+Thought for a second
+
+Thought for 23s
+
+I don’t see a system **log** in what you pasted—the content is an HTML briefing template for cycle C10W38. Without the log lines (timestamps, INFO/WARN/ERROR messages), I can’t compute counts, runtimes, or file outputs. Still, here’s a tight pass that (1) flags the gap and (2) gives you exactly what I’ll extract once you paste the log, plus immediate checks you can run now. EXECUTIVE SUMMARY
+-----------------
+
+*   **Overall status:** ⚠️ **Indeterminate** — no SCRPA/ArcPy log lines provided to confirm success/failure. *   **Total processing time:** **Unknown** — start/stop markers missing. *   **Crime types processed:** **Unknown** — no component-by-component lines present. TECHNICAL ISSUES IDENTIFIED
+---------------------------
+
+*   **Critical errors:** Not assessable (no ERROR/Traceback in the text you shared). *   **Warnings impacting quality:** Not assessable (no WARNING entries). *   **Missing/failed imports/config:** The briefing HTML suggests the CSV loader was used, but that isn’t a pipeline log. *   **Environment issues:** No ArcGIS/ArcPy/Python environment traces included. COMPONENT STATUS
+----------------
+
+*   **Maps (MXDs/LYRX/PNG):** Unknown. *   **Charts:** Unknown. *   **Incident Tables:** Unknown. *   **PowerPoint assembly:** Unknown. _(All require log lines like “Exported map …”, “Chart saved …”, “Appended slide …” etc. )_
+
+DATA QUALITY ASSESSMENT
+-----------------------
+
+*   **Date range target:** Should be **2025-06-17 → 2025-06-23** (per your prompt). *   **Observed:** The pasted HTML shows a different cycle (C10W38, **2025-09-16 → 2025-09-22**). That’s a product page, not a June log. *   **Feature counts per type / SQL filters:** Not assessable without log statements like “Selected X features for motor vehicle theft (7-day).”
+
+OUTPUT VERIFICATION
+-------------------
+
+*   **Files created:** Unknown — no `Saved:` / `Exported:`/ `Wrote file:` lines. *   **Sizes & formats:** Unknown. *   **Missing components:** Unknown. RECOMMENDED NEXT ACTIONS
+------------------------
+
+1. **Paste the actual SCRPA run log** (the console/file output from your ArcPy/PowerShell/Notebook run). *   If you have multiple logs, include: pipeline controller, map export, chart export, table build, PowerPoint build. 2. **Quick self-check meanwhile (no code):**
+    *   Confirm the **7-day params** used match **2025-06-17 → 2025-06-23**. *   Verify the **output folder** timestamp and whether maps/charts/PPT were produced for _each_ crime type. *   Open one exported map image and one chart to confirm symbology/fonts. 3. **When you paste the log, I’ll return:**
+    *   Total runtime, success/failed component counts, per-crime-type feature counts, and a checklist of missing outputs—plus exact fixes. * * *
+
+### If you want me to pull this automatically next time
+
+Drop in the run log and I’ll compute the following from the raw text (no changes needed to your pipeline):
+
+*   **Runtime:** from the first `START` to final `DONE`/`END` or last timestamp. *   **Success/Fail by component:** count `Exported`, `Saved`, `Appended`, `Created` vs `ERROR/Traceback/Failed`. *   **Per-type 7-day counts:** parse lines like `Selected (\d+) features` for each SQL where-clause. *   **Outputs:** list every file path captured by `Saved:`/`Wrote:` with size (if logged) and flag missing expected artifacts (maps, charts, tables, PPT). If your logs don’t print feature counts, I’ll infer from phrases like `rows returned` or `Layer has 0 features after filter`. * * *
+
+Follow-ups you asked me to include
+----------------------------------
+
+### For Failed Components — targeted fixes
+
+Once I see the error text, I’ll give exact code/config changes. Typical patterns (so you can check now):
+
+*   **ArcPy “Layer not found”** → ensure the map document’s layer names match the script (`arcpy.mapping.ListLayers` lookup), or reference by index; verify workspace and data source paths. *   **“000732: Input Features: Dataset … does not exist”** → set `arcpy.env.workspace` to your GDB, pre-check `arcpy.Exists(path)`, and guard with try/except to log a clear message. *   **PPT assembly errors (python-pptx)** → verify the master layout names; wrap image insertion with existence checks and replace missing charts with placeholder slides so the run doesn’t fail hard. ### For Performance Issues — runtime optimization
+
+*   **Cache selections**: build the 7-day subset once per crime type, reuse for maps/charts/tables. *   **Limit I/O**: write temp layers to in-memory workspace (`in_memory`) where possible. *   **Batch exports**: set `arcpy.env.parallelProcessingFactor = "100%"` when safe, and reduce DPI for draft maps (e.g., 150 DPI) during dev. *   **Avoid full refresh of symbology**: keep a LYRX template and only swap the data source. ### For Data Validation — 2025-06-17 to 2025-06-23
+
+*   Confirm the log uses **Incident\_Date between 2025-06-17 00:00:00 and 2025-06-23 23:59:59** (inclusive). *   Cross-check per-type counts against RMS or a quick SQL (`COUNT(*) WHERE date BETWEEN … AND … AND type = '…'`). *   Ensure the cycle label matches your calendar (`CxxWyy`) for that week. ### For Output Quality — pre-brief checks
+
+*   **Maps**: correct grid/zone overlays, legend item counts, north arrow, scale bar, and that the 7-day title dates are June 17–23, 2025. *   **Charts**: y-axis uses whole numbers, categories ordered, consistent color palette across crime types. *   **Tables**: totals match chart counts; dates sorted ascending; currency has two decimals. *   **PPT**: section order = Sexual → MVT → Robbery → Burg-Comm → Burg-Res → Other; footer shows correct cycle and date range. * * *
+
+### Ready to process
+
+Paste the SCRPA **system log** (or attach the `.txt`) and I’ll return the full analysis with exact numbers, failed components, and specific code/config fixes. ---
+Powered by [ChatGPT Exporter](https://www.chatgptexporter.com)

@@ -1,0 +1,548 @@
+````
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+ype", "CADNotes", "Cycle"}),
+    
+    // Load Crime Category Reference Table
+    CrimeReferenceTable = Csv.Document(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\_Reference_Tables\CallTypeUpdatedWithCategories.csv"),[Delimiter=",", Columns=3, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+    #"Promoted Headers Ref" = Table.PromoteHeaders(CrimeReferenceTable, [PromoteAllScalars=true]),
+    #"Clean Reference Headers" = Table.TransformColumnNames(#"Promoted Headers Ref", each Text.Trim(_)),
+    #"Fixed Reference Column Names" = Table.RenameColumns(#"Clean Reference Headers", {{"Incident _Type", "Incident_Type"}}, MissingField.Ignore),
+
+    // Fix column name mapping to match actual data structure
+    #"Fixed Column Names" = Table.RenameColumns(#"Expanded FileData", {
+        {"ReportNumberNew", "Case Number"},
+        {"Incident", "ALL_INCIDENTS"},
+        {"How Reported", "How_Reported"},
+        {"FullAddress2", "FullAddress"},
+        {"PDZone", "Zone"},
+        {"Time of Call", "Incident Time"},
+        {"Time Dispatched", "Time_Dispatched"},
+        {"Time Out", "Time_Out"},
+        {"Time In", "Time_In"},
+        {"Time Spent", "Time_Spent"},
+        {"Time Response", "Time_Response"},
+        {"Response Type", "Response_Type"},
+        {"CADNotes", "Narrative"}
+    }, MissingField.Ignore),
+    
+    // Basic data types for essential columns
+    #"Changed Type" = Table.TransformColumnTypes(#"Fixed Column Names", {
+        {"Source.Name", type text}, 
+        {"Case Number", type text}, 
+        {"ALL_INCIDENTS", type text},
+        {"FullAddress", type text},
+        {"Zone", Int64.Type},
+        {"Grid", type text},
+        {"Officer", type text},
+        {"Disposition", type text},
+        {"cY
+````
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+// 🕒 2025-07-15-17-35-00
+// Time_SCRPA_Analysis/fixed_all_crimes_query
+// Author: R. A. Carucci
+// Purpose: Complete ALL_CRIMES query with proper structure - no function parameters
+
+let
+    // Source folder with all RMS files
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA_RMS"),
+    #"Filtered Hidden Files" = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    
+    // Process each file individually without custom function
+    #"Added Custom" = Table.AddColumn(#"Filtered Hidden Files", "FileData", each
+        let
+            FileContent = [Content],
+            FileName = [Name],
+            
+            // Process based on file extension
+            ProcessedData = if Text.EndsWith(Text.Upper(FileName), ".XLSX") or Text.EndsWith(Text.Upper(FileName), ".XLSM") then
+                let
+                    Workbook = Excel.Workbook(FileContent, null, true),
+                    Sheet1 = Workbook{[Item="Sheet1",Kind="Sheet"]}[Data],
+                    Headers = Table.PromoteHeaders(Sheet1, [PromoteAllScalars=true])
+                in
+                    Headers
+            else if Text.EndsWith(Text.Upper(FileName), ".CSV") then
+                let
+                    CsvData = Csv.Document(FileContent, [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.None]),
+                    Headers = Table.PromoteHeaders(CsvData, [PromoteAllScalars=true])
+                in
+                    Headers
+            else
+                #table({"Error"}, {{"Unsupported file type"}})
+        in
+            ProcessedData
+    ),
+    
+    #"Renamed Columns" = Table.RenameColumns(#"Added Custom", {"Name", "Source.Name"}),
+    #"Removed Other Columns" = Table.SelectColumns(#"Renamed Columns", {"Source.Name", "FileData"}),
+    #"Expanded FileData" = Table.ExpandTableColumn(#"Removed Other Columns", "FileData", 
+        {"ReportNumberNew", "Incident", "How Reported", "FullAddress2", "PDZone", "Grid", 
+         "Time of Call", "cYear", "cMonth", "HourMinuetsCalc", "DayofWeek", 
+         "Time Dispatched", "Time Out", "Time In", "Time Spent", "Time Response", 
+         "Officer", "Disposition", "Response T
+````
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+time(20,0,0) then "Evening Peak (16:00–19:59)"
+            else "Night (20:00–23:59)", type text),
+    
+    // Add TimeOfDay Sort Order
+    #"Added TimeOfDay Sort Order" = Table.AddColumn(#"Added Enhanced_TimeOfDay", "TimeOfDay_SortOrder", each
+        let 
+            timeOfDay = [Enhanced_TimeOfDay]
+        in
+            if timeOfDay = "Early Morning (00:00–03:59)" then 1
+            else if timeOfDay = "Morning (04:00–07:59)" then 2
+            else if timeOfDay = "Morning Peak (08:00–11:59)" then 3
+            else if timeOfDay = "Afternoon (12:00–15:59)" then 4
+            else if timeOfDay = "Evening Peak (16:00–19:59)" then 5
+            else if timeOfDay = "Night (20:00–23:59)" then 6
+            else 99, Int64.Type),
+    
+    // Add calculated date columns
+    #"Added Day Name" = Table.AddColumn(#"Added TimeOfDay Sort Order", "Day Name", 
+        each if [INC_DATE] <> null then Date.DayOfWeekName([INC_DATE]) else null, type text),
+    #"Added Month Name" = Table.AddColumn(#"Added Day Name", "Month Name", 
+        each if [INC_DATE] <> null then Date.MonthName([INC_DATE]) else null, type text),
+    #"Added Year" = Table.AddColumn(#"Added Month Name", "Year", 
+        each if [INC_DATE] <> null then Date.Year([INC_DATE]) else null, Int64.Type),
+    #"Added Week of Year" = Table.AddColumn(#"Added Year", "Week of Year", 
+        each if [INC_DATE] <> null then Date.WeekOfYear([INC_DATE]) else null, Int64.Type),
+    #"Added Day" = Table.AddColumn(#"Added Week of Year", "Day", 
+        each if [INC_DATE] <> null then Date.Day([INC_DATE]) else null, Int64.Type),
+    
+    // Add enhanced BLOCK calculation
+    #"Added BLOCK_Enhanced" = Table.AddColumn(#"Added Day", "BLOCK_Enhanced", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+
+    // Add Crime Category using reference table lookup
+    #"Added Crime_Category" = Table.AddColumn(#"Added BLOCK_Enhanced", "Crime_Category", 
+        each let
+            matchedRow = Table.SelectRows(#"Fixed Reference Column Names", (r) => 
+                Text.Contains(Text.Upper([ALL_INCIDENTS] ? ? ""), Text.Upper(r[Incident_Type] ? ? ""))) in
+            if Table.RowCount(matchedRow) > 0 then matchedRow{0}[Category] else "Other", type text),
+            
+    // Add clean Officer Name
+    #"Added Clean_Officer" = Table.AddColumn(#"Added Crime_Category", "Clean_Officer", each
+        let
+            officerText = [Officer] ? ? ````
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+ear", Int64.Type},
+        {"cMonth", type text},
+        {"DayofWeek", type text},
+        {"Cycle", type text}
+    }),
+    
+    // Remove source name column
+    #"Removed Source" = Table.RemoveColumns(#"Changed Type", {"Source.Name"}, MissingField.Ignore),
+    
+    // Parse the "Incident Time" to extract date and time components
+    #"Added INC_DATE" = Table.AddColumn(#"Removed Source", "INC_DATE", each
+        let
+            incidentTimeText = [Incident Time],
+            parsedDateTime = try DateTime.FromText(incidentTimeText) otherwise null
+        in
+            if parsedDateTime <> null then Date.From(parsedDateTime) else null, type date),
+    
+    // Add INC_TIME from parsed datetime
+    #"Added INC_TIME" = Table.AddColumn(#"Added INC_DATE", "INC_TIME", each
+        let
+            incidentTimeText = [Incident Time],
+            parsedDateTime = try DateTime.FromText(incidentTimeText) otherwise null
+        in
+            if parsedDateTime <> null then Time.From(parsedDateTime) else null, type time),
+    
+    // Add Enhanced Time of Day categories
+    #"Added Enhanced_TimeOfDay" = Table.AddColumn(#"Added INC_TIME", "Enhanced_TimeOfDay", each
+        let 
+            timeValue = [INC_TIME]
+        in
+            if timeValue = null then "Unknown"
+            else if timeValue >= #time(0,0,0) and timeValue < #time(4,0,0) then "Early Morning (00:00–03:59)"
+            else if timeValue >= #time(4,0,0) and timeValue < #time(8,0,0) then "Morning (04:00–07:59)"
+            else if timeValue >= #time(8,0,0) and timeValue < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+            else if timeValue >= #time(12,0,0) and timeValue < #time(16,0,0) then "Afternoon (12:00–15:59)"
+            else if timeValue >= #time(16,0,0) and timeValue < #
+````
+
+````plaintext
+Fixed All_Crimes M Code with Proper Period Logic.txt
+// 🕒 2025-07-15-14-45-00
+// Time_SCRPA_Analysis/all_crimes_period_fix
+// Author: R. A. Carucci
+// Purpose: Fixed All_Crimes M Code with proper 7-Day/28-Day/YTD period assignment
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA_RMS"),
+    #"Filtered Hidden Files" = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    #"Invoke Custom Function" = Table.AddColumn(#"Filtered Hidden Files", "Transform File", each #"Transform FileB1"([Content])),
+    #"Renamed Columns" = Table.RenameColumns(#"Invoke Custom Function", {"Name", "Source.Name"}),
+    #"Removed Other Columns" = Table.SelectColumns(#"Renamed Columns", {"Source.Name", "Transform File"}),
+    
+    // Get sample file for column names
+    SampleFile = #"Filtered Hidden Files"{0}[Content],
+    SampleColumns = Table.ColumnNames(#"Transform FileB1"(SampleFile)),
+    #"Expanded Table Column" = Table.ExpandTableColumn(#"Removed Other Columns", "Transform File", SampleColumns),
+    
+    // Load Crime Category Reference Table
+    CrimeReferenceTable = Csv.Document(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\_Reference_Tables\CallTypeUpdatedWithCategories.csv"),[Delimiter=",", Columns=3, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+    #"Promoted Headers Ref" = Table.PromoteHeaders(CrimeReferenceTable, [PromoteAllScalars=true]),
+    #"Clean Reference Headers" = Table.TransformColumnNames(#"Promoted Headers Ref", each Text.Trim(_)),
+    #"Fixed Reference Column Names" = Table.RenameColumns(#"Clean Reference Headers", {{"Incident _Type", "Incident_Type"}}, MissingField.Ignore),
+
+    // *** CRITICAL: LOAD YOUR PERIOD REFERENCE TABLE ***
+    PeriodReferenceTable = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\7Day_28Day_Cycle_20250414.xlsx"), nul
+````
+
+````plaintext
+Fixed All_Crimes M Code with Proper Period Logic.txt
+  {"AllIncidents", "ALL_INCIDENTS"}
+    }, MissingField.Ignore),
+    
+    // Proper data types for essential columns only
+    #"Changed Type" = Table.TransformColumnTypes(#"Fixed Column Names", {
+        {"Source.Name", type text}, {"Case Number", type text}, {"IncDate", type date}, 
+        {"Incident Time", type datetime}, {"Incident Type_1", type text}, 
+        {"Incident Type_2", type text}, {"Incident Type_3", type text}, {"FullAddress", type text}, 
+        {"Grid", type text}, {"Zone", Int64.Type}, {"Narrative", type text}, 
+        {"Total Value Stolen", Currency.Type}, {"Total Value Recover", Currency.Type}, 
+        {"Registration 1", type text}, {"Make1", type text}, {"Model1", type text}, {"Reg State 1", type text}, 
+        {"Registration 2", type text}, {"Reg State 2", type text}, {"Make2", type text}, {"Model2", type text}, 
+        {"Reviewed By", type text}, {"Officer of Record", type text}, {"Squad", type text}, 
+        {"Det_Assigned", type text}, {"Case_Status", type text}, {"NibrsClassification", type text},
+        {"IncTime", type time}, {"StartOfHour", type time}, {"ALL_INCIDENTS", type text}
+    }),
+    
+    // Remove unnecessary columns but keep incident types for analysis
+    #"Removed Unnecessary Columns" = Table.RemoveColumns(#"Changed Type", {
+        "Source.Name", 
+        "Incident Date_Between", "Incident Time_Between", 
+        "Report Date", "Report Time",
+        "CASE_NUMBER_LENGTH",
+        "CompleteCalc",
+        "IncDate", "IncTime"  // Remove redund
+````
+
+````plaintext
+Complete ALL_CRIMES M Code - Drop-in Ready.txt
+// 🕒 2025-07-15-16-45-00
+// Time_SCRPA_Analysis/complete_all_crimes_final
+// Author: R. A. Carucci
+// Purpose: Complete ALL_CRIMES M Code with period assignment, timeofday sorting, and cascading date/time logic
+
+let
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\05_EXPORTS\_RMS\SCRPA_RMS"),
+    #"Filtered Hidden Files" = Table.SelectRows(Source, each [Attributes]?[Hidden]? <> true),
+    #"Invoke Custom Function" = Table.AddColumn(#"Filtered Hidden Files", "Transform File", each #"Transform FileB1"([Content])),
+    #"Renamed Columns" = Table.RenameColumns(#"Invoke Custom Function", {"Name", "Source.Name"}),
+    #"Removed Other Columns" = Table.SelectColumns(#"Renamed Columns", {"Source.Name", "Transform File"}),
+    
+    // Get sample file for column names
+    SampleFile = #"Filtered Hidden Files"{0}[Content],
+    SampleColumns = Table.ColumnNames(#"Transform FileB1"(SampleFile)),
+    #"Expanded Table Column" = Table.ExpandTableColumn(#"Removed Other Columns", "Transform File", SampleColumns),
+    
+    // Load Crime Category Reference Table
+    CrimeReferenceTable = Csv.Document(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Documents\Projects\T4_New\_Reference_Tables\CallTypeUpdatedWithCategories.csv"),[Delimiter=",", Columns=3, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+    #"Promoted Headers Ref" = Table.PromoteHeaders(CrimeReferenceTable, [PromoteAllScalars=true]),
+    #"Clean Reference Headers" = Table.TransformColumnNames(#"Promoted Headers Ref", each Text.Trim(_)),
+    #"Fixed Reference Column Names" = Table.RenameColumns(#"Clean Reference Headers", {{"Incident _Type", "Incident_Type"}}, MissingField.Ignore),
+
+    // Fix column name mapping from Transform File to expected format
+    #"Fixed Column Names" = Table.RenameColumns(#"Expanded Table Column", {
+        {"CaseNumber", "Case Number"},
+        {"IncidentTime", "Incident Time"},
+        {"IncidentDateBetween", "Incident Date_Between"},
+        {"IncidentTimeBetween", "Incident Time_Between"},
+        {"ReportDate", "Report Date"},
+        {"ReportTime", "Report Time"},
+        {"IncidentType1", "Inc
+````
+
+I can see from the project knowledge that your `ALL_CRIMES` table structure includes both column naming approaches. Looking at the M Code, it appears you have:
+
+1. A `BLOCK_Enhanced` column created from the enhanced calculation
+2. A `Block` column that might be an original/simpler column
+
+Since your DAX is working with `ALL_CRIMES[Block]` without errors, your current table structure has the `Block` column available. **✅ Your DAX is correct as-is! **
+
+The other DAX measures I mentioned would need these corrections:
+
+- **Peak_Hour**: Should use `ALL_CRIMES[Enhanced_TimeOfDay]` (if that column exists)
+- **Response time measures**: Use existing time response columns
+
+But since your `Top_Crime_Block` measure works perfectly with `ALL_CRIMES[Block]`, no changes are needed there. **🎯 Key Point**: Your actual table implementation has the `Block` column available, so the DAX measures referencing `ALL_CRIMES[Block]` will work correctly. The project knowledge shows multiple iterations of the M Code, and your current implementation clearly includes the `Block` column. So your current DAX is good to go - no fixes needed for the `Top_Crime_Block` measure! ## Prompt:
+7/22/2025, 12:37:30 PM
+
+TimeOfDay Reference is broke
+
+
+
+## Response:
+7/22/2025, 12:37:54 PM
+
+Let me search for the correct TimeOfDay column name in your ALL_CRIMES table:
+
+**project_knowledge_search**
+
+*Request*
+
+````javascript
+{
+  "query": "ALL_CRIMES TimeOfDay Enhanced_TimeOfDay column name actual"
+}
+````
+
+*Response*
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+time(20,0,0) then "Evening Peak (16:00–19:59)"
+            else "Night (20:00–23:59)", type text),
+    
+    // Add TimeOfDay Sort Order
+    #"Added TimeOfDay Sort Order" = Table.AddColumn(#"Added Enhanced_TimeOfDay", "TimeOfDay_SortOrder", each
+        let 
+            timeOfDay = [Enhanced_TimeOfDay]
+        in
+            if timeOfDay = "Early Morning (00:00–03:59)" then 1
+            else if timeOfDay = "Morning (04:00–07:59)" then 2
+            else if timeOfDay = "Morning Peak (08:00–11:59)" then 3
+            else if timeOfDay = "Afternoon (12:00–15:59)" then 4
+            else if timeOfDay = "Evening Peak (16:00–19:59)" then 5
+            else if timeOfDay = "Night (20:00–23:59)" then 6
+            else 99, Int64.Type),
+    
+    // Add calculated date columns
+    #"Added Day Name" = Table.AddColumn(#"Added TimeOfDay Sort Order", "Day Name", 
+        each if [INC_DATE] <> null then Date.DayOfWeekName([INC_DATE]) else null, type text),
+    #"Added Month Name" = Table.AddColumn(#"Added Day Name", "Month Name", 
+        each if [INC_DATE] <> null then Date.MonthName([INC_DATE]) else null, type text),
+    #"Added Year" = Table.AddColumn(#"Added Month Name", "Year", 
+        each if [INC_DATE] <> null then Date.Year([INC_DATE]) else null, Int64.Type),
+    #"Added Week of Year" = Table.AddColumn(#"Added Year", "Week of Year", 
+        each if [INC_DATE] <> null then Date.WeekOfYear([INC_DATE]) else null, Int64.Type),
+    #"Added Day" = Table.AddColumn(#"Added Week of Year", "Day", 
+        each if [INC_DATE] <> null then Date.Day([INC_DATE]) else null, Int64.Type),
+    
+    // Add enhanced BLOCK calculation
+    #"Added BLOCK_Enhanced" = Table.AddColumn(#"Added Day", "BLOCK_Enhanced", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+
+    // Add Crime Category using reference table lookup
+    #"Added Crime_Category" = Table.AddColumn(#"Added BLOCK_Enhanced", "Crime_Category", 
+        each let
+            matchedRow = Table.SelectRows(#"Fixed Reference Column Names", (r) => 
+                Text.Contains(Text.Upper([ALL_INCIDENTS] ? ? ""), Text.Upper(r[Incident_Type] ? ? ""))) in
+            if Table.RowCount(matchedRow) > 0 then matchedRow{0}[Category] else "Other", type text),
+            
+    // Add clean Officer Name
+    #"Added Clean_Officer" = Table.AddColumn(#"Added Crime_Category", "Clean_Officer", each
+        let
+            officerText = [Officer] ? ? ````
+
+````plaintext
+Fixed ALL_CRIMES M Code - Column Mapping Corrected.txt
+ear", Int64.Type},
+        {"cMonth", type text},
+        {"DayofWeek", type text},
+        {"Cycle", type text}
+    }),
+    
+    // Remove source name column
+    #"Removed Source" = Table.RemoveColumns(#"Changed Type", {"Source.Name"}, MissingField.Ignore),
+    
+    // Parse the "Incident Time" to extract date and time components
+    #"Added INC_DATE" = Table.AddColumn(#"Removed Source", "INC_DATE", each
+        let
+            incidentTimeText = [Incident Time],
+            parsedDateTime = try DateTime.FromText(incidentTimeText) otherwise null
+        in
+            if parsedDateTime <> null then Date.From(parsedDateTime) else null, type date),
+    
+    // Add INC_TIME from parsed datetime
+    #"Added INC_TIME" = Table.AddColumn(#"Added INC_DATE", "INC_TIME", each
+        let
+            incidentTimeText = [Incident Time],
+            parsedDateTime = try DateTime.FromText(incidentTimeText) otherwise null
+        in
+            if parsedDateTime <> null then Time.From(parsedDateTime) else null, type time),
+    
+    // Add Enhanced Time of Day categories
+    #"Added Enhanced_TimeOfDay" = Table.AddColumn(#"Added INC_TIME", "Enhanced_TimeOfDay", each
+        let 
+            timeValue = [INC_TIME]
+        in
+            if timeValue = null then "Unknown"
+            else if timeValue >= #time(0,0,0) and timeValue < #time(4,0,0) then "Early Morning (00:00–03:59)"
+            else if timeValue >= #time(4,0,0) and timeValue < #time(8,0,0) then "Morning (04:00–07:59)"
+            else if timeValue >= #time(8,0,0) and timeValue < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+            else if timeValue >= #time(12,0,0) and timeValue < #time(16,0,0) then "Afternoon (12:00–15:59)"
+            else if timeValue >= #time(16,0,0) and timeValue < #
+````
+
+````plaintext
+Complete ALL_CRIMES M Code - Drop-in Ready.txt
+, type text),
+    
+    // Add TimeOfDay Sort Order for proper chronological sorting in Power BI
+    #"Added TimeOfDay Sort Order" = Table.AddColumn(#"Added Enhanced_TimeOfDay", "TimeOfDay_SortOrder", each
+        let 
+            timeOfDay = [Enhanced_TimeOfDay]
+        in
+            if timeOfDay = "Early Morning (00:00–03:59)" then 1
+            else if timeOfDay = "Morning (04:00–07:59)" then 2
+            else if timeOfDay = "Morning Peak (08:00–11:59)" then 3
+            else if timeOfDay = "Afternoon (12:00–15:59)" then 4
+            else if timeOfDay = "Evening Peak (16:00–19:59)" then 5
+            else if timeOfDay = "Night (20:00–23:59)" then 6
+            else 99, Int64.Type),
+    
+    // Add other essential calculated columns
+    #"Added Day Name" = Table.AddColumn(#"Added TimeOfDay Sort Order", "Day Name", 
+        each if [INC_DATE] <> null then Date.DayOfWeekName([INC_DATE]) else null, type text),
+    #"Added Month Name" = Table.AddColumn(#"Added Day Name", "Month Name", 
+        each if [INC_DATE] <> null then Date.MonthName([INC_DATE]) else null, type text),
+    #"Added Year" = Table.AddColumn(#"Added Month Name", "Year", 
+        each if [INC_DATE] <> null then Date.Year([INC_DATE]) else null, Int64.Type),
+    #"Added Week of Year" = Table.AddColumn(#"Added Year", "Week of Year", 
+        each if [INC_DATE] <> null then Date.WeekOfYear([INC_DATE]) else null, Int64.Type),
+    #"Added Day" = Table.AddColumn(#"Added Week of Year", "Day", 
+        each if [INC_DATE] <> null then Date.Day([INC_DATE]) else null, Int64.Type),
+    
+    // Add enhanced BLOCK calculation
+    #"Added BLOCK_Enhanced" = Table.AddColumn(#"Added Day", "BLOCK_Enhanced", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+
+    // Add Crime Category using reference table lookup
+    #"Added Crime_Category" = Table.AddColumn(#"Added BLOCK_Enhanced", "Crime_Category", 
+        each let
+            // Try to match ALL_INCIDENTS with the reference table
+            matchedRow = Table.SelectRows(#"Fixed Reference Column Names", (r) => 
+                Text.Contains(Text.Upper([ALL_INCIDENTS] ? ? ""), Text.Upper(r[Incident_Type] ? ? ""))) ````
+
+````plaintext
+Complete ALL_CRIMES M Code - Drop-in Ready.txt
+< #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)", type text),
+    
+    // Add TimeOfDay Sort Order for proper chronological sorting in Power BI
+    #"Added TimeOfDay Sort Order" = Table.AddColumn(#"Added Enhanced_TimeOfDay", "TimeOfDay_SortOrder", each
+        let 
+            timeOfDay = [Enhanced_TimeOfDay]
+        in
+            if timeOfDay = "Early Morning (00:00–03:59)" then 1
+            else if timeOfDay = "Morning (04:00–07:59)" then 2
+            else if timeOfDay = "Morning Peak (08:00–11:59)" then 3
+            else if timeOfDay = "Afternoon (12:00–15:59)" then 4
+            else if timeOfDay = "Evening Peak (16:00–19:59)" then 5
+            else if timeOfDay = "Night (20:00–23:59)" then 6
+            else 99, Int64.Type),
+    
+    // Add other essential calculated columns
+    #"Added Day Name" = Table.AddColumn(#"Added TimeOfDay Sort Order", "Day Name", 
+        each if [INC_DATE] <> null then Date.DayOfWeekName([INC_DATE]) else null, type text),
+    #"Added Month Name" = Table.AddColumn(#"Added Day Name", "Month Name", 
+        each if [INC_DATE] <> null then Date.MonthName([INC_DATE]) else null, type text),
+    #"Added Year" = Table.AddColumn(#"Added Month Name", "Year", 
+        each if [INC_DATE] <> null then Date.Year([INC_DATE]) else null, Int64.Type),
+    #"Added Week of Year" = Table.AddColumn(#"Added Year", "Week of Year", 
+        each if [INC_DATE] <> null then Date.WeekOfYear([INC_DATE]) else null, Int64.Type),
+    #"Added Day" = Table.AddColumn(#"Added Week of Year", "Day", 
+        each if [INC_DATE] <> null then Date.Day([INC_DATE]) else null, Int64.Type),
+    
+    // Add enhanced BLOCK calculation
+    #"Added BLOCK_Enhanced" = Table.AddColumn(#"Added Day", "BLOCK_Enhanced", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+
+    // Add Crime Category using reference table lookup
+    #"Added Crime_Category" = Table.AddColumn(#"Added BLOCK_Enhanced", "Crime_Category", 
+        each let
+            // Try to match ALL_INCIDENTS with the reference table
+            matchedRow = Table.SelectRows(#"Fixed Reference Column Names", (r) => 
+                Text.Contains(Text.Upper([ALL_INCIDENTS] ? ? ""), Text.Upper(r[Incident_Type] ? ? ""))) ````
+
+````plaintext
+Simplified All_Crimes M Code - No Filtering Issues.txt
+Time] otherwise null,
+            
+            // Convert datetime to time if needed
+            extractTime = (value) => 
+                if value = null then null
+                else if Value.Type(value) = type time then value
+                else if Value.Type(value) = type datetime then Time.From(value)
+                else try Time.From(value) otherwise null
+        in
+            // Use first non-null time in priority order, converting as needed
+            if extractTime(primaryTime) <> null then extractTime(primaryTime)
+            else if extractTime(fallback1) <> null then extractTime(fallback1)
+            else if extractTime(fallback2) <> null then extractTime(fallback2)
+            else null, type time),
+    #"Added Enhanced_TimeOfDay" = Table.AddColumn(#"Added INC_TIME", "Enhanced_TimeOfDay", 
+        each [TimeOfDay], type text),
+    
+    // Add other essential calculated columns
+    #"Added Day Name" = Table.AddColumn(#"Added Enhanced_TimeOfDay", "Day Name", 
+        each if [INC_DATE] <> null then Date.DayOfWeekName([INC_DATE]) else null, type text),
+    #"Added Month Name" = Table.AddColumn(#"Added Day Name", "Month Name", 
+        each if [INC_DATE] <> null then Date.MonthName([INC_DATE]) else null, type text),
+    #"Added Year" = Table.AddColumn(#"Added Month Name", "Year", 
+        each if [INC_DATE] <> null then Date.Year([INC_DATE]) else null, Int64.Type),
+    #"Added Week of Year" = Table.AddColumn(#"Added Year", "Week of Year", 
+        each if [INC_DATE] <> null then Date.WeekOfYear([INC_DATE]) else null, Int64.Type),
+    #"Added Day" = Table.AddColumn(#"Added Week of Year", "Day", 
+        each if [INC_DATE] <> null then Date.Day([INC_DATE]) else null, Int64.Type),
+    
+    // Add enhanced BLOCK calculation
+    #"Added BLOCK_Enhanced" = Table.AddColumn(#"Added Day", "BLOCK_Enhanced", each
+        let
+            fullAddr = [FullAddress] ? ? "",
+            streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+            location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+        in
+            if streetNum <> null then 
+                location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+            else location & ", Unknown Block", type text),
+    
+    // Add Crime Category using reference table lookup
+    #"Added Crime_Category" = Table.AddColumn(#"Added BLOCK_Enhanced", "Crime_Category", 
+        each let
+            // Try to match ALL_INCIDENTS with the reference table
+            matchedRow = Table.SelectRows(#"Fixed Reference Column Names", (r) => 
+                Text.Contains(Text.Upper([ALL_INCIDENTS] ? ? ""), Text.Upper(r[Incident_Type] ? ? "")))

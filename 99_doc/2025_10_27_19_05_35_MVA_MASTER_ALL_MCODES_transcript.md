@@ -1,0 +1,838 @@
+# Mva Master All Mcodes
+
+**Processing Date:** 2025-10-27 19:05:35
+**Source File:** MVA_MASTER_ALL_MCODES.txt
+**Total Chunks:** 2
+
+---
+
+let
+    // === COMPSTAT EXECUTIVE SUMMARY ===
+    Source = MVA_MASTER,
+    
+    // Find the most recent month with data for CompStat reporting
+    LatestData = Table.SelectRows(Source, each [Month] <> null and [Year] <> null),
+    LatestDate = Table.Group(LatestData, {}, {{"MaxDate", each List.Max([IncDate]), type nullable date}}),
+    LatestMonth = if Table.RowCount(LatestDate) > 0 then Date.Month(LatestDate{0}[MaxDate]) else Date.Month(DateTime.LocalNow()),
+    LatestYear = if Table.RowCount(LatestDate) > 0 then Date.Year(LatestDate{0}[MaxDate]) else Date.Year(DateTime.LocalNow()),
+    
+    // === COMPSTAT TIMEFRAMES ===
+    // Current Reporting Period (Latest Complete Month)
+    CurrentMonth = LatestMonth,
+    CurrentYear = LatestYear,
+    
+    // Previous Month Comparison
+    PrevMonth = if CurrentMonth = 1 then 12 else CurrentMonth - 1,
+    PrevYear = if CurrentMonth = 1 then CurrentYear - 1 else CurrentYear,
+    
+    // Same Month Previous Year (Year-over-Year)
+    SameMonthPrevYear = CurrentMonth,
+    PrevYearForSameMonth = CurrentYear - 1,
+    
+    // Year-to-Date Current vs Previous
+    YTDCurrentYear = CurrentYear,
+    YTDPreviousYear = CurrentYear - 1,
+    
+    // === DATA FILTERING ===
+    CurrentMonthData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Month] = CurrentMonth and [Year] = CurrentYear),
+    
+    PrevMonthData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Month] = PrevMonth and [Year] = PrevYear),
+    
+    SameMonthLastYearData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Month] = SameMonthPrevYear and [Year] = PrevYearForSameMonth),
+    
+    YTDCurrentData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Year] = YTDCurrentYear and [Month] <= CurrentMonth),
+    
+    YTDPreviousData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Year] = YTDPreviousYear and [Month] <= CurrentMonth),
+    
+    // === KEY PERFORMANCE INDICATORS ===
+    
+    // 1. TRAFFIC VOLUME METRICS
+    CurrentMVAs = Table.RowCount(CurrentMonthData),
+    PrevMVAs = Table.RowCount(PrevMonthData),
+    SameMonthLastYear = Table.RowCount(SameMonthLastYearData),
+    YTDCurrent = Table.RowCount(YTDCurrentData),
+    YTDPrevious = Table.RowCount(YTDPreviousData),
+    
+    MVAChangeMonth = try (CurrentMVAs - PrevMVAs) / PrevMVAs otherwise 0,
+    MVAChangeYear = try (CurrentMVAs - SameMonthLastYear) / SameMonthLastYear otherwise 0,
+    MVAChangeYTD = try (YTDCurrent - YTDPrevious) / YTDPrevious otherwise 0,
+    
+    // 2. INJURY CRASH METRICS
+    CurrentInjuries = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    PrevInjuries = List.Count(List.Select(PrevMonthData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    SameMonthLastYearInjuries = List.Count(List.Select(SameMonthLastYearData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    YTDCurrentInjuries = List.Count(List.Select(YTDCurrentData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    YTDPreviousInjuries = List.Count(List.Select(YTDPreviousData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    
+    InjuryChangeMonth = try (CurrentInjuries - PrevInjuries) / PrevInjuries otherwise 0,
+    InjuryChangeYear = try (CurrentInjuries - SameMonthLastYearInjuries) / SameMonthLastYearInjuries otherwise 0,
+    InjuryChangeYTD = try (YTDCurrentInjuries - YTDPreviousInjuries) / YTDPreviousInjuries otherwise 0,
+    
+    // 3. HIT-AND-RUN METRICS
+    CurrentHitRuns = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    PrevHitRuns = List.Count(List.Select(PrevMonthData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    SameMonthLastYearHitRuns = List.Count(List.Select(SameMonthLastYearData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    YTDCurrentHitRuns = List.Count(List.Select(YTDCurrentData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    YTDPreviousHitRuns = List.Count(List.Select(YTDPreviousData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    
+    HitRunChangeMonth = try (CurrentHitRuns - PrevHitRuns) / PrevHitRuns otherwise 0,
+    HitRunChangeYear = try (CurrentHitRuns - SameMonthLastYearHitRuns) / SameMonthLastYearHitRuns otherwise 0,
+    HitRunChangeYTD = try (YTDCurrentHitRuns - YTDPreviousHitRuns) / YTDPreviousHitRuns otherwise 0,
+    
+    // === ADDITIONAL OPERATIONAL METRICS ===
+    
+    // 4. PLATOON PERFORMANCE
+    PlatoonA_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "A")),
+    PlatoonB_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "B")),
+    Traffic_Cases = List.Count(List.Select(CurrentMonthData[Squad], each _ <> null and _ = "TFR")),
+    
+    // 5. RUSH HOUR IMPACT (Split AM/PM) - Fixed Table vs List issue
+    RushHourAM = Table.RowCount(Table.SelectRows(CurrentMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    RushHourPM = Table.RowCount(Table.SelectRows(CurrentMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    TotalRushHour = RushHourAM + RushHourPM,
+    RushHourRate = if CurrentMVAs > 0 then TotalRushHour / CurrentMVAs else 0,
+    
+    // 6. TIME OF DAY BREAKDOWN
+    MorningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    EveningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    // 7. CASE CLOSURE PERFORMANCE
+    TrafficCases = Table.SelectRows(CurrentMonthData, each [Squad] <> null and [Squad] = "TFR"),
+    TrafficSupplements = Table.SelectRows(TrafficCases, each [IsSupplement] <> null and [IsSupplement] = true),
+    ClosedCases = List.Count(List.Select(TrafficSupplements[FinalCaseStatus], each _ <> null and _ <> "Open" and _ <> "Case_Status")),
+    ClosureRate = if Table.RowCount(TrafficSupplements) > 0 then ClosedCases / Table.RowCount(TrafficSupplements) else 0,
+    
+    // 8. TOP CRASH LOCATIONS - Enhanced with historical comparisons
+    LocationAnalysis = Table.Group(
+        Table.SelectRows(CurrentMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SortedLocations = Table.Sort(LocationAnalysis, {{"CrashCount", Order.Descending}}),
+    TopLocation = if Table.RowCount(SortedLocations) > 0 then SortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    HotspotLocation = TopLocation[Block],
+    HotspotCount = TopLocation[CrashCount],
+    
+    // Previous Month Top Location Analysis
+    PrevLocationAnalysis = Table.Group(
+        Table.SelectRows(PrevMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    PrevSortedLocations = Table.Sort(PrevLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    PrevTopLocation = if Table.RowCount(PrevSortedLocations) > 0 then PrevSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    PrevHotspotLocation = PrevTopLocation[Block],
+    PrevHotspotCount = PrevTopLocation[CrashCount],
+    
+    // Same Month Last Year Top Location Analysis
+    SameMonthLocationAnalysis = Table.Group(
+        Table.SelectRows(SameMonthLastYearData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SameMonthSortedLocations = Table.Sort(SameMonthLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    SameMonthTopLocation = if Table.RowCount(SameMonthSortedLocations) > 0 then SameMonthSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    SameMonthHotspotLocation = SameMonthTopLocation[Block],
+    SameMonthHotspotCount = SameMonthTopLocation[CrashCount],
+    
+    // YTD Top Location Analysis
+    YTDLocationAnalysis = Table.Group(
+        Table.SelectRows(YTDCurrentData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    YTDSortedLocations = Table.Sort(YTDLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    YTDTopLocation = if Table.RowCount(YTDSortedLocations) > 0 then YTDSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    YTDHotspotLocation = YTDTopLocation[Block],
+    YTDHotspotCount = YTDTopLocation[CrashCount],
+    
+    // YTD Previous Year Top Location Analysis
+    YTDPrevLocationAnalysis = Table.Group(
+        Table.SelectRows(YTDPreviousData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    YTDPrevSortedLocations = Table.Sort(YTDPrevLocationAnalysis, {{"CrashCount", Order.Descending}}),
+    YTDPrevTopLocation = if Table.RowCount(YTDPrevSortedLocations) > 0 then YTDPrevSortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    YTDPrevHotspotLocation = YTDPrevTopLocation[Block],
+    YTDPrevHotspotCount = YTDPrevTopLocation[CrashCount],
+    
+    // Location-based change calculations
+    LocationChangeMonth = try (HotspotCount - PrevHotspotCount) / PrevHotspotCount otherwise 0,
+    LocationChangeYear = try (HotspotCount - SameMonthHotspotCount) / SameMonthHotspotCount otherwise 0,
+    LocationChangeYTD = try (YTDHotspotCount - YTDPrevHotspotCount) / YTDPrevHotspotCount otherwise 0,
+    
+    // Previous Month Operational Data - Fixed Table vs List issue
+    PrevRushHourAM = Table.RowCount(Table.SelectRows(PrevMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    PrevRushHourPM = Table.RowCount(Table.SelectRows(PrevMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    PrevTotalRushHour = PrevRushHourAM + PrevRushHourPM,
+    PrevMorningPeak = List.Count(List.Select(PrevMonthData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    PrevEveningPeak = List.Count(List.Select(PrevMonthData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    PrevTrafficCases = Table.SelectRows(PrevMonthData, each [Squad] <> null and [Squad] = "TFR"),
+    PrevTrafficSupplements = Table.SelectRows(PrevTrafficCases, each [IsSupplement] <> null and [IsSupplement] = true),
+    PrevClosedCases = List.Count(List.Select(PrevTrafficSupplements[FinalCaseStatus], each _ <> null and _ <> "Open" and _ <> "Case_Status")),
+    PrevClosureRate = if Table.RowCount(PrevTrafficSupplements) > 0 then PrevClosedCases / Table.RowCount(PrevTrafficSupplements) else 0,
+    
+    // Same Month Last Year Operational Data - Fixed Table vs List issue
+    SameMonthRushHourAM = Table.RowCount(Table.SelectRows(SameMonthLastYearData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    SameMonthRushHourPM = Table.RowCount(Table.SelectRows(SameMonthLastYearData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    SameMonthTotalRushHour = SameMonthRushHourAM + SameMonthRushHourPM,
+    SameMonthMorningPeak = List.Count(List.Select(SameMonthLastYearData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    SameMonthEveningPeak = List.Count(List.Select(SameMonthLastYearData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    // YTD Operational Metrics
+    YTDRushHourAM = Table.RowCount(Table.SelectRows(YTDCurrentData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    YTDRushHourPM = Table.RowCount(Table.SelectRows(YTDCurrentData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    YTDMorningPeak = List.Count(List.Select(YTDCurrentData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    YTDEveningPeak = List.Count(List.Select(YTDCurrentData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    YTDPrevRushHourAM = Table.RowCount(Table.SelectRows(YTDPreviousData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    YTDPrevRushHourPM = Table.RowCount(Table.SelectRows(YTDPreviousData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    YTDPrevMorningPeak = List.Count(List.Select(YTDPreviousData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    YTDPrevEveningPeak = List.Count(List.Select(YTDPreviousData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    
+    // YTD Change Calculations
+    YTDRushAMChange = try (YTDRushHourAM - YTDPrevRushHourAM) / YTDPrevRushHourAM otherwise 0,
+    YTDRushPMChange = try (YTDRushHourPM - YTDPrevRushHourPM) / YTDPrevRushHourPM otherwise 0,
+    YTDMorningChange = try (YTDMorningPeak - YTDPrevMorningPeak) / YTDPrevMorningPeak otherwise 0,
+    YTDEveningChange = try (YTDEveningPeak - YTDPrevEveningPeak) / YTDPrevEveningPeak otherwise 0,
+
+    // === ENHANCED COMPSTAT TABLE WITH OPERATIONAL METRICS ===
+    PrimaryCompStatTable = #table(
+        type table [
+            Metric = text, 
+            Current_Month = text, 
+            Previous_Month = text, 
+            Same_Month_Last_Year = text,
+            Month_vs_Month = text,
+            Month_vs_Year_Ago = text,
+            YTD_Current = text,
+            YTD_Previous = text,
+            YTD_Change = text,
+            Status = text
+        ],
+        {
+            {"Total MVAs", 
+             Text.From(CurrentMVAs), Text.From(PrevMVAs), Text.From(SameMonthLastYear), 
+             Text.From(Number.Round(MVAChangeMonth * 100, 1)) & "%", Text.From(Number.Round(MVAChangeYear * 100, 1)) & "%", 
+             Text.From(YTDCurrent), Text.From(YTDPrevious), Text.From(Number.Round(MVAChangeYTD * 100, 1)) & "%", 
+             if MVAChangeMonth > 0 then "↑ Month Increase" else "↓ Month Decrease"},
+            
+            {"Injury Crashes", 
+             Text.From(CurrentInjuries), Text.From(PrevInjuries), Text.From(SameMonthLastYearInjuries), 
+             Text.From(Number.Round(InjuryChangeMonth * 100, 1)) & "%", Text.From(Number.Round(InjuryChangeYear * 100, 1)) & "%",
+             Text.From(YTDCurrentInjuries), Text.From(YTDPreviousInjuries), Text.From(Number.Round(InjuryChangeYTD * 100, 1)) & "%",
+             if InjuryChangeMonth > 0 then "⚠️ Month Increase" else "✅ Month Decrease"},
+            
+            {"Hit-and-Runs", 
+             Text.From(CurrentHitRuns), Text.From(PrevHitRuns), Text.From(SameMonthLastYearHitRuns), 
+             Text.From(Number.Round(HitRunChangeMonth * 100, 1)) & "%", Text.From(Number.Round(HitRunChangeYear * 100, 1)) & "%",
+             Text.From(YTDCurrentHitRuns), Text.From(YTDPreviousHitRuns), Text.From(Number.Round(HitRunChangeYTD * 100, 1)) & "%",
+             if HitRunChangeMonth > 0 then "⚠️ Month Increase" else "✅ Month Decrease"},
+            
+            {"Rush Hour AM (6-9AM)", 
+             Text.From(RushHourAM), Text.From(PrevRushHourAM), Text.From(SameMonthRushHourAM), 
+             Text.From(Number.Round(try (RushHourAM - PrevRushHourAM) / PrevRushHourAM * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (RushHourAM - SameMonthRushHourAM) / SameMonthRushHourAM * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDRushHourAM), Text.From(YTDPrevRushHourAM), Text.From(Number.Round(YTDRushAMChange * 100, 1)) & "%",
+             if RushHourAM > PrevRushHourAM then "⚠️ AM Increase" else "✅ AM Decrease"},
+            
+            {"Rush Hour PM (3-6PM)", 
+             Text.From(RushHourPM), Text.From(PrevRushHourPM), Text.From(SameMonthRushHourPM), 
+             Text.From(Number.Round(try (RushHourPM - PrevRushHourPM) / PrevRushHourPM * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (RushHourPM - SameMonthRushHourPM) / SameMonthRushHourPM * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDRushHourPM), Text.From(YTDPrevRushHourPM), Text.From(Number.Round(YTDRushPMChange * 100, 1)) & "%",
+             if RushHourPM > PrevRushHourPM then "⚠️ PM Increase" else "✅ PM Decrease"},
+            
+            {"Morning Peak (8AM-12PM)", 
+             Text.From(MorningPeak), Text.From(PrevMorningPeak), Text.From(SameMonthMorningPeak), 
+             Text.From(Number.Round(try (MorningPeak - PrevMorningPeak) / PrevMorningPeak * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (MorningPeak - SameMonthMorningPeak) / SameMonthMorningPeak * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDMorningPeak), Text.From(YTDPrevMorningPeak), Text.From(Number.Round(YTDMorningChange * 100, 1)) & "%",
+             if MorningPeak > PrevMorningPeak then "⚠️ Morning Increase" else "✅ Morning Decrease"},
+            
+            {"Evening Peak (4PM-8PM)", 
+             Text.From(EveningPeak), Text.From(PrevEveningPeak), Text.From(SameMonthEveningPeak), 
+             Text.From(Number.Round(try (EveningPeak - PrevEveningPeak) / PrevEveningPeak * 100 otherwise 0, 1)) & "%", 
+             Text.From(Number.Round(try (EveningPeak - SameMonthEveningPeak) / SameMonthEveningPeak * 100 otherwise 0, 1)) & "%",
+             Text.From(YTDEveningPeak), Text.From(YTDPrevEveningPeak), Text.From(Number.Round(YTDEveningChange * 100, 1)) & "%",
+             if EveningPeak > PrevEveningPeak then "⚠️ Evening Increase" else "✅ Evening Decrease"},
+            
+            {"Traffic Closure Rate", 
+             Text.From(Number.Round(ClosureRate * 100, 1)) & "%", 
+             Text.From(Number.Round(PrevClosureRate * 100, 1)) & "%", 
+             "No Historical Data",
+             if ClosureRate > 0 and PrevClosureRate > 0 then Text.From(Number.Round((ClosureRate - PrevClosureRate) / PrevClosureRate * 100, 1)) & "%" else "0%", 
+             "N/A",
+             "No YTD Data", "No YTD Data", "N/A",
+             if ClosureRate > 0.8 then "✅ Good Performance" else "⚠️ Needs Attention"},
+            
+            {"Top Crash Location", 
+             HotspotLocation & " (" & Text.From(HotspotCount) & ")", 
+             PrevHotspotLocation & " (" & Text.From(PrevHotspotCount) & ")", 
+             SameMonthHotspotLocation & " (" & Text.From(SameMonthHotspotCount) & ")",
+             Text.From(Number.Round(LocationChangeMonth * 100, 1)) & "%", 
+             Text.From(Number.Round(LocationChangeYear * 100, 1)) & "%",
+             YTDHotspotLocation & " (" & Text.From(YTDHotspotCount) & ")", 
+             YTDPrevHotspotLocation & " (" & Text.From(YTDPrevHotspotCount) & ")", 
+             Text.From(Number.Round(LocationChangeYTD * 100, 1)) & "%",
+             if HotspotCount > 5 then "⚠️ Enforcement Target" else "✅ Normal"}
+        }
+    )
+in
+    PrimaryCompStatTable
+	
+
+let
+    // === COMPSTAT OPERATIONAL METRICS ===
+    Source = MVA_MASTER,
+    
+    // Find the most recent month with data
+    LatestData = Table.SelectRows(Source, each [Month] <> null and [Year] <> null),
+    LatestDate = Table.Group(LatestData, {}, {{"MaxDate", each List.Max([IncDate]), type nullable date}}),
+    LatestMonth = if Table.RowCount(LatestDate) > 0 then Date.Month(LatestDate{0}[MaxDate]) else Date.Month(DateTime.LocalNow()),
+    LatestYear = if Table.RowCount(LatestDate) > 0 then Date.Year(LatestDate{0}[MaxDate]) else Date.Year(DateTime.LocalNow()),
+    
+    // Current Month Data
+    CurrentMonth = LatestMonth,
+    CurrentYear = LatestYear,
+    CurrentMonthData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Month] = CurrentMonth and [Year] = CurrentYear),
+    
+    // === OPERATIONAL CALCULATIONS ===
+    
+    // 1. PLATOON PERFORMANCE
+    PlatoonA_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "A")),
+    PlatoonB_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "B")),
+    Traffic_Cases = List.Count(List.Select(CurrentMonthData[Squad], each _ <> null and _ = "TFR")),
+    PlatoonSummary = "A:" & Text.From(PlatoonA_Cases) & " | B:" & Text.From(PlatoonB_Cases) & " | Traffic:" & Text.From(Traffic_Cases),
+    
+    // 2. RUSH HOUR IMPACT
+    RushHourCrashes = List.Count(List.Select(CurrentMonthData[IsRushHour], each _ <> null and _ = true)),
+    CurrentMVAs = Table.RowCount(CurrentMonthData),
+    RushHourRate = if CurrentMVAs > 0 then RushHourCrashes / CurrentMVAs else 0,
+    
+    // 3. TIME OF DAY BREAKDOWN
+    MorningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    EveningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    TimeBreakdown = "Morning Peak: " & Text.From(MorningPeak) & " | Evening Peak: " & Text.From(EveningPeak),
+    
+    // 4. CASE CLOSURE PERFORMANCE
+    TrafficCases = Table.SelectRows(CurrentMonthData, each [Squad] <> null and [Squad] = "TFR"),
+    TrafficSupplements = Table.SelectRows(TrafficCases, each [IsSupplement] <> null and [IsSupplement] = true),
+    ClosedCases = List.Count(List.Select(TrafficSupplements[FinalCaseStatus], each _ <> null and _ <> "Open" and _ <> "Case_Status")),
+    ClosureRate = if Table.RowCount(TrafficSupplements) > 0 then ClosedCases / Table.RowCount(TrafficSupplements) else 0,
+    
+    // 5. TOP CRASH LOCATIONS
+    LocationAnalysis = Table.Group(
+        Table.SelectRows(CurrentMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SortedLocations = Table.Sort(LocationAnalysis, {{"CrashCount", Order.Descending}}),
+    TopLocation = if Table.RowCount(SortedLocations) > 0 then SortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    HotspotLocation = TopLocation[Block],
+    HotspotCount = TopLocation[CrashCount],
+    
+    // === OPERATIONAL METRICS TABLE ===
+    OperationalTable = #table(
+        type table [Metric = text, Current_Value = text, Status = text, Notes = text],
+        {
+            {"Rush Hour Rate (6-9AM, 3-6PM)", 
+             Text.From(Number.Round(RushHourRate * 100, 1)) & "%", 
+             if RushHourRate > 0.3 then "⚠️ High" else "✅ Normal",
+             "Weekday crashes during peak hours"},
+            
+            {"Time Distribution", 
+             TimeBreakdown, 
+             "ℹ️ Info",
+             "Peak hour crash patterns"},
+            
+            {"Traffic Unit Closure Rate", 
+             Text.From(Number.Round(ClosureRate * 100, 1)) & "%", 
+             if ClosureRate > 0.8 then "✅ Good" else "⚠️ Needs Attention",
+             "Supplement case closure performance"},
+            
+            {"Unit Deployment", 
+             PlatoonSummary, 
+             "ℹ️ Info",
+             "Current month response distribution"},
+            
+            {"Top Crash Location", 
+             HotspotLocation & " (" & Text.From(HotspotCount) & " crashes)", 
+             if HotspotCount > 5 then "⚠️ Hotspot" else "✅ Normal",
+             "Primary enforcement target area"}
+        }
+    )
+in
+    OperationalTable
+	
+let
+    // === COMPSTAT OPERATIONAL METRICS ===
+    Source = MVA_MASTER,
+    
+    // Find the most recent month with data
+    LatestData = Table.SelectRows(Source, each [Month] <> null and [Year] <> null),
+    LatestDate = Table.Group(LatestData, {}, {{"MaxDate", each List.Max([IncDate]), type nullable date}}),
+    LatestMonth = if Table.RowCount(LatestDate) > 0 then Date.Month(LatestDate{0}[MaxDate]) else Date.Month(DateTime.LocalNow()),
+    LatestYear = if Table.RowCount(LatestDate) > 0 then Date.Year(LatestDate{0}[MaxDate]) else Date.Year(DateTime.LocalNow()),
+    
+    // Current Month Data
+    CurrentMonth = LatestMonth,
+    CurrentYear = LatestYear,
+    CurrentMonthData = Table.SelectRows(Source, each 
+        [Month] <> null and [Year] <> null and 
+        [Month] = CurrentMonth and [Year] = CurrentYear),
+    
+    // === OPERATIONAL CALCULATIONS ===
+    
+    // 1. PLATOON PERFORMANCE
+    PlatoonA_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "A")),
+    PlatoonB_Cases = List.Count(List.Select(CurrentMonthData[Platoon], each _ <> null and _ = "B")),
+    Traffic_Cases = List.Count(List.Select(CurrentMonthData[Squad], each _ <> null and _ = "TFR")),
+    PlatoonSummary = "A:" & Text.From(PlatoonA_Cases) & " | B:" & Text.From(PlatoonB_Cases) & " | Traffic:" & Text.From(Traffic_Cases),
+    
+    // 2. RUSH HOUR IMPACT (Enhanced with AM/PM split)
+    RushHourAM = Table.RowCount(Table.SelectRows(CurrentMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(6,0,0) and [IncTime] < #time(9,0,0))),
+    RushHourPM = Table.RowCount(Table.SelectRows(CurrentMonthData, each 
+        [IncTime] <> null and [DayType] = "Weekday" and 
+        [IncTime] >= #time(15,0,0) and [IncTime] < #time(18,0,0))),
+    RushHourCrashes = List.Count(List.Select(CurrentMonthData[IsRushHour], each _ <> null and _ = true)),
+    CurrentMVAs = Table.RowCount(CurrentMonthData),
+    RushHourRate = if CurrentMVAs > 0 then RushHourCrashes / CurrentMVAs else 0,
+    RushHourBreakdown = "AM: " & Text.From(RushHourAM) & " | PM: " & Text.From(RushHourPM) & " | Total: " & Text.From(RushHourCrashes),
+    
+    // 3. TIME OF DAY BREAKDOWN (Enhanced)
+    MorningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Morning Peak (08:00–11:59)")),
+    EveningPeak = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Evening Peak (16:00–19:59)")),
+    EarlyMorning = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Early Morning (00:00–03:59)")),
+    Morning = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Morning (04:00–07:59)")),
+    Afternoon = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Afternoon (12:00–15:59)")),
+    Night = List.Count(List.Select(CurrentMonthData[TimeOfDay], each _ <> null and _ = "Night (20:00–23:59)")),
+    TimeBreakdown = "Morning Peak: " & Text.From(MorningPeak) & " | Evening Peak: " & Text.From(EveningPeak),
+    FullTimeBreakdown = "Early AM: " & Text.From(EarlyMorning) & " | AM: " & Text.From(Morning) & " | Peak AM: " & Text.From(MorningPeak) & " | PM: " & Text.From(Afternoon) & " | Peak PM: " & Text.From(EveningPeak) & " | Night: " & Text.From(Night),
+    
+    // 4. CRITICAL CRASH TYPES
+    CurrentFatals = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and (Text.Contains(Text.Lower(_), "fatal") or Text.Contains(Text.Lower(_), "death")))),
+    CurrentDUI = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and (Text.Contains(Text.Lower(_), "dui") or Text.Contains(Text.Lower(_), "dwi") or Text.Contains(Text.Lower(_), "impaired")))),
+    CurrentPedestrian = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "pedestrian"))),
+    CurrentBicycle = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "bicycle"))),
+    CurrentInjuries = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(Text.Lower(_), "injury"))),
+    CurrentHitRuns = List.Count(List.Select(CurrentMonthData[AllIncidents], each _ <> null and Text.Contains(_, "Hit"))),
+    CriticalSummary = "Fatal: " & Text.From(CurrentFatals) & " | DUI: " & Text.From(CurrentDUI) & " | Ped: " & Text.From(CurrentPedestrian) & " | Bike: " & Text.From(CurrentBicycle),
+    
+    // 5. DAY-OF-WEEK PATTERNS
+    WeekendCrashes = List.Count(List.Select(CurrentMonthData[DayType], each _ = "Weekend")),
+    WeekdayCrashes = CurrentMVAs - WeekendCrashes,
+    WeekdayRate = if CurrentMVAs > 0 then WeekdayCrashes / CurrentMVAs else 0,
+    WeekendRate = if CurrentMVAs > 0 then WeekendCrashes / CurrentMVAs else 0,
+    DayTypeBreakdown = "Weekday: " & Text.From(WeekdayCrashes) & " (" & Text.From(Number.Round(WeekdayRate * 100, 1)) & "%) | Weekend: " & Text.From(WeekendCrashes) & " (" & Text.From(Number.Round(WeekendRate * 100, 1)) & "%)",
+    
+    // 6. CASE CLOSURE PERFORMANCE (Enhanced)
+    TrafficCases = Table.SelectRows(CurrentMonthData, each [Squad] <> null and [Squad] = "TFR"),
+    TrafficSupplements = Table.SelectRows(TrafficCases, each [IsSupplement] <> null and [IsSupplement] = true),
+    ClosedCases = List.Count(List.Select(TrafficSupplements[FinalCaseStatus], each _ <> null and _ <> "Open" and _ <> "Case_Status")),
+    OpenCases = List.Count(List.Select(TrafficSupplements[FinalCaseStatus], each _ <> null and _ = "Open")),
+    ClosureRate = if Table.RowCount(TrafficSupplements) > 0 then ClosedCases / Table.RowCount(TrafficSupplements) else 0,
+    ClosureDetail = "Closed: " & Text.From(ClosedCases) & " | Open: " & Text.From(OpenCases) & " | Rate: " & Text.From(Number.Round(ClosureRate * 100, 1)) & "%",
+    
+    // 7.
+
+TOP 5 CRASH LOCATIONS (Enhanced Hotspot Analysis)
+    LocationAnalysis = Table.Group(
+        Table.SelectRows(CurrentMonthData, each [Block] <> null), 
+        {"Block"}, 
+        {{"CrashCount", each Table.RowCount(_), Int64.Type}}
+    ),
+    SortedLocations = Table.Sort(LocationAnalysis, {{"CrashCount", Order.Descending}}),
+    Top5Locations = Table.FirstN(SortedLocations, 5),
+    TopLocation = if Table.RowCount(SortedLocations) > 0 then SortedLocations{0} else [Block = "No Data", CrashCount = 0],
+    HotspotLocation = TopLocation[Block],
+    HotspotCount = TopLocation[CrashCount],
+    Top5Summary = if Table.RowCount(Top5Locations) > 0 then 
+        Text.Combine(List.Transform(Table.ToRecords(Top5Locations), each [Block] & "(" & Text.From([CrashCount]) & ")"), " | ") 
+        else "No Data",
+    
+    // 8. RESOURCE ALLOCATION EFFICIENCY
+    CasesPerPlatoonA = if PlatoonA_Cases > 0 then Number.Round(CurrentMVAs / PlatoonA_Cases, 1) else 0,
+    CasesPerPlatoonB = if PlatoonB_Cases > 0 then Number.Round(CurrentMVAs / PlatoonB_Cases, 1) else 0,
+    WorkloadBalance = "A-Platoon: " & Text.From(CasesPerPlatoonA) & " cases/unit | B-Platoon: " & Text.From(CasesPerPlatoonB) & " cases/unit",
+    
+    // 9. DATA QUALITY METRICS
+    RecordsWithTime = List.Count(List.Select(CurrentMonthData[IncTime], each _ <> null)),
+    RecordsWithLocation = List.Count(List.Select(CurrentMonthData[Block], each _ <> null)),
+    TimeCompleteness = if CurrentMVAs > 0 then RecordsWithTime / CurrentMVAs else 0,
+    LocationCompleteness = if CurrentMVAs > 0 then RecordsWithLocation / CurrentMVAs else 0,
+    DataQuality = "Time: " & Text.From(Number.Round(TimeCompleteness * 100, 1)) & "% | Location: " & Text.From(Number.Round(LocationCompleteness * 100, 1)) & "%",
+    
+    // === ENHANCED OPERATIONAL METRICS TABLE ===
+    OperationalTable = #table(
+        type table [Metric = text, Current_Value = text, Status = text, Notes = text],
+        {
+            {"Total MVA Count", 
+             Text.From(CurrentMVAs), 
+             "ℹ️ Info",
+             "Current month total incidents"},
+            
+            {"Critical Incidents", 
+             CriticalSummary, 
+             if CurrentFatals > 0 then "🚨 Fatal Present" else if CurrentDUI > 2 then "⚠️ High DUI" else "✅ Normal",
+             "Fatal, DUI, Pedestrian, Bicycle crashes"},
+            
+            {"Rush Hour Breakdown", 
+             RushHourBreakdown & " (" & Text.From(Number.Round(RushHourRate * 100, 1)) & "%)", 
+             if RushHourRate > 0.35 then "⚠️ High Rush Hour" else "✅ Normal",
+             "AM (6-9), PM (3-6), weekdays only"},
+            
+            {"Time Distribution (Full Day)", 
+             FullTimeBreakdown, 
+             "ℹ️ Info",
+             "Complete 24-hour crash patterns"},
+            
+            {"Day Type Patterns", 
+             DayTypeBreakdown, 
+             if WeekendRate > 0.4 then "⚠️ High Weekend" else "✅ Normal Pattern",
+             "Weekday vs Weekend distribution"},
+            
+            {"Traffic Unit Performance", 
+             ClosureDetail, 
+             if ClosureRate > 0.8 then "✅ Excellent" else if ClosureRate > 0.6 then "⚠️ Good" else "🚨 Needs Attention",
+             "Case closure and workload analysis"},
+            
+            {"Unit Deployment Balance", 
+             PlatoonSummary, 
+             "ℹ️ Info",
+             "Current month response distribution"},
+            
+            {"Resource Efficiency", 
+             WorkloadBalance, 
+             if Number.Abs(CasesPerPlatoonA - CasesPerPlatoonB) > 2 then "⚠️ Imbalanced" else "✅ Balanced",
+             "Cases per unit workload analysis"},
+            
+            {"Top 5 Crash Locations", 
+             Top5Summary, 
+             if HotspotCount > 8 then "🚨 Major Hotspot" else if HotspotCount > 5 then "⚠️ Hotspot" else "✅ Normal",
+             "Primary enforcement target areas"},
+            
+            {"Primary Hotspot", 
+             HotspotLocation & " (" & Text.From(HotspotCount) & " crashes)", 
+             if HotspotCount > 8 then "🚨 Critical" else if HotspotCount > 5 then "⚠️ Target" else "✅ Monitor",
+             "Highest crash location this month"},
+            
+            {"Data Quality Index", 
+             DataQuality, 
+             if TimeCompleteness > 0.95 and LocationCompleteness > 0.95 then "✅ Excellent" 
+             else if TimeCompleteness > 0.9 and LocationCompleteness > 0.9 then "⚠️ Good" 
+             else "🚨 Poor Quality",
+             "Time and location data completeness"}
+        }
+    )
+in
+    OperationalTable
+	
+let
+    // === STEP 1: Load RMS Excel File from Folder ===
+    Source = Folder.Files("C:\Users\carucci_r\OneDrive - City of Hackensack\_LawSoft_EXPORT\RMS\MVA"),
+    FilteredFiles = Table.SelectRows(Source, each Text.EndsWith([Extension], ".xlsx")),
+    FirstFile = FilteredFiles{0}[Content],
+    ExcelData = Excel.Workbook(FirstFile, null, true),
+    SheetData = ExcelData{[Item="Sheet1", Kind="Sheet"]}[Data],
+    PromotedHeaders = Table.PromoteHeaders(SheetData, [PromoteAllScalars=true]),
+
+    // === STEP 2: Clean Column Names ===
+    FixedColumns = Table.RenameColumns(PromotedHeaders, {{"Case Number", "CaseNumber"}}, MissingField.Ignore),
+    
+    CurrentColumns = Table.ColumnNames(FixedColumns),
+    PascalCaseNames = List.Transform(CurrentColumns, each 
+        if Text.Contains(_, " ") then
+            Text.Combine(
+                List.Transform(Text.SplitAny(_, " _"), 
+                    each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+                ), ""
+            )
+        else _),
+    RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+    RenamedTable = Table.RenameColumns(FixedColumns, RenamePairs, MissingField.Ignore),
+
+    // === STEP 3: Add Basic Date and Time ===
+    AddedIncDate = Table.AddColumn(RenamedTable, "IncDate", each 
+        if [IncidentDate] <> null then Date.From([IncidentDate])
+        else if [ReportDate] <> null then Date.From([ReportDate])
+        else null),
+
+    AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+        if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime]))
+        else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime]))
+        else null),
+
+    // === STEP 3.5: Clean Narrative Text (Alternative Method) ===
+    CleanedNarrative = Table.AddColumn(AddedIncTime, "NarrativeClean", each 
+        if [Narrative] <> null then Text.Clean(Text.Trim(Text.From([Narrative]))) else null),
+
+    // === STEP 3.6: Simple Vehicle Data Cleaning ===
+    // Keep it simple - just add new clean columns without removing originals
+    AddedReg1Clean = Table.AddColumn(CleanedNarrative, "Reg1Clean", each 
+        if [Registration1] <> null then Text.Upper(Text.From([Registration1])) else null),
+    
+    AddedMake1Clean = Table.AddColumn(AddedReg1Clean, "Make1Clean", each 
+        if [Make1] <> null then Text.Upper(Text.From([Make1])) else null),
+    
+    AddedModel1Clean = Table.AddColumn(AddedMake1Clean, "Model1Clean", each 
+        if [Model1] <> null then Text.Upper(Text.From([Model1])) else null),
+    
+    AddedRegState1Clean = Table.AddColumn(AddedModel1Clean, "RegState1Clean", each 
+        if [RegState1] <> null then Text.Upper(Text.From([RegState1])) else null),
+
+    AddedReg2Clean = Table.AddColumn(AddedRegState1Clean, "Reg2Clean", each 
+        if [Registration2] <> null then Text.Upper(Text.From([Registration2])) else null),
+    
+    AddedMake2Clean = Table.AddColumn(AddedReg2Clean, "Make2Clean", each 
+        if [Make2] <> null then Text.Upper(Text.From([Make2])) else null),
+    
+    AddedModel2Clean = Table.AddColumn(AddedMake2Clean, "Model2Clean", each 
+        if [Model2] <> null then Text.Upper(Text.From([Model2])) else null),
+    
+    AddedRegState2Clean = Table.AddColumn(AddedModel2Clean, "RegState2Clean", each 
+        if [RegState2] <> null then Text.Upper(Text.From([RegState2])) else null),
+
+    ReorderedColumns = AddedRegState2Clean,
+
+    // === STEP 4: Squad Processing ===
+    AddedSquad = Table.AddColumn(ReorderedColumns, "SquadStandardized", each 
+        if [Squad] <> null then 
+            let squadText = Text.Upper(Text.From([Squad]))
+            in if squadText = "A1" then "A1"
+            else if squadText = "A2" then "A2" 
+            else if squadText = "A3" then "A3"
+            else if squadText = "A4" then "A4"
+            else if squadText = "B1" then "B1"
+            else if squadText = "B2" then "B2"
+            else if squadText = "B3" then "B3"
+            else if squadText = "B4" then "B4"
+            else if squadText = "TFR" then "TFR"
+            else if squadText = "CSB" then "CSB"
+            else if squadText = "DET" then "DET"
+            else if Text.Contains(squadText, "ADMIN") then "Admin"
+            else if squadText = "HACSOC" then "HACSOC"
+            else if squadText = "HOU" then "HOU"
+            else if squadText = "STA" then "STA"
+            else squadText
+        else "Unknown"),
+
+    AddedPlatoon = Table.AddColumn(AddedSquad, "Platoon", each 
+        let squad = [SquadStandardized]
+        in if squad = "A1" or squad = "A2" or squad = "A3" or squad = "A4" then "A"
+        else if squad = "B1" or squad = "B2" or squad = "B3" or squad = "B4" then "B"
+        else "N/A"),
+
+    // Remove original Squad and rename
+    RemovedSquad = Table.RemoveColumns(AddedPlatoon, {"Squad"}, MissingField.Ignore),
+    RenamedSquad = Table.RenameColumns(RemovedSquad, {{"SquadStandardized", "Squad"}}, MissingField.Ignore),
+
+    // === STEP 5: Add Enhanced Analysis Columns (Your Block Logic) ===
+    
+    // Add StreetNumber
+    AddedStreetNumber = Table.AddColumn(RenamedSquad, "StreetNumber", each 
+        try Number.From(Text.BeforeDelimiter([FullAddress] ? ? "", " ")) otherwise null),
+
+    // Add Location (Fixed for intersections)
+    AddedLocation = Table.AddColumn(AddedStreetNumber, "Location", each 
+        let
+            fullAddr = [FullAddress] ? ? "",
+            // For intersections (no house number), take everything before the first comma
+            // For regular addresses, take everything between first space and first comma
+            result = if Text.Contains(fullAddr, "&") then
+                // Intersection - take everything before first comma
+                try Text.BeforeDelimiter(fullAddr, ", ") otherwise fullAddr
+            else
+                // Regular address - take between first space and first comma
+                try Text.BetweenDelimiters(fullAddr, " ", ", ") 
+                otherwise try Text.AfterDelimiter(fullAddr, " ", 1) 
+                otherwise fullAddr
+        in result),
+
+    // Add Block (Fixed logic for full location and intersections)
+    AddedBlock = Table.AddColumn(AddedLocation, "Block", each 
+        let
+            location = [Location] ? ? "",
+            streetNumber = [StreetNumber] ? ? 0,
+            CustomColumn = 
+                if Text.Contains(location, "&") then 
+                    // Handle intersections - abbreviate both streets
+                    let
+                        // Split by & and process each street
+                        streets = Text.SplitAny(location, "&"),
+                        street1 = Text.Trim(streets{0}),
+                        street2 = if List.Count(streets) > 1 then Text.Trim(streets{1}) else "",
+                        // Abbreviate first street
+                        abbrev1 = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(street1, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way"),
+                        // Abbreviate second street  
+                        abbrev2 = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(street2, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way")
+                    in
+                        abbrev1 & " & " & abbrev2
+                else
+                    // Handle regular addresses - use full location with abbreviations
+                    let 
+                        BlockNumber = try Number.ToText(Number.IntegerDivide(streetNumber, 100) * 100) & " Block" otherwise "0 Block",
+                        AbbreviatedLocation = Text.Replace(
+                            Text.Replace(
+                                Text.Replace(
+                                    Text.Replace(
+                                        Text.Replace(location, "Street", "St"), 
+                                    "Avenue", "Ave"), 
+                                "Place", "Pl"), 
+                            "Terrace", "Terr"),
+                        "Way", "Way")
+                    in
+                        AbbreviatedLocation & ", " & BlockNumber
+        in CustomColumn),
+
+    // Add HourOfDay
+    AddedHourOfDay = Table.AddColumn(AddedBlock, "HourOfDay", each 
+        if [IncTime] <> null then Time.Hour([IncTime]) else null),
+
+    // Add TimeOfDay (matching your exact categories)
+    AddedTimeOfDay = Table.AddColumn(AddedHourOfDay, "TimeOfDay", each
+        let t = try Time.From([IncTime]) otherwise null
+        in if t = null then "Unknown"
+           else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+           else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+           else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+           else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+           else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+           else "Night (20:00–23:59)"),
+
+    // === STEP 6: Add Case Analysis Columns ===
+    
+    // Add Year from Case Number
+    AddedCaseYear = Table.AddColumn(AddedTimeOfDay, "CaseYear", each 
+        if [CaseNumber] <> null then 
+            try Text.Start([CaseNumber], 2) otherwise null
+        else null),
+    
+    // Add Sequential Number from Case Number  
+    AddedCaseSequential = Table.AddColumn(AddedCaseYear, "CaseSequential", each 
+        if [CaseNumber] <> null then 
+            try Text.AfterDelimiter([CaseNumber], "-") otherwise null
+        else null),
+    
+    // Identify if case is a supplement (has letter at end)
+    AddedIsSupplement = Table.AddColumn(AddedCaseSequential, "IsSupplement", each 
+        if [CaseNumber] <> null then 
+            let
+                caseNum = [CaseNumber],
+                lastChar = Text.End(caseNum, 1),
+                isLetter = try (Number.From(lastChar) = null) otherwise true
+            in isLetter
+        else false),
+    
+    // Extract supplement letter
+    AddedSupplementLetter = Table.AddColumn(AddedIsSupplement, "SupplementLetter", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.End([CaseNumber], 1)
+        else null),
+    
+    // Get base case number (without supplement letter)
+    AddedBaseCaseNumber = Table.AddColumn(AddedSupplementLetter, "BaseCaseNumber", each 
+        if [IsSupplement] = true and [CaseNumber] <> null then 
+            Text.RemoveRange([CaseNumber], Text.Length([CaseNumber]) - 1, 1)
+        else [CaseNumber]),
+    
+    // Determine final case status
+    AddedFinalCaseStatus = Table.AddColumn(AddedBaseCaseNumber, "FinalCaseStatus", each 
+        let
+            status1 = [Case_Status],
+            status2 = [Case_Status_1]
+        in
+            if status1 <> null then status1
+            else if status2 <> null then status2  
+            else "Open"),
+    
+    // Identify Traffic Supplements (for case closure tracking)
+    AddedIsTrafficSupplement = Table.AddColumn(AddedFinalCaseStatus, "IsTrafficSupplement", each 
+        [IsSupplement] = true and [Squad] = "TFR"),
+
+    // === STEP 6.5: Add Temporal Analysis Columns ===
+    AddedYear = Table.AddColumn(AddedIsTrafficSupplement, "Year", each 
+        if [IncDate] <> null then Date.Year([IncDate]) else null),
+
+    AddedMonth = Table.AddColumn(AddedYear, "Month", each 
+        if [IncDate] <> null then Date.Month([IncDate]) else null),
+
+    AddedMonthName = Table.AddColumn(AddedMonth, "MonthName", each 
+        if [IncDate] <> null then Date.MonthName([IncDate]) else null),
+
+    AddedDayOfWeek = Table.AddColumn(AddedMonthName, "DayOfWeek", each 
+        if [IncDate] <> null then Date.DayOfWeekName([IncDate]) else null),
+
+    AddedDayType = Table.AddColumn(AddedDayOfWeek, "DayType", each 
+        if [IncDate] <> null then
+            if Date.DayOfWeek([IncDate], Day.Monday) >= 5 then "Weekend" else "Weekday"
+        else null),
+
+    // === NEW: Add IsRushHour Column ===
+    AddedIsRushHour = Table.AddColumn(AddedDayType, "IsRushHour", each
+        if [IncTime] <> null and [DayType] = "Weekday" then
+            let t = [IncTime]
+            in (t >= #time(6,0,0) and t < #time(9,0,0)) or 
+               (t >= #time(15,0,0) and t < #time(18,0,0))
+        else false),
+
+    // === STEP 7: Add AllIncidents ===
+    AddedAllIncidents = Table.AddColumn(AddedIsRushHour, "AllIncidents", each 
+        [IncidentType1] & 
+        (if [IncidentType2] <> null then " - " & [IncidentType2] else "") & 
+        (if [IncidentType3] <> null then " - " & [IncidentType3] else ""))
+in
+    AddedAllIncidents
+

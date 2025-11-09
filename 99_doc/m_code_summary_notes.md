@@ -1,0 +1,218 @@
+# M Code Summary & Block Notes
+
+This document captures detailed breakdowns of each M code file, organized by function type. Duplicate logic is excluded. Unique transformations are grouped and documented by purpose.
+
+---
+
+## 🔧 Core Transform Functions
+
+### Transform\_FileA1
+
+**File:** `Transform_FileA1.txt`
+
+- Sheet source loaded and headers promoted
+- Column normalization (PascalCase, renaming, trimming)
+- `CaseNumber`, `CaseNumberLength` derived or ensured
+- Adds `IncDate`, `IncTime`, `StartOfHour`, `TimeOfDay`
+- Adds `Block`, `AllIncidents`, and `Period`
+- Cleans text fields (`Narrative`)
+
+---
+
+## 🔁 Shared Transformation Components
+
+### 🔍 Case Number Handling
+
+```m
+HasCaseNumber = Table.HasColumns(RenamedTable, "CaseNumber"),
+AddedCaseNumber = if HasCaseNumber then RenamedTable else Table.AddColumn(RenamedTable, "CaseNumber", each "Missing"),
+
+ReplacedNulls = Table.TransformColumns(AddedCaseNumber, {
+    {"CaseNumber", each if _ is null then "Null" else Text.From(_), type text}
+}),
+
+AddedCaseNumberLength = Table.AddColumn(ReplacedNulls, "CaseNumberLength", each Text.Length([CaseNumber]))
+```
+
+### 🆔 Column Renaming & Header Standardization
+
+```m
+FixedFullAddress = Table.RenameColumns(#"Promoted Headers", {{"Fulladdress", "FullAddress"}, {"Case Number", "CaseNumber"}}, MissingField.Ignore),
+
+CurrentColumns = Table.ColumnNames(FixedFullAddress),
+PascalCaseNames = List.Transform(CurrentColumns, each 
+    if Text.Contains(_, " ") then
+        Text.Combine(
+            List.Transform(Text.SplitAny(Text.Replace(_, " ", "_"), " _"), 
+                each Text.Upper(Text.Start(_, 1)) & Text.Lower(Text.End(_, Text.Length(_) - 1))
+            ), ""
+        )
+    else
+        _),
+RenamePairs = List.Zip({CurrentColumns, PascalCaseNames}),
+RenamedTable = Table.RenameColumns(FixedFullAddress, RenamePairs, MissingField.Ignore)
+```
+
+### 🗓️ Incident Date & Time Parsing
+
+```m
+AddedIncDate = Table.AddColumn(AddedCaseNumberLength, "IncDate", each 
+    if [IncidentDate] <> null then Date.From([IncidentDate])
+    else if [IncidentDateBetween] <> null then Date.From([IncidentDateBetween]) 
+    else if [ReportDate] <> null then Date.From([ReportDate])
+    else null, type date),
+
+AddedIncTime = Table.AddColumn(AddedIncDate, "IncTime", each 
+    if [IncidentTime] <> null then Time.From(DateTime.Time([IncidentTime]))
+    else if [IncidentTimeBetween] <> null then Time.From(DateTime.Time([IncidentTimeBetween]))
+    else if [ReportTime] <> null then Time.From(DateTime.Time([ReportTime]))
+    else null, type time),
+
+AddedStartOfHour = Table.AddColumn(AddedIncTime, "StartOfHour", each 
+    if [IncTime] <> null then Time.StartOfHour([IncTime]) else null, type time),
+
+AddedIncDateTime = Table.AddColumn(AddedStartOfHour, "INC_DATE_AND_TIME", 
+    each if [IncidentDate] <> null and [IncidentTime] <> null 
+         then DateTime.From([IncidentDate]) + Duration.From([IncidentTime]) 
+         else null, type datetime)
+```
+
+### 🧠 AllIncidents Concatenation
+
+```m
+AddedAllIncidents = Table.AddColumn(AddedBlock, "AllIncidents", each 
+    [IncidentType1] & (if [IncidentType2] <> null then " - " & [IncidentType2] else "") & 
+    (if [IncidentType3] <> null then " - " & [IncidentType3] else ""), type text),
+```
+
+### 🕒 Time of Day Calculation
+
+```m
+AddedTimeOfDay = Table.AddColumn(AddedStartOfHour, "TimeOfDay", each
+    let t = try Time.From([IncTime]) otherwise null
+    in if t = null then "Unknown"
+       else if t >= #time(0,0,0) and t < #time(4,0,0) then "Early Morning (00:00–03:59)"
+       else if t >= #time(4,0,0) and t < #time(8,0,0) then "Morning (04:00–07:59)"
+       else if t >= #time(8,0,0) and t < #time(12,0,0) then "Morning Peak (08:00–11:59)"
+       else if t >= #time(12,0,0) and t < #time(16,0,0) then "Afternoon (12:00–15:59)"
+       else if t >= #time(16,0,0) and t < #time(20,0,0) then "Evening Peak (16:00–19:59)"
+       else "Night (20:00–23:59)", type text)
+```
+
+### 🧱 Block Field Calculation
+
+```m
+AddedBlock = Table.AddColumn(AddedTimeOfDay, "Block", each
+    let
+        fullAddr = [FullAddress] ?? "",
+        streetNum = try Number.FromText(Text.BeforeDelimiter(fullAddr, " ")) otherwise null,
+        location = Text.Trim(Text.BeforeDelimiter(Text.AfterDelimiter(fullAddr, " "), ","))
+    in
+        if streetNum <> null then 
+            location & ", " & Text.From(Number.IntegerDivide(streetNum, 100) * 100) & " Block"
+        else location & ", Unknown Block", type text)
+```
+
+### 📅 Period Classification
+
+```m
+AddedPeriod = Table.AddColumn(AddedAllIncidents, "Period", each
+    let daysFromToday = Duration.Days(Date.From(DateTime.LocalNow()) - [IncDate])
+    in
+        if daysFromToday <= 7 then "7-Day"
+        else if daysFromToday <= 28 then "28-Day"
+        else if Date.Year([IncDate]) = Date.Year(DateTime.LocalNow()) then "YTD"
+        else "Historical", type text)
+```
+
+### 🧼 Narrative Cleaning
+
+```m
+TrimmedText = Table.TransformColumns(AddedPeriod, {{"Narrative", Text.Trim, type text}}),
+CleanedText = Table.TransformColumns(TrimmedText, {{"Narrative", Text.Clean, type text}})
+```
+
+### 🔣 Standardized Column Names
+
+Applied in EXPORT\_RMS, MOTOR\_VEHICLE\_THEFT, ALL\_CRIMES, etc.
+
+```m
+FixedColumns = Table.RenameColumns(..., MissingField.Ignore)
+```
+
+### 🚗 Vehicle Info Normalization (1 & 2)
+
+Capitalizes vehicle-related fields for both instances:
+
+```m
+Table.TransformColumns(PreviousStep, {
+    {"Registration1", Text.Upper, type text},
+    {"Make1", Text.Upper, type text},
+    {"Model1", Text.Upper, type text},
+    {"RegState1", Text.Upper, type text},
+    {"Registration2", Text.Upper, type text},
+    {"Make2", Text.Upper, type text},
+    {"Model2", Text.Upper, type text},
+    {"RegState2", Text.Upper, type text}
+})
+```
+
+Also includes proper-casing for reviewer field:
+
+```m
+Table.TransformColumns(..., {{"Reviewed By", Text.Proper, type text}})
+```
+
+---
+
+## 📁 Source File Loaders
+
+### EXPORT\_RMS
+
+- Loads folder files
+- Inline transform function
+- Applies all enhancements (time, text, geography, etc.)
+- Final deduplication by `Case Number`
+
+### Sample File(s)
+
+- Loads single binary for structure/reference
+
+### *7Day\_28Day\_250414*
+
+- Loads worksheet
+- Changes types for date and report tracking
+
+---
+
+## 🚔 Crime Type Queries
+
+### Robbery, Sexual\_Offenses, Burglary, etc.
+
+- Use `Transform_FileA1` or similar
+- Apply a filter against `ALL_INCIDENTS` text
+- Remove duplicates, trim/clean text
+
+---
+
+## 🧮 Parameter and Function Utilities
+
+### Parameter1 & Parameter2
+
+- Binary references used to load samples
+
+### fnExtractAfterKeyword
+
+```m
+(TextToSearch as text, Keyword as text) as nullable text =>
+let
+    KeywordPosition = Text.PositionOf(TextToSearch, Keyword, Occurrence.First),
+    ExtractedText = if KeywordPosition = -1 then null else Text.Middle(TextToSearch, KeywordPosition + Text.Length(Keyword))
+in
+    ExtractedText
+```
+
+---
+
+Let me know if you'd like to visually map which queries use which block.
+

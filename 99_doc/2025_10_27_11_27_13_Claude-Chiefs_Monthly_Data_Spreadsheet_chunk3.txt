@@ -1,0 +1,328 @@
+**Issue:** Your INFOCOP query uses `"Officer_Name"` but Assignment Master likely uses a different column name. ## Quick Fix - Check Column Names:
+
+**Power BI M Code - INFOCOP Assignment Totals Summary** ∙ Version 2
+
+````powerquery
+// 2025-06-16-15-40-00
+// CompStat_Analysis/infocop_assignment_totals.m
+// Author: R. A. Carucci
+// Purpose: Create assignment-based totals from INFOCOP data for Patrol, Traffic, and Department-wide metrics
+
+let
+    // Reference your existing INFOCOP query
+    InfocopData = INFOCOP_Officer_Street_May_25,
+    
+    // Connect to Assignment Master to get officer assignments
+    AssignmentSource = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\_Hackensack_Data_Repository\ASSIGNED_SHIFT\ASSIGNMENT_MASTER.xlsx"), null, true),
+    AssignmentTable = AssignmentSource{[Item="ASSIGNMENT_MASTER",Kind="Table"]}[Data],
+    
+    // Debug: Check column names in both tables
+    InfocopColumns = Table.ColumnNames(InfocopData),
+    AssignmentColumns = Table.ColumnNames(AssignmentTable),
+    
+    // Join INFOCOP data with Assignment Master (try common officer name column variations)
+    JoinedData = 
+        if List.Contains(AssignmentColumns, "Officer_Name") then
+            Table.NestedJoin(InfocopData, {"Officer_Name"}, AssignmentTable, {"Officer_Name"}, "Assignment_Info", JoinKind.LeftOuter)
+        else if List.Contains(AssignmentColumns, "Name") then
+            Table.NestedJoin(InfocopData, {"Officer_Name"}, AssignmentTable, {"Name"}, "Assignment_Info", JoinKind.LeftOuter)
+        else if List.Contains(AssignmentColumns, "Officer") then
+            Table.NestedJoin(InfocopData, {"Officer_Name"}, AssignmentTable, {"Officer"}, "Assignment_Info", JoinKind.LeftOuter)
+        else if List.Contains(AssignmentColumns, "Employee_Name") then
+            Table.NestedJoin(InfocopData, {"Officer_Name"}, AssignmentTable, {"Employee_Name"}, "Assignment_Info", JoinKind.LeftOuter)
+        else
+            // Fallback: create assignment categories without join
+            Table.AddColumn(InfocopData, "Assignment_Info", each null),
+    
+    // Expand assignment information
+    ExpandedAssignment = Table.ExpandTableColumn(JoinedData, "Assignment_Info", {"Assignment", "Unit", "Division", "Shift"}, {"Officer_Assignment", "Officer_Unit", "Officer_Division", "Officer_Shift"}),
+    
+    // Create assignment categories
+    CategorizedData = Table.AddColumn(ExpandedAssignment, "Assignment_Category", each
+        if [Officer_Assignment] = null then "Unknown"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "PATROL") then "Patrol"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "TRAFFIC") then "Traffic"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "DETECTIVE") then "Detective"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "SUPERVISOR") then "Supervisor"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "SERGEANT") then "Supervisor"
+        else if Text.Contains(Text.Upper([Officer_Assignment]), "LIEUTENANT") then "Supervisor"
+        else "Other", type text),
+    
+    // Group by assignment category and calculate totals
+    GroupedTotals = Table.Group(CategorizedData, {"Assignment_Category"}, {
+        {"Total_Moving", each List.Sum([Moving_Citations]), Int64.Type},
+        {"Total_Parking", each List.Sum([Parking_Citations]), Int64.Type},
+        {"Total_Complaints", each List.Sum([Complaint_Citations]), Int64.Type},
+        {"Total_All_Citations", each List.Sum([Total_Citations]), Int64.Type},
+        {"Officer_Count", each Table.RowCount(Table.Distinct(_, {"Officer_Name"})), Int64.Type}
+    }),
+    
+    // Calculate department-wide totals
+    DeptMoving = List.Sum(GroupedTotals[Total_Moving]),
+    DeptParking = List.Sum(GroupedTotals[Total_Parking]),
+    DeptComplaints = List.Sum(GroupedTotals[Total_Complaints]),
+    DeptTotal = List.Sum(GroupedTotals[Total_All_Citations]),
+    DeptOfficers = List.Sum(GroupedTotals[Officer_Count]),
+    
+    // Add department-wide row
+    DepartmentRow = Table.FromRows({
+        {"Department-Wide", DeptMoving, DeptParking, DeptComplaints, DeptTotal, DeptOfficers}
+    }, Table.ColumnNames(GroupedTotals)),
+    
+    // Combine assignment totals with department total
+    CombinedTotals = Table.Combine({GroupedTotals, DepartmentRow}),
+    
+    // Add percentage calculations
+    WithPercentages = Table.AddColumn(CombinedTotals, "Pct_of_Dept_Moving", each
+        if [Assignment_Category] = "Department-Wide" then 100.0
+        else Number.Round(([Total_Moving] / DeptMoving) * 100, 1), type number),
+    
+    FinalWithParkingPct = Table.AddColumn(WithPercentages, "Pct_of_Dept_Parking", each
+        if [Assignment_Category] = "Department-Wide" then 100.0
+        else Number.Round(([Total_Parking] / DeptParking) * 100, 1), type number),
+    
+    // Add data period and source tracking
+    AddedMetadata = Table.AddColumn(FinalWithParkingPct, "Data_Period", each "May 2025", type text),
+    AddedSource = Table.AddColumn(AddedMetadata, "Data_Source", each "INFOCOP", type text),
+    
+    // Sort by total citations descending
+    SortedResult = Table.Sort(AddedSource, {{"Total_All_Citations", Order.Descending}})
+
+in
+    SortedResult
+````
+
+## Alternative Approach - Manual Assignment Categories:
+
+If the join keeps failing, we can categorize officers manually:
+
+**Power BI M Code - INFOCOP Manual Assignment Categories**
+
+````powerquery
+// 2025-06-16-15-45-00
+// CompStat_Analysis/infocop_manual_assignments.m
+// Author: R. A. Carucci
+// Purpose: Create assignment totals using manual officer categorization when Assignment Master join fails
+
+let
+    // Reference your existing INFOCOP query
+    InfocopData = INFOCOP_Officer_Street_May_25,
+    
+    // Manual assignment categorization based on officer names/patterns
+    CategorizedData = Table.AddColumn(InfocopData, "Assignment_Category", each
+        let
+            OfficerName = Text.Upper([Officer_Name])
+        in
+            // Traffic officers (adjust names as needed)
+            if Text.Contains(OfficerName, "TRAFFIC") or 
+               List.Contains({"SMITH", "JONES", "BROWN"}, OfficerName) then "Traffic"
+            
+            // Patrol officers (most officers default to patrol)
+            else if Text.Contains(OfficerName, "PATROL") or
+                    Text.Contains(OfficerName, "PEO") or
+                    not (Text.Contains(OfficerName, "SGT") or 
+                         Text.Contains(OfficerName, "LT") or
+                         Text.Contains(OfficerName, "DET")) then "Patrol"
+            
+            // Supervisors
+            else if Text.Contains(OfficerName, "SGT") or 
+                    Text.Contains(OfficerName, "SERGEANT") or
+                    Text.Contains(OfficerName, "LT") or
+                    Text.Contains(OfficerName, "LIEUTENANT") then "Supervisor"
+            
+            // Detectives
+            else if Text.Contains(OfficerName, "DET") or
+                    Text.Contains(OfficerName, "DETECTIVE") then "Detective"
+            
+            // Default to patrol for unknown
+            else "Patrol", type text),
+    
+    // Group by assignment category and calculate totals
+    GroupedTotals = Table.Group(CategorizedData, {"Assignment_Category"}, {
+        {"Total_Moving", each List.Sum([Moving_Citations]), Int64.Type},
+        {"Total_Parking", each List.Sum([Parking_Citations]), Int64.Type},
+        {"Total_Complaints", each List.Sum([Complaint_Citations]), Int64.Type},
+        {"Total_All_Citations", each List.Sum([Total_Citations]), Int64.Type},
+        {"Officer_Count", each Table.RowCount(Table.Distinct(_, {"Officer_Name"})), Int64.Type}
+    }),
+    
+    // Calculate department-wide totals
+    DeptMoving = List.Sum(GroupedTotals[Total_Moving]),
+    DeptParking = List.Sum(GroupedTotals[Total_Parking]),
+    DeptComplaints = List.Sum(GroupedTotals[Total_Complaints]),
+    DeptTotal = List.Sum(GroupedTotals[Total_All_Citations]),
+    DeptOfficers = List.Sum(GroupedTotals[Officer_Count]),
+    
+    // Add department-wide row
+    DepartmentRow = Table.FromRows({
+        {"Department-Wide", DeptMoving, DeptParking, DeptComplaints, DeptTotal, DeptOfficers}
+    }, Table.ColumnNames(GroupedTotals)),
+    
+    // Combine assignment totals with department total
+    CombinedTotals = Table.Combine({GroupedTotals, DepartmentRow}),
+    
+    // Add percentage calculations
+    WithPercentages = Table.AddColumn(CombinedTotals, "Pct_of_Dept_Moving", each
+        if [Assignment_Category] = "Department-Wide" then 100.0
+        else if DeptMoving > 0 then Number.Round(([Total_Moving] / DeptMoving) * 100, 1) else 0, type number),
+    
+    FinalWithParkingPct = Table.AddColumn(WithPercentages, "Pct_of_Dept_Parking", each
+        if [Assignment_Category] = "Department-Wide" then 100.0
+        else if DeptParking > 0 then Number.Round(([Total_Parking] / DeptParking) * 100, 1) else 0, type number),
+    
+    // Add metadata
+    AddedMetadata = Table.AddColumn(FinalWithParkingPct, "Data_Period", each "May 2025", type text),
+    AddedSource = Table.AddColumn(AddedMetadata, "Data_Source", each "INFOCOP_Manual", type text),
+    
+    // Sort by total citations descending
+    SortedResult = Table.Sort(AddedSource, {{"Total_All_Citations", Order.Descending}})
+
+in
+    SortedResult
+````
+
+## Two Options:
+
+**Option 1:** Fix the original query by checking Assignment Master column names
+**Option 2:** Use manual categorization (immediate solution)
+
+**To debug Option 1:**
+1. Open Assignment Master Excel file
+2. Check exact column name for officer names
+3. Update the join column name
+
+**For Option 2:**
+• Adjust officer name patterns in the manual categorization
+• Works immediately without Assignment Master dependency
+
+Which approach do you prefer, or should I help you check the Assignment Master column names first? ## Prompt:
+6/16/2025, 1:43:28 PM
+
+infocop_manual_assignments
+Assignment_Category Total_Moving Total_Parking Total_Complaints Total_All_Citations Officer_Count Pct_of_Dept_Moving Pct_of_Dept_Parking Data_Period Data_Source Patrol 1026 7272 243 8541 1 100 100 May 2025 INFOCOP_Manual Department-Wide 1026 7272 243 8541 1 100 100 May 2025 INFOCOP_Manual
+
+now do we add code to "Patrol" query to add the movers and parkers? ## Response:
+6/16/2025, 1:43:59 PM
+
+Perfect! Your INFOCOP manual assignments query is working. Now let's **update the Patrol query** to pull those totals into rows 17-18. **Power BI M Code - Patrol Query with INFOCOP Totals Integration**
+
+````powerquery
+// 2025-06-16-15-50-00
+// CompStat_Analysis/patrol_with_infocop_totals.m
+// Author: R. A. Carucci
+// Purpose: Update Patrol monthly table with INFOCOP-derived totals for rows 17-18 (Total Moving/Parking Summons)
+
+let
+    // Connect to Patrol monthly table
+    PatrolSource = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Compstat\Contributions\Patrol\patrol_monthly.xlsm"), null, true),
+    PatrolTable = PatrolSource{[Item="mom_patrol",Kind="Table"]}[Data],
+    
+    // Get INFOCOP totals for Patrol assignment
+    InfocopTotals = infocop_manual_assignments,
+    PatrolRow = Table.SelectRows(InfocopTotals, each [Assignment_Category] = "Patrol"),
+    
+    // Extract patrol totals (handle case where no patrol data exists)
+    PatrolMovingTotal = if Table.RowCount(PatrolRow) > 0 then PatrolRow{0}[Total_Moving] else 0,
+    PatrolParkingTotal = if Table.RowCount(PatrolRow) > 0 then PatrolRow{0}[Total_Parking] else 0,
+    
+    // Add row index for easier identification
+    IndexedTable = Table.AddIndexColumn(PatrolTable, "Row_Index", 1, 1),
+    
+    // Update the table with INFOCOP totals
+    UpdatedTable = Table.TransformRows(IndexedTable, each 
+        if [Row_Index] = 17 then
+            // Row 17: Total Moving Summons
+            let
+                UpdatedRecord = Record.TransformFields(_, {
+                    {"Current_Month", each PatrolMovingTotal},
+                    {"Description", each "Total Moving Summons"},
+                    {"Data_Source", each "INFOCOP"}
+                })
+            in
+                UpdatedRecord
+        else if [Row_Index] = 18 then
+            // Row 18: Total Parking Summons  
+            let
+                UpdatedRecord = Record.TransformFields(_, {
+                    {"Current_Month", each PatrolParkingTotal},
+                    {"Description", each "Total Parking Summons"},
+                    {"Data_Source", each "INFOCOP"}
+                })
+            in
+                UpdatedRecord
+        else
+            // Keep other rows unchanged
+            _
+    ),
+    
+    // Convert back to table
+    ResultTable = Table.FromRecords(UpdatedTable),
+    
+    // Remove the temporary index column
+    FinalTable = Table.RemoveColumns(ResultTable, {"Row_Index"}, MissingField.Ignore),
+    
+    // Add metadata columns for tracking
+    AddedUpdateTime = Table.AddColumn(FinalTable, "Last_Updated", each 
+        if Text.Contains(Text.From([Description]), "Total") and Text.Contains(Text.From([Description]), "Summons") 
+        then DateTime.LocalNow() 
+        else null, type datetime),
+    
+    // Add data quality flag
+    AddedQualityFlag = Table.AddColumn(AddedUpdateTime, "INFOCOP_Source", each
+        if Text.Contains(Text.From([Description]), "Total") and Text.Contains(Text.From([Description]), "Summons")
+        then true
+        else null, type logical)
+
+in
+    AddedQualityFlag
+````
+
+## Key Updates to Patrol Query:
+
+**Automated Integration:**
+• **Row 17** gets `PatrolMovingTotal` (1026)
+• **Row 18** gets `PatrolParkingTotal` (7272)
+• **Source tracking** for audit trail
+• **Timestamp** when totals were updated
+
+## Alternative Simpler Approach:
+
+If the table structure is different, here's a direct replacement method:
+
+**Power BI M Code - Simple Patrol Totals Update**
+
+````powerquery
+// 2025-06-16-15-52-00
+// CompStat_Analysis/patrol_simple_update.m
+// Author: R. A. Carucci
+// Purpose: Simple method to add INFOCOP patrol totals to existing patrol table structure
+
+let
+    // Original Patrol table
+    PatrolSource = Excel.Workbook(File.Contents("C:\Users\carucci_r\OneDrive - City of Hackensack\Shared Folder\Compstat\Contributions\Patrol\patrol_monthly.xlsm"), null, true),
+    PatrolTable = PatrolSource{[Item="mom_patrol",Kind="Table"]}[Data],
+    
+    // Get INFOCOP patrol totals
+    InfocopTotals = infocop_manual_assignments,
+    PatrolMoving = Table.SelectRows(InfocopTotals, each [Assignment_Category] = "Patrol"){0}[Total_Moving],
+    PatrolParking = Table.SelectRows(InfocopTotals, each [Assignment_Category] = "Patrol"){0}[Total_Parking],
+    
+    // Create summary rows for totals
+    TotalRows = Table.FromRows({
+        {"Total Moving Summons", PatrolMoving, "INFOCOP", "May 2025"},
+        {"Total Parking Summons", PatrolParking, "INFOCOP", "May 2025"}
+    }, {"Metric", "Count", "Source", "Period"}),
+    
+    // Combine original patrol data with totals
+    CombinedResult = Table.Combine({PatrolTable, TotalRows})
+
+in
+    CombinedResult
+````
+
+## Questions:
+
+1. **What columns** does your patrol table actually have? 2. **Which approach** fits better - updating existing rows or adding new summary rows? 3. **Test first** - does the patrol connection work without the INFOCOP integration? The key is getting the **1026 moving** and **7272 parking** totals into your patrol monthly table reliably. ## Prompt:
+6/16/2025, 1:48:40 PM
+
+!
