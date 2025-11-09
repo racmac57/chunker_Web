@@ -344,8 +344,15 @@ Edit `config.json` to customize:
 
 ### Monitoring Settings
 - **`debounce_window`**: File event debouncing time (seconds)
+- **`use_ready_signal`**: Wait for `<filename>.ready` markers before processing atomic pushes
+- **`failed_dir`**: Directory for failed file processing quarantine
 - **`max_workers`**: Maximum parallel processing workers
-- **`failed_dir`**: Directory for failed file processing
+
+### Vector Store Settings
+- **`batch.size`**: Number of chunks to insert into ChromaDB per batch (default 500)
+- **`batch.flush_every`**: Optional flush cadence for very large ingest jobs
+- **`batch.mem_soft_limit_mb`**: Soft memory cap for batching helper
+- **`search.ef_search`**: Overrides HNSW search ef after each batch to rebalance recall vs. latency
 
 ## 🔍 RAG Usage
 

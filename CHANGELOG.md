@@ -12,10 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds, and 24-48 hour review schedule for tracking SQLite contention patterns.
 - **Windows UTF-8 Troubleshooting**: Updated README/SUMMARY with steps for switching PowerShell to UTF-8 to avoid Unicode logging failures on emoji filenames.
 - **Streamlit GUI Doc**: Added `streamlit run gui_app.py` workflow to README and SUMMARY so users can launch the browser-based search interface.
+- **Chunker Bridge Compatibility**: Watcher now understands `.part` staging files and optional `.ready` markers produced by upstream bridges, keeping them off the work queue until the final rename is complete.
+- **Batched Vector Ingest**: `ChromaRAG.add_chunks_bulk()` accepts batches (configurable via `batch.size`) and skips null embeddings while refreshing `hnsw:search_ef` from `search.ef_search`.
 
 ### Changed
 - **Small File Handling**: Changed log level from WARNING to INFO for small file archiving since this is now expected behavior rather than an error condition.
 - **Archive Organization**: Added `skipped_files/` subfolder in archive directory to separate tiny/invalid files from successfully processed files.
+- **Watcher Retry Safety**: All sequential and parallel processing paths funnel through `process_with_retries()`, quarantining persistent failures to `03_archive/failed` after exponential backoff and copying any associated `.ready` files.
+- **Configuration Defaults**: New keys `debounce_window`, `use_ready_signal`, `failed_dir`, `batch.{size,flush_every,mem_soft_limit_mb}`, and `search.ef_search` expose watcher deferrals and vector-store tuning directly in `config.json`.
 
 ### Analysis & Documentation
 - **DB Lock Error Analysis**: Detailed breakdown showing 11 `log_processing()` errors vs 1 `_update_department_stats()` error over 8-minute test period (1.5 errors/min baseline, down 68% from previous baseline).
