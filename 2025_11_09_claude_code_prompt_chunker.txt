@@ -1,0 +1,143 @@
+Here’s a single, tight prompt for Claude Code to apply the needed edits and run the checks end-to-end.
+
+Claude Code Prompt
+
+Goal
+Bring the repo racmac57/chunker_Web to a production-ready state with OneDrive sync, enriched tagging, watcher restart, smoke test, GUI and CLI checks, and Ollama embedding. Make small, targeted edits only.
+
+Do this
+
+1. Verify OneDrive paths and toggles
+
+* Open config.json. Set these keys exactly. Keep other keys unchanged.
+
+```
+{
+  "watch_folder": "%OneDriveCommercial%\\KB_Shared\\02_data",
+  "archive_dir":  "%OneDriveCommercial%\\KB_Shared\\03_archive",
+  "output_dir":   "%OneDriveCommercial%\\KB_Shared\\04_output",
+  "metadata_enrichment": { "enabled": true },
+  "incremental_updates": { "enabled": true },
+  "deduplication": { "enabled": true },
+  "rag_enabled": true,
+  "embedding": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "endpoint": "http://127.0.0.1:11434"
+  }
+}
+```
+
+* Ensure the existing config loaders expand env variables for the three paths.
+
+2. Add Ollama embedding support
+
+* In rag_integration.py add a lightweight embedder that calls Ollama’s embeddings API. Keep current embedding paths as fallback.
+
+```
+# at top
+import os, json, requests
+
+class OllamaEmbedder:
+    def __init__(self, model: str, endpoint: str = "http://127.0.0.1:11434"):
+        self.model = model
+        self.url = f"{endpoint.rstrip('/')}/api/embeddings"
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        out = []
+        for t in texts:
+            r = requests.post(self.url, json={"model": self.model, "input": t}, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            out.append(data["embedding"])
+        return out
+```
+
+* In ChromaRAG.**init**, read config and set self.embedder accordingly.
+
+```
+cfg = self._global_config or {}
+emb = (cfg.get("embedding") or {})
+if emb.get("provider") == "ollama":
+    self._embedder = OllamaEmbedder(emb.get("model","nomic-embed-text"),
+                                    emb.get("endpoint","http://127.0.0.1:11434"))
+else:
+    self._embedder = None  # falls back to existing code paths
+```
+
+* In any add/add_chunks path where embeddings are created, if self._embedder is set, call it and pass the vectors to collection.add via embeddings=[...]. Preserve existing behavior when not set.
+
+3. Harden tagging path
+
+* Ensure the metadata enrichment path always writes tags and keywords arrays. Confirm write_chunk_files and copy_manifest_sidecar already mkdir parents and wrap writes in try/except. If not, add as previously specified.
+
+4. GUI pull-through
+
+* In gui_app.py confirm facets refresh uses collection.peek and supports tags written by enrichment. Keep the “Use Ollama for answer synthesis” toggle and model select. No other UI changes.
+
+5. Requirements
+
+* Open requirements.txt. Ensure these packages are present on separate lines:
+
+```
+chromadb
+watchdog
+streamlit
+requests
+portalocker
+```
+
+* Do not remove existing requirements.
+
+6. Ops scripts
+
+* Keep scripts and npm aliases. No path changes.
+
+7. Execute the runbook on the primary PC
+   Run these commands in C:_chunker. Stop if any command fails and print the error.
+
+```
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+
+# Ollama service and model
+ollama serve
+ollama pull nomic-embed-text
+
+# Stop any running watcher, then start
+npm run kb:stop
+npm run kb:start
+
+# Smoke
+$ts = Get-Date -Format yyyyMMdd_HHmmss
+$p  = "$env:OneDriveCommercial\KB_Shared\02_data\smoke_$ts.md"
+"Smoke test $ts`n$([string]::new('X', 900))" | Set-Content -Path $p -Encoding UTF8
+
+# Health and report
+npm run kb:health
+npm run kb:report
+
+# CLI retrieval sanity check
+python rag_search.py --query "date cascade logic" --top_k 5
+```
+
+8. Acceptance checks
+
+* OneDriveOK True. ChromaDB True. Watcher Running with one PID.
+* The new smoke file appears in 03_archive. At least one new entry in 04_output.
+* watcher.log has no “Chunk write failed” and no “database is locked”.
+* rag_search.py returns hits for the test query.
+* GUI opens and “Refresh facets” shows departments and tags.
+
+9. If any check fails
+
+* Print the last 80 lines of logs\watcher.log.
+* Print the exact exception stack trace.
+* Suggest the minimal code diff to fix. Then re-run only the failing step.
+
+Deliverables
+
+* The exact diffs you made to rag_integration.py and config.json.
+* The console transcript for the runbook commands.
+* A one-line status: Ready or Needs follow-up, with the failing step name if any.

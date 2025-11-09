@@ -30,7 +30,21 @@ from metadata_enrichment import (
     SIDECAR_SUFFIX,
     dump_json,
 )
-from incremental_updates import VersionTracker, build_chunk_id
+try:
+    from incremental_updates import VersionTracker, build_chunk_id
+except Exception:  # noqa: BLE001
+    VersionTracker = None  # type: ignore[assignment]
+
+    def build_chunk_id(timestamp: str, base_name: str, chunk_index: int) -> str:
+        """
+        Fallback chunk-id generator when incremental_updates isn't available.
+
+        Mirrors the structure produced by build_chunk_id in incremental_updates.py so
+        downstream systems continue to receive stable identifiers.
+        """
+        safe_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S") if not timestamp else timestamp
+        safe_base = base_name.replace(" ", "_")
+        return f"{safe_ts}:{safe_base}:{chunk_index:05d}"
 from chunker_db import ChunkerDatabase
 from notification_system import NotificationSystem
 from monitoring_system import MonitoringSystem
