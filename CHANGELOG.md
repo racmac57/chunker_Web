@@ -15,14 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chunker Bridge Compatibility**: Watcher now understands `.part` staging files and optional `.ready` markers produced by upstream bridges, keeping them off the work queue until the final rename is complete.
 - **Batched Vector Ingest**: `ChromaRAG.add_chunks_bulk()` accepts batches (configurable via `batch.size`) and skips null embeddings while refreshing `hnsw:search_ef` from `search.ef_search`.
 - **Analytics CLI**: Added `analytics_cli.py` plus npm alias `kb:analytics` for quick daily/weekly stats dumps from `chunker_tracking.db`.
+- **Watcher Performance Guards**: Added an LRU cache around sentence tokenization, a dedicated metrics executor, and a rate limiter that caps repeated notifications to once every 60 seconds per key.
+- **Process Pool Batch Mode**: Introduced optional `multiprocessing.Pool` handling (config flag) for heavy backlogs and automatic pruning of the `processed_files` cache past 1,000 entries.
+- **SQLite Integrity Check**: `ChunkerDatabase.run_integrity_check()` validates the database at startup while a centralized `_conn()` helper enforces 60 s timeouts and WAL pragmas.
+- **Pytest Guardrails**: Root-level `conftest.py` ignores bulky `99_doc/legacy` fixtures and `tests/test_db.py` smoke-tests the SQLite retry path.
 
 ### Changed
 - **Small File Handling**: Changed log level from WARNING to INFO for small file archiving since this is now expected behavior rather than an error condition.
 - **Archive Organization**: Added `skipped_files/` subfolder in archive directory to separate tiny/invalid files from successfully processed files.
 - **Watcher Retry Safety**: All sequential and parallel processing paths funnel through `process_with_retries()`, quarantining persistent failures to `03_archive/failed` after exponential backoff and copying any associated `.ready` files.
 - **Configuration Defaults**: New keys `debounce_window`, `use_ready_signal`, `failed_dir`, `batch.{size,flush_every,mem_soft_limit_mb}`, and `search.ef_search` expose watcher deferrals and vector-store tuning directly in `config.json`.
-- **Chunk Writer Robustness**: Chunk outputs pre-create folders once, wrap writes in try/except, and keep processing even when individual chunk files fail; manifest copies also ensure parent directories exist.
-- **SQLite Error Logging**: `chunker_db.log_error` retries locked inserts with exponential backoff and a 60 s timeout, slashing “database is locked” noise during peak ingest.
+- **Chunk Writer Robustness**: Consolidated `write_chunk_files()` helper pre-creates the parent once, writes UTF-8 chunks with defensive logging, guarantees manifest copy directories exist, and re-hashes content when manifests lack checksums while skipping any path containing `.origin.json`.
+- **SQLite Error Logging**: `chunker_db.log_error` now supports legacy/modern signatures, retries locked inserts with exponential backoff, and sits atop the shared `_conn()` plumbing so every path enjoys consistent 60 s timeouts; startup now runs `run_integrity_check()` and logs anomalies.
 - **Requirements Hygiene**: Simplified `requirements.txt` to unpinned dependency names and explicitly include `portalocker`, avoiding pip resolution failures on Python 3.13.
 
 ### Analysis & Documentation

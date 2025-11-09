@@ -9,8 +9,10 @@ import time
 import shutil
 import logging
 import traceback
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
+from functools import lru_cache
 import nltk
 from nltk.tokenize import sent_tokenize
 import json
@@ -129,6 +131,36 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 logger = setup_logging()
+
+metrics_executor = ThreadPoolExecutor(max_workers=1)
+
+
+class NotificationRateLimiter:
+    def __init__(self, window_seconds: int = 60):
+        self.window_seconds = window_seconds
+        self._lock = threading.Lock()
+        self._last_sent: Dict[str, float] = {}
+
+    def should_send(self, key: str) -> bool:
+        now = time.time()
+        with self._lock:
+            last = self._last_sent.get(key, 0.0)
+            if now - last >= self.window_seconds:
+                self._last_sent[key] = now
+                return True
+            return False
+
+
+notification_rate_limiter = NotificationRateLimiter()
+
+
+def notify_with_rate_limit(key: str, func, *args, **kwargs) -> None:
+    if not notification_rate_limiter.should_send(key):
+        return
+    try:
+        func(*args, **kwargs)
+    except Exception as notify_error:
+        logger.warning("Notification send failed for %s: %s", key, notify_error)
 
 # Initialize database and notification systems with timeout and retry
 def init_database_with_retry():
@@ -291,6 +323,9 @@ def load_manifest_data(file_path: Path) -> Tuple[Dict[str, Any], Path, Optional[
 
 def should_process_file(file_path: Path) -> bool:
     """Check if file should be processed - skip manifests and archives"""
+    name_l = file_path.name.lower()
+    if ".origin.json" in name_l:
+        return False
     file_str = str(file_path)
 
     # Skip manifest files (.origin.json) - catch both exact suffix and embedded patterns
@@ -334,6 +369,29 @@ def sanitize_folder_name(base_name: str, max_length: int = 60) -> str:
         clean_name = clean_name[:max_length]
 
     return clean_name
+
+
+def write_chunk_files(doc_id: str, chunks: List[str], out_root: str) -> List[str]:
+    written: List[str] = []
+    base = Path(out_root) / doc_id
+    base.mkdir(parents=True, exist_ok=True)
+
+    for i, text in enumerate(chunks):
+        p = base / f"chunk_{i:05d}.txt"
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write(text if isinstance(text, str) else str(text))
+            written.append(str(p))
+        except Exception as e:
+            logger.exception("Chunk write failed for %s: %s", p, e)
+    return written
+
+
+def copy_manifest_sidecar(src_manifest: str, dst_path: str):
+    dst = Path(dst_path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(src_manifest, "r", encoding="utf-8") as fsrc, open(dst, "w", encoding="utf-8") as fdst:
+        fdst.write(fsrc.read())
 
 
 def safe_file_move(source_path: Path, dest_path: Path, max_retries: int = 3) -> bool:
@@ -423,8 +481,8 @@ def get_department_config(file_path):
     
     return merged_config
 
-def log_system_metrics():
-    """Log comprehensive system metrics"""
+def _log_system_metrics_sync():
+    """Log comprehensive system metrics (synchronous worker)"""
     try:
         cpu_percent = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory()
@@ -454,17 +512,54 @@ def log_system_metrics():
         
         # Send alerts if thresholds exceeded
         if cpu_percent > 90:
-            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "90%", "critical")
+            notify_with_rate_limit(
+                "cpu-critical",
+                notifications.send_threshold_alert,
+                "CPU Usage",
+                f"{cpu_percent}%",
+                "90%",
+                "critical",
+            )
         elif cpu_percent > 80:
-            notifications.send_threshold_alert("CPU Usage", f"{cpu_percent}%", "80%", "warning")
+            notify_with_rate_limit(
+                "cpu-warning",
+                notifications.send_threshold_alert,
+                "CPU Usage",
+                f"{cpu_percent}%",
+                "80%",
+                "warning",
+            )
         
         if memory.percent > 90:
-            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "90%", "critical")
+            notify_with_rate_limit(
+                "memory-critical",
+                notifications.send_threshold_alert,
+                "Memory Usage",
+                f"{memory.percent}%",
+                "90%",
+                "critical",
+            )
         elif memory.percent > 80:
-            notifications.send_threshold_alert("Memory Usage", f"{memory.percent}%", "80%", "warning")
+            notify_with_rate_limit(
+                "memory-warning",
+                notifications.send_threshold_alert,
+                "Memory Usage",
+                f"{memory.percent}%",
+                "80%",
+                "warning",
+            )
             
     except Exception as e:
         logger.error(f"Failed to log system metrics: {e}")
+
+
+def log_system_metrics():
+    metrics_executor.submit(_log_system_metrics_sync)
+
+@lru_cache(maxsize=512)
+def _cached_sent_tokenize(text: str) -> Tuple[str, ...]:
+    return tuple(sent_tokenize(text))
+
 
 def chunk_text_enhanced(text, limit, department_config):
     """Enhanced chunking with department-specific rules"""
@@ -473,7 +568,7 @@ def chunk_text_enhanced(text, limit, department_config):
         return []
     
     try:
-        sentences = sent_tokenize(text)
+        sentences = list(_cached_sent_tokenize(text))
         if not sentences:
             logger.warning("No sentences found in text")
             return []
@@ -716,6 +811,13 @@ def process_file_enhanced(file_path, config):
 
         if content_hash:
             manifest_data["last_content_hash"] = content_hash
+        elif version_tracker:
+            try:
+                content_hash = version_tracker.hash_content(text)
+                if content_hash:
+                    manifest_data["last_content_hash"] = content_hash
+            except Exception:
+                pass
 
         # Chunk the text
         sentence_limit = department_config.get("chunk_size", 100)
@@ -737,7 +839,7 @@ def process_file_enhanced(file_path, config):
         # Sanitize to prevent path length issues and remove .origin.json artifacts
         raw_base = Path(file_path.name).stem.replace(" ", "_")
         clean_base = sanitize_folder_name(raw_base, max_length=60)
-        output_folder = config.get("output_dir", "output")
+        output_folder = str(config.get("output_dir", "output"))
 
         # Create folder named after the source file
         file_output_folder = Path(output_folder) / clean_base
@@ -770,6 +872,8 @@ def process_file_enhanced(file_path, config):
         sidecar_path: Optional[Path] = None
         generated_chunk_ids: List[str] = []
 
+        chunk_payloads: List[Dict[str, Any]] = []
+
         # Write chunks with validation and deduplication
         for i, chunk in enumerate(chunks):
             chunk_index = i + 1
@@ -781,7 +885,6 @@ def process_file_enhanced(file_path, config):
             if METADATA_ENABLED:
                 chunk_metadata = enrich_chunk(chunk, enrichment.tags)
                 chunk_tags = chunk_metadata.get("tags", [])
-                tag_suffix = tag_suffix_for_filename(chunk_tags)
             else:
                 chunk_metadata = {
                     "tags": [],
@@ -790,13 +893,6 @@ def process_file_enhanced(file_path, config):
                     "char_length": len(chunk),
                 }
                 chunk_tags = []
-                tag_suffix = ""
-
-            chunk_filename_base = f"{timestamp}_{clean_base}_chunk{chunk_index}"
-            if tag_suffix:
-                chunk_filename = f"{chunk_filename_base}_{tag_suffix}.txt"
-            else:
-                chunk_filename = f"{chunk_filename_base}.txt"
 
             chunk_id = build_chunk_id(timestamp, clean_base, chunk_index)
             chunk_dedup_id = chunk_id
@@ -830,55 +926,103 @@ def process_file_enhanced(file_path, config):
                     )
                     continue
 
-            chunk_path = file_output_folder / chunk_filename
+            chunk_payloads.append(
+                {
+                    "chunk": chunk if isinstance(chunk, str) else str(chunk),
+                    "chunk_metadata": chunk_metadata,
+                    "chunk_tags": chunk_tags,
+                    "chunk_id": chunk_id,
+                    "chunk_index": chunk_index,
+                    "chunk_dedup_id": chunk_dedup_id,
+                    "dedup_hash_value": dedup_hash_value,
+                }
+            )
+
+        if not chunk_payloads:
+            error_msg = f"No valid chunks created for {file_path.name}"
+            logger.error(error_msg)
+            if db:
+                try:
+                    db.log_processing(str(file_path), original_size, 0, 0, 
+                                    time.time() - start_time, False, error_msg, department)
+                except Exception as db_error:
+                    logger.warning(f"Failed to log processing to database: {db_error}")
+            return False
+
+        chunk_texts = [payload["chunk"] for payload in chunk_payloads]
+        written_paths = write_chunk_files(clean_base, chunk_texts, output_folder)
+
+        if len(written_paths) != len(chunk_payloads):
+            logger.warning(
+                "Chunk write mismatch for %s: expected %d, wrote %d",
+                file_path.name,
+                len(chunk_payloads),
+                len(written_paths),
+            )
+
+        generated_chunk_ids = []
+
+        for payload, path_str in zip(chunk_payloads, written_paths):
+            chunk_path = Path(path_str)
             try:
-                chunk_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(chunk_path, "w", encoding="utf-8") as cf:
-                    cf.write(chunk if isinstance(chunk, str) else str(chunk))
-                # Verify file was written correctly
                 written_size = os.path.getsize(chunk_path)
-                if written_size > 0:
-                    chunk_files.append(chunk_path)
-                    artifacts_for_distribution.append(chunk_path)
-                    valid_chunks += 1
-                    total_chunk_size += written_size
-                    logger.info(f"Created chunk: {chunk_path.name} ({len(chunk)} chars, {written_size} bytes)")
-                    if dedup_manager and dedup_hash_value:
-                        dedup_manager.add_hash(dedup_hash_value, chunk_dedup_id)
-                    chunk_record = {
-                        "chunk_id": chunk_id,
-                        "chunk_index": chunk_index,
-                        "file": chunk_path.name,
-                        "tags": chunk_tags,
-                        "key_terms": chunk_metadata.get("key_terms", []),
-                        "summary": chunk_metadata.get("summary", ""),
-                        "char_length": chunk_metadata.get("char_length", len(chunk)),
-                        "byte_length": written_size,
-                    }
-                    chunk_records.append(chunk_record)
-                    generated_chunk_ids.append(chunk_id)
-                    if METADATA_ENABLED:
-                        update_session_tag_counts(chunk_tags)
-                else:
-                    logger.warning(f"Zero-byte chunk prevented: {chunk_path.name}")
-                    session_stats["zero_byte_prevented"] += 1
-                    os.remove(chunk_path)
-            except Exception as e:
-                logger.error(f"Failed to write chunk {chunk_index} for {file_path.name}: {e}")
-                if db:
-                    try:
-                        db.log_error("ChunkWriteError", str(e), traceback.format_exc(), str(file_path))
-                    except Exception as db_error:
-                        logger.warning(f"Failed to log chunk write error to database: {db_error}")
+            except OSError:
+                logger.warning("Chunk file missing after write attempt: %s", chunk_path)
+                continue
+
+            if written_size <= 0:
+                logger.warning(f"Zero-byte chunk prevented: {chunk_path.name}")
+                session_stats["zero_byte_prevented"] += 1
+                try:
+                    chunk_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception as unlink_error:
+                    logger.debug("Failed to remove zero-byte chunk %s: %s", chunk_path, unlink_error)
+                continue
+
+            chunk_files.append(chunk_path)
+            artifacts_for_distribution.append(chunk_path)
+            valid_chunks += 1
+            total_chunk_size += written_size
+            logger.info(
+                "Created chunk: %s (%d chars, %d bytes)",
+                chunk_path.name,
+                len(payload["chunk"]),
+                written_size,
+            )
+
+            if dedup_manager and payload.get("dedup_hash_value"):
+                try:
+                    dedup_manager.add_hash(payload["dedup_hash_value"], payload["chunk_dedup_id"])
+                except Exception as dedup_error:
+                    logger.debug("Failed to register dedup hash for %s: %s", chunk_path, dedup_error)
+
+            chunk_record = {
+                "chunk_id": payload["chunk_id"],
+                "chunk_index": payload["chunk_index"],
+                "file": chunk_path.name,
+                "tags": payload["chunk_tags"],
+                "key_terms": payload["chunk_metadata"].get("key_terms", []),
+                "summary": payload["chunk_metadata"].get("summary", ""),
+                "char_length": payload["chunk_metadata"].get("char_length", len(payload["chunk"])),
+                "byte_length": written_size,
+            }
+            chunk_records.append(chunk_record)
+            generated_chunk_ids.append(payload["chunk_id"])
+            if METADATA_ENABLED:
+                update_session_tag_counts(payload["chunk_tags"])
 
         if generated_chunk_ids:
             manifest_data["chunk_ids"] = generated_chunk_ids
 
         manifest_copy_path = file_output_folder / f"{timestamp}_{clean_base}.origin.json"
         try:
-            manifest_copy_path.parent.mkdir(parents=True, exist_ok=True)
-            dump_json(manifest_data, manifest_copy_path)
-            artifacts_for_distribution.append(manifest_copy_path)
+            if manifest_path.exists():
+                copy_manifest_sidecar(str(manifest_path), str(manifest_copy_path))
+                artifacts_for_distribution.append(manifest_copy_path)
+            else:
+                logger.warning("Manifest source missing for %s, skipping copy.", file_path.name)
         except Exception as manifest_copy_error:  # noqa: BLE001
             logger.warning(
                 "Failed to write manifest copy for %s: %s",
@@ -1059,10 +1203,13 @@ def process_file_enhanced(file_path, config):
             except Exception as db_error:
                 logger.warning(f"Failed to log processing error to database: {db_error}")
         
-        try:
-            notifications.send_error_alert(error_msg, str(file_path), traceback.format_exc())
-        except Exception as notify_error:
-            logger.warning(f"Failed to send error alert: {notify_error}")
+        notify_with_rate_limit(
+            f"processing-error:{file_path}",
+            notifications.send_error_alert,
+            error_msg,
+            str(file_path),
+            traceback.format_exc(),
+        )
         
         # Update department breakdown
         department = get_department_config(file_path).get("department", "default")
@@ -1073,58 +1220,92 @@ def process_file_enhanced(file_path, config):
         session_stats["errors"] += 1
         return False
 
+def _pool_process_entry(args: Tuple[str, Dict[str, Any]]):
+    path_str, cfg = args
+    try:
+        return process_with_retries(Path(path_str), cfg)
+    except Exception:
+        logger.exception("Process pool worker failed for %s", path_str)
+        return False
+
+
 def process_files_parallel(file_list, config):
     """Process multiple files in parallel"""
     if not file_list:
         return []
     
     global monitoring
-    max_workers = min(4, multiprocessing.cpu_count(), len(file_list))
-    logger.info(f"Processing {len(file_list)} files with {max_workers} workers")
-    
-    results = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all jobs
-        future_to_file = {
-            executor.submit(process_with_retries, file_path, config): file_path
-            for file_path in file_list
-        }
+    use_pool = config.get("enable_process_pool", False) and len(file_list) >= 32
+    results: List[bool] = []
+
+    if use_pool:
+        pool_workers = min(multiprocessing.cpu_count(), len(file_list))
+        logger.info("Processing %d files with process pool (%d workers)", len(file_list), pool_workers)
+        try:
+            with multiprocessing.Pool(processes=pool_workers) as pool:
+                args = [(str(file_path), config) for file_path in file_list]
+                for result in pool.imap(_pool_process_entry, args, chunksize=32):
+                    results.append(bool(result))
+                    session_stats["parallel_jobs_completed"] += 1
+        except Exception as pool_error:
+            logger.warning("Process pool fallback due to error: %s", pool_error)
+            results.clear()
+            use_pool = False
+
+    if not use_pool:
+        max_workers = min(4, multiprocessing.cpu_count(), len(file_list))
+        logger.info(f"Processing {len(file_list)} files with {max_workers} workers")
         
-        # Collect results with timeout
-        for future in future_to_file:
-            try:
-                file_path = future_to_file[future]
-                result = future.result(timeout=300)  # 5 minute timeout per file
-                results.append(result)
-                session_stats["parallel_jobs_completed"] += 1
-                if monitoring and monitoring.enabled:
-                    monitoring.record_processing_event(
-                        bool(result),
-                        {"file": file_path.name, "mode": "parallel"},
-                    )
-                    if not result:
-                        monitoring.record_error(
-                            "ProcessingFailure",
-                            f"Parallel processing failed for {file_path.name}",
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {
+                executor.submit(process_with_retries, file_path, config): file_path
+                for file_path in file_list
+            }
+            
+            for future in future_to_file:
+                try:
+                    file_path = future_to_file[future]
+                    result = future.result(timeout=300)  # 5 minute timeout per file
+                    results.append(result)
+                    session_stats["parallel_jobs_completed"] += 1
+                    if monitoring and monitoring.enabled:
+                        monitoring.record_processing_event(
+                            bool(result),
+                            {"file": file_path.name, "mode": "parallel"},
                         )
-            except Exception as e:
-                file_path = future_to_file[future]
-                logger.error(f"Parallel processing failed for {file_path}: {e}")
-                if db:
-                    try:
-                        db.log_error("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path))
-                    except Exception as db_error:
-                        logger.warning(f"Failed to log parallel processing error to database: {db_error}")
-                results.append(False)
-                if monitoring and monitoring.enabled:
-                    monitoring.record_processing_event(
-                        False, {"file": file_path.name, "mode": "parallel"}
-                    )
-                    monitoring.record_error(
-                        "ProcessingException",
-                        f"Parallel worker raised exception for {file_path.name}: {e}",
-                        severity="critical",
-                    )
+                        if not result:
+                            monitoring.record_error(
+                                "ProcessingFailure",
+                                f"Parallel processing failed for {file_path.name}",
+                            )
+                except Exception as e:
+                    file_path = future_to_file[future]
+                    logger.error(f"Parallel processing failed for {file_path}: {e}")
+                    if db:
+                        try:
+                            db.log_error("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path))
+                        except Exception as db_error:
+                            logger.warning(f"Failed to log parallel processing error to database: {db_error}")
+                    results.append(False)
+                    if monitoring and monitoring.enabled:
+                        monitoring.record_processing_event(
+                            False, {"file": file_path.name, "mode": "parallel"}
+                        )
+                        monitoring.record_error(
+                            "ProcessingException",
+                            f"Parallel worker raised exception for {file_path.name}: {e}",
+                            severity="critical",
+                        )
+    elif monitoring and monitoring.enabled:
+        for file_path, result in zip(file_list, results):
+            monitoring.record_processing_event(
+                bool(result), {"file": file_path.name, "mode": "process-pool"}
+            )
+            if not result:
+                monitoring.record_error(
+                    "ProcessingFailure",
+                    f"Process pool failed for {file_path.name}",
+                )
     
     successful = sum(1 for r in results if r)
     logger.info(f"Parallel processing complete: {successful}/{len(file_list)} files successful")
@@ -1491,6 +1672,8 @@ def main():
                         for i, result in enumerate(results):
                             if result:
                                 processed_files.add(new_files[i].name)
+                                if len(processed_files) > 1000:
+                                    processed_files.clear()
                     else:
                         # Process files sequentially
                         for file_path in new_files:
@@ -1535,6 +1718,8 @@ def main():
 
                             if success:
                                 processed_files.add(file_path.name)
+                                if len(processed_files) > 1000:
+                                    processed_files.clear()
                                 logger.info(f"Successfully processed: {file_path.name}")
                             else:
                                 logger.error(f"Failed to process: {file_path.name}")
@@ -1581,10 +1766,12 @@ def main():
                         db.log_error("MainLoopError", str(e), traceback.format_exc())
                     except Exception as db_error:
                         logger.warning(f"Failed to log main loop error to database: {db_error}")
-                try:
-                    notifications.send_error_alert(f"Critical main loop error: {str(e)}", stack_trace=traceback.format_exc())
-                except Exception as notify_error:
-                    logger.warning(f"Failed to send error alert: {notify_error}")
+                notify_with_rate_limit(
+                    "main-loop-error",
+                    notifications.send_error_alert,
+                    f"Critical main loop error: {str(e)}",
+                    stack_trace=traceback.format_exc(),
+                )
                 time.sleep(10)
                 
     finally:
@@ -1594,6 +1781,10 @@ def main():
             backup_manager.stop_scheduled_backups()
         if monitoring and monitoring.enabled:
             monitoring.stop_monitoring()
+        try:
+            metrics_executor.shutdown(wait=False)
+        except Exception as exec_shutdown_error:
+            logger.debug("Metrics executor shutdown warning: %s", exec_shutdown_error)
         
         # Send shutdown notification
         notifications.send_email(

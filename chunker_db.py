@@ -18,22 +18,34 @@ except ImportError:  # pragma: no cover - optional dependency
 log = logging.getLogger(__name__)
 
 class ChunkerDatabase:
-    def __init__(self, db_path="chunker_tracking.db", timeout=90.0):  # Increased default timeout
+    def __init__(self, db_path="chunker_tracking.db", timeout=60.0):
         self.db_path = db_path
         self.timeout = timeout
         self._dept_stats_lock = threading.Lock()
         self.init_database()
+        try:
+            if not self.run_integrity_check():
+                log.warning("Database integrity check reported an issue at startup.")
+        except Exception:
+            log.exception("Failed to execute integrity check during initialization.")
+
+    def _conn(self):
+        conn = sqlite3.connect(self.db_path, timeout=60)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+        except sqlite3.OperationalError as pragma_error:
+            log.debug("PRAGMA setup warning: %s", pragma_error)
+        return conn
     
     def get_connection(self):
         """Get database connection with timeout and retry logic"""
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                conn = sqlite3.connect(self.db_path, timeout=self.timeout)
-                conn.execute("PRAGMA journal_mode=WAL")  # Use WAL mode for better concurrency
-                conn.execute("PRAGMA synchronous=NORMAL")  # Faster writes
-                conn.execute("PRAGMA cache_size=10000")  # Larger cache
-                conn.execute("PRAGMA temp_store=MEMORY")  # Use memory for temp tables
+                conn = self._conn()
                 return conn
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e) and attempt < max_retries - 1:
@@ -145,51 +157,64 @@ class ChunkerDatabase:
                 except:
                     pass
     
-    def log_error(self, error_type, error_message, stack_trace=None, filename=None):
+    def log_error(self, error_type, error_message=None, stack_trace=None, filename=None):
         """Log error information with retry handling for locked databases"""
         retries = 6
         delay = 0.5
 
+        treat_as_file_first = (
+            stack_trace is None
+            and filename is None
+            and error_message is not None
+            and isinstance(error_type, str)
+            and Path(str(error_type)).suffix
+        )
+
+        if treat_as_file_first:
+            file_name = str(error_type)
+            error_name = "GenericError"
+            message = str(error_message)
+        else:
+            file_name = filename
+            error_name = error_type or "UnknownError"
+            message = str(error_message or "")
+
         for attempt in range(retries):
-            conn = None
             try:
-                conn = self.get_connection()
-                cursor = conn.cursor()
-                cursor.execute(
-                    '''
-                    INSERT INTO error_log (error_type, error_message, stack_trace, filename)
-                    VALUES (?, ?, ?, ?)
-                    ''',
-                    (
-                        error_type or "UnknownError",
-                        (error_message or "")[:2048],
-                        stack_trace,
-                        filename,
-                    ),
-                )
-                conn.commit()
-                conn.close()
+                with self._conn() as conn:
+                    conn.execute(
+                        '''
+                        INSERT INTO error_log (error_type, error_message, stack_trace, filename)
+                        VALUES (?, ?, ?, ?)
+                        ''',
+                        (
+                            error_name,
+                            message[:2048],
+                            stack_trace,
+                            file_name,
+                        ),
+                    )
+                    conn.commit()
                 return
             except sqlite3.OperationalError as exc:
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:  # pragma: no cover - best effort
-                        pass
                 if "locked" in str(exc).lower() and attempt < retries - 1:
                     time.sleep(delay)
                     delay = min(delay * 2, 5.0)
                     continue
-                log.warning("Error log write failed after %s attempts: %s", attempt + 1, exc)
+                log.warning("log_error failed after %s tries: %s", attempt + 1, exc)
                 return
             except Exception as exc:  # noqa: BLE001
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:  # pragma: no cover
-                        pass
                 log.error("Failed to log error: %s", exc)
                 return
+    
+    def run_integrity_check(self) -> bool:
+        try:
+            with self._conn() as conn:
+                row = conn.execute("PRAGMA integrity_check").fetchone()
+                return bool(row and row[0] == "ok")
+        except Exception as e:
+            log.error("Integrity check failed: %s", e)
+            return False
     
     def log_system_metrics(self, cpu_percent, memory_percent, disk_percent, active_processes):
         """Log system performance metrics"""

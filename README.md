@@ -5,12 +5,15 @@
 ## What's New in v2.1.8+
 
 ### Recent Improvements (Post-v2.1.8)
-- **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` with their manifests, eliminating repeated warnings for empty files, placeholders, and "No measures found" messages.
-- **Chunk Writer Hardening**: Chunk outputs now pre-create directories, wrap per-file writes in try/except, and keep processing even when individual chunk files fail; manifest copies also ensure parent folders exist.
-- **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds (3 errors/min = 2x baseline), and 24-48 hour review schedules. Current baseline: 1.5 errors/minute (68% reduction from previous).
-- **SQLite Error Logging Resilience**: `chunker_db.log_error` retries locked inserts with exponential backoff and a 60 s timeout, which sharply reduces noisy “database is locked” traces.
-- **Enhanced Documentation**: All three primary docs (CHANGELOG, SUMMARY, README) updated with monitoring procedures, tiny file handling behavior, and archive organization details.
-- **Watcher Bridge Support**: `watcher_splitter.py` now ignores `.part` staging files until the final rename, optionally waits for `.ready` handshakes, retries processing up to three times, and quarantines stubborn failures to `03_archive/failed/`.
+- **Tiny File Archiving**: Files under 100 bytes are automatically parked in `03_archive/skipped_files/` with their manifests to eliminate endless “too small” retries.
+- **Manifest & Hash Safety**: Watcher now skips any file containing `.origin.json` in its name and recomputes content hashes when the manifest is missing a checksum so incremental tracking remains intact.
+- **Chunk Writer Hardening**: Consolidated `write_chunk_files()` helper creates the directory once, writes UTF-8 chunks with defensive logging, and `copy_manifest_sidecar()` guarantees parent folders exist before copying manifests.
+- **Parallel Queue Handling**: Added optional `multiprocessing.Pool` batches for queues ≥32 files (config flag), plus automatic pruning of the `processed_files` set to prevent long-running watcher stalls.
+- **Tokenizer & Metrics Optimizations**: Sentence tokenization is LRU-cached, system metrics run on a background executor, and notification bursts are throttled with a 60-second rate limiter per alert key.
+- **SQLite Resilience**: Centralized `_conn()` helper sets 60 s timeouts, `log_error()` now understands both legacy signatures and retries lock errors, and `run_integrity_check()` validates the DB at startup.
+- **Test Coverage & Pytest Guardrails**: Root `conftest.py` skips bulky `99_doc/legacy` suites and `tests/test_db.py` smoke-tests the new retry path to ensure future regressions fail fast.
+- **Database Lock Monitoring**: `MONITOR_DB_LOCKS.md` documents command-line checks, baseline metrics (1.5 errors/min), and alert thresholds (3 errors/min = 2× baseline).
+- **Watcher Bridge Support**: `watcher_splitter.py` understands `.part` staging files, waits for optional `.ready` signals, retries processing up to three times, and quarantines stubborn failures to `03_archive/failed/`.
 - **Batched Chroma Ingest**: `ChromaRAG.add_chunks_bulk()` honours `batch.size`, skips null embeddings, and refreshes `hnsw:search_ef` from `config.json` so the vector store keeps pace with high-volume ingest.
 
 ### v2.1.8 Release (2025-11-07)

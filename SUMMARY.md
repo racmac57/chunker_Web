@@ -40,16 +40,29 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **Preserved Files**: Tiny files are preserved in archive for review rather than left in watch folder or deleted.
 
 ### Chunk Writer & Manifest Hardening
-- **Single Directory Pass**: Chunk writes now pre-create destination folders, catch per-file errors, and log failures without crashing subsequent chunks.
-- **Manifest Copies**: Sidecars and manifest copies ensure parent directories exist, preventing `FileNotFoundError` when writing into fresh OneDrive folders.
-- **Content Hash Fallback**: Version tracker will re-hash content if a file arrives without a stored checksum.
+- **Single Directory Pass**: Consolidated `write_chunk_files()` builds the parent folder once, writes each chunk with UTF-8 safety, and logs failures without halting the batch.
+- **Manifest Copies**: `copy_manifest_sidecar()` now always prepares the destination path before cloning manifests, preventing `FileNotFoundError` in fresh OneDrive hierarchies.
+- **Manifest Hygiene**: Watcher ignores any filename containing `.origin.json`, and automatically re-hashes content when manifests arrive without stored checksums so incremental tracking stays accurate.
 
 ### Database Lock Monitoring
 - **Monitoring Documentation**: Created `MONITOR_DB_LOCKS.md` with real-time monitoring commands, hourly error counts, and pattern analysis scripts.
 - **Alert Thresholds**: Established baseline at 1.5 errors/minute (68% reduction from previous), alert threshold at 3 errors/minute (2x baseline).
 - **24-48 Hour Review Schedule**: Structured monitoring plan to identify time-based clustering, processing volume correlation, and sustained error periods.
 - **Error Analysis**: Identified that 92% of lock errors occur in `log_processing()` (lacks retry wrapper) vs 8% in `_update_department_stats()` (has 5-retry backoff).
-- **Error Log Retries**: `chunker_db.log_error` now retries writes with exponential backoff and a 60 s SQLite timeout, dramatically reducing `database is locked` noise.
+- **Error Log Retries**: `chunker_db.log_error` supports both legacy and streamlined call signatures while retrying writes with exponential backoff and a 60 s SQLite timeout, dramatically reducing `database is locked` noise.
+
+### Queue & Metrics Optimizations
+- **Tokenizer Cache**: Sentence tokenization uses an LRU cache so repeat documents avoid redundant NLTK calls.
+- **Background Metrics**: System metrics run on a dedicated executor and notification bursts are rate-limited (once every 60 s per key) to keep the main watcher loop responsive.
+- **Queue Handling**: Optional `multiprocessing.Pool` batches (configurable) accelerate heavy backlogs, while the `processed_files` set auto-clears past 1,000 entries to prevent lookup bloat.
+
+### SQLite Reliability
+- **Centralized Connection Helper**: `_conn()` applies 60 s timeouts and WAL pragmas across the module, and `get_connection()` delegates to it for consistency.
+- **Integrity Check**: `run_integrity_check()` runs at startup, logging anomalies before work begins.
+
+### Testing & Collection Guardrails
+- **Legacy Skip Hook**: Root `conftest.py` skips `99_doc/legacy` collections to keep pytest runs focused on active suites.
+- **DB Smoke Test**: `tests/test_db.py` exercises the new retry logic, ensuring locked inserts surface immediately during CI.
 
 ### Windows Console Encoding
 - **UTF-8 Shell Setup**: Documented `chcp 65001` and `PYTHONIOENCODING=utf-8` steps so emoji-rich filenames no longer trigger Unicode logging errors on Windows watchers.
