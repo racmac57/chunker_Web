@@ -722,3 +722,4 @@ For detailed Git setup information, see `GIT_SETUP_STATUS.md`.
 
 **Git Status:** ✅ Repository initialized, connected to GitHub, and regularly backed up
 [![Release](https://img.shields.io/github/v/release/racmac57/chunker_Web?display_name=tag&sort=semver)](https://github.com/racmac57/chunker_Web/releases/latest)
+[![CI](https://github.com/racmac57/chunker_Web/actions/workflows/ci.yml/badge.svg)](https://github.com/racmac57/chunker_Web/actions/workflows/ci.yml)
