@@ -7,11 +7,19 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 import time
+import threading
+from contextlib import nullcontext
+
+try:
+    import portalocker  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    portalocker = None
 
 class ChunkerDatabase:
     def __init__(self, db_path="chunker_tracking.db", timeout=60.0):  # Increased from 30 to 60 seconds
         self.db_path = db_path
         self.timeout = timeout
+        self._dept_stats_lock = threading.Lock()
         self.init_database()
     
     def get_connection(self):
@@ -183,81 +191,90 @@ class ChunkerDatabase:
         """Update department statistics with retry logic for database locks"""
         max_retries = 5  # Increased from 3 to 5
         retry_delay = 1.0  # Increased from 0.5 to 1.0 second
-
-        for attempt in range(max_retries):
-            conn = None
+        lock_path = Path(f"{self.db_path}.dept.lock")
+        if portalocker:
             try:
-                conn = self.get_connection()
-                cursor = conn.cursor()
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        lock_ctx = portalocker.Lock(str(lock_path), timeout=15) if portalocker else nullcontext()
 
-                # Check if department exists
-                cursor.execute('SELECT * FROM department_stats WHERE department = ?', (department,))
-                exists = cursor.fetchone()
-
-                if exists:
-                    # Update existing record
-                    if success:
-                        cursor.execute('''
-                            UPDATE department_stats
-                            SET files_processed = files_processed + 1,
-                                chunks_created = chunks_created + ?,
-                                total_processing_time = total_processing_time + ?,
-                                last_updated = CURRENT_TIMESTAMP
-                            WHERE department = ?
-                        ''', (chunks_created, processing_time, department))
-                    else:
-                        cursor.execute('''
-                            UPDATE department_stats
-                            SET errors = errors + 1,
-                                last_updated = CURRENT_TIMESTAMP
-                            WHERE department = ?
-                        ''', (department,))
-                else:
-                    # Create new record
-                    if success:
-                        cursor.execute('''
-                            INSERT INTO department_stats
-                            (department, files_processed, chunks_created, total_processing_time)
-                            VALUES (?, 1, ?, ?)
-                        ''', (department, chunks_created, processing_time))
-                    else:
-                        cursor.execute('''
-                            INSERT INTO department_stats
-                            (department, errors)
-                            VALUES (?, 1)
-                        ''', (department,))
-
-                conn.commit()
-                conn.close()
-                return  # Success, exit retry loop
-
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e) and attempt < max_retries - 1:
-                    # Only log warning on first and last retry to reduce log spam
-                    if attempt == 0 or attempt == max_retries - 2:
-                        logging.warning(f"Department stats update locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
-                    if conn:
-                        try:
-                            conn.close()
-                        except:
-                            pass
-                    time.sleep(retry_delay)
-                    retry_delay *= 1.5  # Slower exponential backoff (was 2)
-                else:
-                    logging.error(f"Failed to update department stats after {max_retries} attempts: {e}")
-                    if conn:
-                        try:
-                            conn.close()
-                        except:
-                            pass
-            except Exception as e:
-                logging.error(f"Failed to update department stats: {e}")
-                if conn:
+        with self._dept_stats_lock:
+            with lock_ctx:
+                for attempt in range(max_retries):
+                    conn = None
                     try:
+                        conn = self.get_connection()
+                        cursor = conn.cursor()
+
+                        # Check if department exists
+                        cursor.execute('SELECT * FROM department_stats WHERE department = ?', (department,))
+                        exists = cursor.fetchone()
+
+                        if exists:
+                            # Update existing record
+                            if success:
+                                cursor.execute('''
+                                    UPDATE department_stats
+                                    SET files_processed = files_processed + 1,
+                                        chunks_created = chunks_created + ?,
+                                        total_processing_time = total_processing_time + ?,
+                                        last_updated = CURRENT_TIMESTAMP
+                                    WHERE department = ?
+                                ''', (chunks_created, processing_time, department))
+                            else:
+                                cursor.execute('''
+                                    UPDATE department_stats
+                                    SET errors = errors + 1,
+                                        last_updated = CURRENT_TIMESTAMP
+                                    WHERE department = ?
+                                ''', (department,))
+                        else:
+                            # Create new record
+                            if success:
+                                cursor.execute('''
+                                    INSERT INTO department_stats
+                                    (department, files_processed, chunks_created, total_processing_time)
+                                    VALUES (?, 1, ?, ?)
+                                ''', (department, chunks_created, processing_time))
+                            else:
+                                cursor.execute('''
+                                    INSERT INTO department_stats
+                                    (department, errors)
+                                    VALUES (?, 1)
+                                ''', (department,))
+
+                        conn.commit()
                         conn.close()
-                    except:
-                        pass
-                break  # Don't retry on non-lock errors
+                        return  # Success, exit retry loop
+
+                    except sqlite3.OperationalError as e:
+                        if "database is locked" in str(e) and attempt < max_retries - 1:
+                            # Only log warning on first and last retry to reduce log spam
+                            if attempt == 0 or attempt == max_retries - 2:
+                                logging.warning(f"Department stats update locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                            if conn:
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
+                            time.sleep(retry_delay)
+                            retry_delay *= 1.5  # Slower exponential backoff (was 2)
+                        else:
+                            logging.error(f"Failed to update department stats after {max_retries} attempts: {e}")
+                            if conn:
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
+                    except Exception as e:
+                        logging.error(f"Failed to update department stats: {e}")
+                        if conn:
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                        break  # Don't retry on non-lock errors
     
     def get_analytics(self, days=1):
         """Get analytics for the specified number of days"""

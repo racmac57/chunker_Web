@@ -8,7 +8,16 @@ $arc   = Join-Path $OD "KB_Shared\03_archive"
 $out   = Join-Path $OD "KB_Shared\04_output"
 $new   = Join-Path $watch $Name
 
-"smoke test $(Get-Date -Format s)" | Set-Content -Encoding UTF8 $new
+$now = Get-Date -Format s
+$content = @"
+Smoke test $now
+This is a long test message to exceed the tiny-file threshold.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vestibulum at
+turpis id arcu finibus mattis. Suspendisse potenti. Phasellus sit amet
+felis eget eros interdum varius. Donec vitae augue ut magna feugiat
+ultrices. Integer in velit a arcu bibendum semper. End of message $now.
+"@
+$content | Set-Content -Encoding UTF8 $new
 
 $archivedPath = Join-Path $arc $Name
 $archived = $false
