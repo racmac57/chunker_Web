@@ -6,7 +6,9 @@
 
 ### Recent Improvements (Post-v2.1.8)
 - **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` with their manifests, eliminating repeated warnings for empty files, placeholders, and "No measures found" messages.
+- **Chunk Writer Hardening**: Chunk outputs now pre-create directories, wrap per-file writes in try/except, and keep processing even when individual chunk files fail; manifest copies also ensure parent folders exist.
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds (3 errors/min = 2x baseline), and 24-48 hour review schedules. Current baseline: 1.5 errors/minute (68% reduction from previous).
+- **SQLite Error Logging Resilience**: `chunker_db.log_error` retries locked inserts with exponential backoff and a 60 s timeout, which sharply reduces noisy “database is locked” traces.
 - **Enhanced Documentation**: All three primary docs (CHANGELOG, SUMMARY, README) updated with monitoring procedures, tiny file handling behavior, and archive organization details.
 - **Watcher Bridge Support**: `watcher_splitter.py` now ignores `.part` staging files until the final rename, optionally waits for `.ready` handshakes, retries processing up to three times, and quarantines stubborn failures to `03_archive/failed/`.
 - **Batched Chroma Ingest**: `ChromaRAG.add_chunks_bulk()` honours `batch.size`, skips null embeddings, and refreshes `hnsw:search_ef` from `config.json` so the vector store keeps pace with high-volume ingest.
@@ -307,6 +309,7 @@ Notes
 - Health: `powershell -File scripts/KB-Health.ps1`
 - Run report: `powershell -File tools/write_run_report.ps1`
 - Config check: `npm run kb:cfg:check`
+- Analytics snapshot: `npm run kb:analytics` (pass `-- --days 7` for weekly view)
 - Toggle dedupe: `npm run kb:cfg:dedupe:on` / `npm run kb:cfg:dedupe:off`
 - Toggle incremental updates: `npm run kb:cfg:incr:on` / `npm run kb:cfg:incr:off`
 - Consistency check: `npm run kb:consistency`

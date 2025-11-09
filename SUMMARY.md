@@ -39,18 +39,25 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **Cleaner Logs**: Changed from repeated WARNING messages to single INFO message on archive, reducing log spam.
 - **Preserved Files**: Tiny files are preserved in archive for review rather than left in watch folder or deleted.
 
+### Chunk Writer & Manifest Hardening
+- **Single Directory Pass**: Chunk writes now pre-create destination folders, catch per-file errors, and log failures without crashing subsequent chunks.
+- **Manifest Copies**: Sidecars and manifest copies ensure parent directories exist, preventing `FileNotFoundError` when writing into fresh OneDrive folders.
+- **Content Hash Fallback**: Version tracker will re-hash content if a file arrives without a stored checksum.
+
 ### Database Lock Monitoring
 - **Monitoring Documentation**: Created `MONITOR_DB_LOCKS.md` with real-time monitoring commands, hourly error counts, and pattern analysis scripts.
 - **Alert Thresholds**: Established baseline at 1.5 errors/minute (68% reduction from previous), alert threshold at 3 errors/minute (2x baseline).
 - **24-48 Hour Review Schedule**: Structured monitoring plan to identify time-based clustering, processing volume correlation, and sustained error periods.
 - **Error Analysis**: Identified that 92% of lock errors occur in `log_processing()` (lacks retry wrapper) vs 8% in `_update_department_stats()` (has 5-retry backoff).
+- **Error Log Retries**: `chunker_db.log_error` now retries writes with exponential backoff and a 60 s SQLite timeout, dramatically reducing `database is locked` noise.
 
 ### Windows Console Encoding
 - **UTF-8 Shell Setup**: Documented `chcp 65001` and `PYTHONIOENCODING=utf-8` steps so emoji-rich filenames no longer trigger Unicode logging errors on Windows watchers.
 
-### Archive Organization
+### Archive & Output Organisation
 - `03_archive/` - Successfully processed files
 - `03_archive/skipped_files/` - Files too small to process (< 100 bytes)
+- Output folders pre-create manifest and chunk directories, avoiding empty `03_archive/failed` fallbacks.
 
 ## Prior Highlights (v2.1.6)
 

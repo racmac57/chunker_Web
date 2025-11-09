@@ -14,12 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Streamlit GUI Doc**: Added `streamlit run gui_app.py` workflow to README and SUMMARY so users can launch the browser-based search interface.
 - **Chunker Bridge Compatibility**: Watcher now understands `.part` staging files and optional `.ready` markers produced by upstream bridges, keeping them off the work queue until the final rename is complete.
 - **Batched Vector Ingest**: `ChromaRAG.add_chunks_bulk()` accepts batches (configurable via `batch.size`) and skips null embeddings while refreshing `hnsw:search_ef` from `search.ef_search`.
+- **Analytics CLI**: Added `analytics_cli.py` plus npm alias `kb:analytics` for quick daily/weekly stats dumps from `chunker_tracking.db`.
 
 ### Changed
 - **Small File Handling**: Changed log level from WARNING to INFO for small file archiving since this is now expected behavior rather than an error condition.
 - **Archive Organization**: Added `skipped_files/` subfolder in archive directory to separate tiny/invalid files from successfully processed files.
 - **Watcher Retry Safety**: All sequential and parallel processing paths funnel through `process_with_retries()`, quarantining persistent failures to `03_archive/failed` after exponential backoff and copying any associated `.ready` files.
 - **Configuration Defaults**: New keys `debounce_window`, `use_ready_signal`, `failed_dir`, `batch.{size,flush_every,mem_soft_limit_mb}`, and `search.ef_search` expose watcher deferrals and vector-store tuning directly in `config.json`.
+- **Chunk Writer Robustness**: Chunk outputs pre-create folders once, wrap writes in try/except, and keep processing even when individual chunk files fail; manifest copies also ensure parent directories exist.
+- **SQLite Error Logging**: `chunker_db.log_error` retries locked inserts with exponential backoff and a 60 s timeout, slashing “database is locked” noise during peak ingest.
+- **Requirements Hygiene**: Simplified `requirements.txt` to unpinned dependency names and explicitly include `portalocker`, avoiding pip resolution failures on Python 3.13.
 
 ### Analysis & Documentation
 - **DB Lock Error Analysis**: Detailed breakdown showing 11 `log_processing()` errors vs 1 `_update_department_stats()` error over 8-minute test period (1.5 errors/min baseline, down 68% from previous baseline).
