@@ -306,6 +306,9 @@ Notes
 - Smoke test: `powershell -File scripts/Smoke-Test.ps1`
 - Health: `powershell -File scripts/KB-Health.ps1`
 - Run report: `powershell -File tools/write_run_report.ps1`
+- Config check: `npm run kb:cfg:check`
+- Toggle dedupe: `npm run kb:cfg:dedupe:on` / `npm run kb:cfg:dedupe:off`
+- Toggle incremental updates: `npm run kb:cfg:incr:on` / `npm run kb:cfg:incr:off`
 
 **Secondary PC**
 - Do not start the watcher.
@@ -315,6 +318,8 @@ Notes
 - Only one watcher process should run.
 - OneDrive folder must be set to Always keep on this device.
 - Duplicate protection is active through incremental updates and de-dup logic.
+- To auto-start on login, import `scripts/KB_Watcher_StartOnLogin.xml` in Task Scheduler (Action → Import Task) and confirm the action path points to `C:\_chunker`.
+- After import or any restart, run `npm run kb:health` to verify a single `Running (PID=…)` instance.
 
 ## 🔄 Consolidation (2025-10-29)
 - New sidecar flags (config.json):
