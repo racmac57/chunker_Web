@@ -8,6 +8,7 @@ from chromadb.config import Settings
 from copy import deepcopy
 from datetime import datetime
 import json
+import os
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -489,7 +490,12 @@ class ChromaRAG:
             if not path.exists():
                 return {}
             with path.open("r", encoding="utf-8") as handle:
-                return json.load(handle)
+                data = json.load(handle)
+            if isinstance(data, dict):
+                for key in ("watch_folder", "archive_dir", "output_dir"):
+                    if key in data:
+                        data[key] = os.path.expandvars(str(data[key]))
+            return data
         except Exception as exc:
             logger.debug("Unable to load global config: %s", exc)
             return {}
