@@ -298,6 +298,24 @@ Notes
 - Discovery is recursive under `02_data` and case-insensitive for extensions
 - Optional sidecar copy-back to `source/` is enabled via `copy_sidecar_to_source`
 
+## KB Operations (OneDrive)
+
+**Primary PC**
+- Start watcher: `powershell -File scripts/Start-Watcher.ps1`
+- Stop watcher: `powershell -File scripts/Stop-Watcher.ps1`
+- Smoke test: `powershell -File scripts/Smoke-Test.ps1`
+- Health: `powershell -File scripts/KB-Health.ps1`
+- Run report: `powershell -File tools/write_run_report.ps1`
+
+**Secondary PC**
+- Do not start the watcher.
+- Use `streamlit run gui_app.py` for search and answers.
+
+**Notes**
+- Only one watcher process should run.
+- OneDrive folder must be set to Always keep on this device.
+- Duplicate protection is active through incremental updates and de-dup logic.
+
 ## 🔄 Consolidation (2025-10-29)
 - New sidecar flags (config.json):
   - `enable_json_sidecar` (default: true)
