@@ -46,7 +46,8 @@ class ChromaRAG:
         chunk_index_str = str(chunk_index)
         return f"{timestamp}_{file_name}_chunk{chunk_index_str}"
 
-    def __init__(self, persist_directory="./chroma_db", 
+    def __init__(self, persist_directory="./chroma_db",
+                 persist_dir: Optional[str] = None,
                  hnsw_m: int = 32, 
                  hnsw_ef_construction: int = 512,
                  hnsw_ef_search: int = 200,
@@ -64,6 +65,10 @@ class ChromaRAG:
             hnsw_ef_search: Size of the dynamic candidate list during search (default: 200)
             recreate_collection: If True, delete existing collection and recreate with new HNSW params (default: False)
         """
+        # Allow alias parameter persist_dir
+        if persist_dir is not None:
+            persist_directory = persist_dir
+
         # Create settings with explicit API implementation
         chroma_settings = Settings(
             anonymized_telemetry=False,

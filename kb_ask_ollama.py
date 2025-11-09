@@ -40,7 +40,7 @@ def ask_kb(
     model: str = "llama3.1:8b",
     temperature: float = 0.2,
 ) -> Dict[str, Any]:
-    rag = ChromaRAG(persist_directory="./chroma_db", collection_name="chunker_knowledge_base")
+    rag = ChromaRAG(persist_dir="./chroma_db", collection_name="chunker_knowledge_base")
     hits = rag.search_similar(
         query=query,
         n_results=n_results,
