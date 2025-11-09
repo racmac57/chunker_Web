@@ -15,8 +15,10 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     portalocker = None
 
+log = logging.getLogger(__name__)
+
 class ChunkerDatabase:
-    def __init__(self, db_path="chunker_tracking.db", timeout=60.0):  # Increased from 30 to 60 seconds
+    def __init__(self, db_path="chunker_tracking.db", timeout=90.0):  # Increased default timeout
         self.db_path = db_path
         self.timeout = timeout
         self._dept_stats_lock = threading.Lock()
@@ -144,26 +146,50 @@ class ChunkerDatabase:
                     pass
     
     def log_error(self, error_type, error_message, stack_trace=None, filename=None):
-        """Log error information"""
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO error_log (error_type, error_message, stack_trace, filename)
-                VALUES (?, ?, ?, ?)
-            ''', (error_type, error_message, stack_trace, filename))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            logging.error(f"Failed to log error: {e}")
-            if 'conn' in locals():
-                try:
-                    conn.close()
-                except:
-                    pass
+        """Log error information with retry handling for locked databases"""
+        retries = 6
+        delay = 0.5
+
+        for attempt in range(retries):
+            conn = None
+            try:
+                conn = self.get_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    INSERT INTO error_log (error_type, error_message, stack_trace, filename)
+                    VALUES (?, ?, ?, ?)
+                    ''',
+                    (
+                        error_type or "UnknownError",
+                        (error_message or "")[:2048],
+                        stack_trace,
+                        filename,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+                return
+            except sqlite3.OperationalError as exc:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:  # pragma: no cover - best effort
+                        pass
+                if "locked" in str(exc).lower() and attempt < retries - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 5.0)
+                    continue
+                log.warning("Error log write failed after %s attempts: %s", attempt + 1, exc)
+                return
+            except Exception as exc:  # noqa: BLE001
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:  # pragma: no cover
+                        pass
+                log.error("Failed to log error: %s", exc)
+                return
     
     def log_system_metrics(self, cpu_percent, memory_percent, disk_percent, active_processes):
         """Log system performance metrics"""

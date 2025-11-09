@@ -830,23 +830,25 @@ def process_file_enhanced(file_path, config):
                     )
                     continue
 
+            chunk_path = file_output_folder / chunk_filename
             try:
-                with open(chunk_file, "w", encoding="utf-8") as cf:
-                    cf.write(chunk)
+                chunk_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(chunk_path, "w", encoding="utf-8") as cf:
+                    cf.write(chunk if isinstance(chunk, str) else str(chunk))
                 # Verify file was written correctly
-                written_size = os.path.getsize(chunk_file)
+                written_size = os.path.getsize(chunk_path)
                 if written_size > 0:
-                    chunk_files.append(chunk_file)
-                    artifacts_for_distribution.append(chunk_file)
+                    chunk_files.append(chunk_path)
+                    artifacts_for_distribution.append(chunk_path)
                     valid_chunks += 1
                     total_chunk_size += written_size
-                    logger.info(f"Created chunk: {chunk_file.name} ({len(chunk)} chars, {written_size} bytes)")
+                    logger.info(f"Created chunk: {chunk_path.name} ({len(chunk)} chars, {written_size} bytes)")
                     if dedup_manager and dedup_hash_value:
                         dedup_manager.add_hash(dedup_hash_value, chunk_dedup_id)
                     chunk_record = {
                         "chunk_id": chunk_id,
                         "chunk_index": chunk_index,
-                        "file": chunk_file.name,
+                        "file": chunk_path.name,
                         "tags": chunk_tags,
                         "key_terms": chunk_metadata.get("key_terms", []),
                         "summary": chunk_metadata.get("summary", ""),
@@ -858,9 +860,9 @@ def process_file_enhanced(file_path, config):
                     if METADATA_ENABLED:
                         update_session_tag_counts(chunk_tags)
                 else:
-                    logger.warning(f"Zero-byte chunk prevented: {chunk_file.name}")
+                    logger.warning(f"Zero-byte chunk prevented: {chunk_path.name}")
                     session_stats["zero_byte_prevented"] += 1
-                    os.remove(chunk_file)
+                    os.remove(chunk_path)
             except Exception as e:
                 logger.error(f"Failed to write chunk {chunk_index} for {file_path.name}: {e}")
                 if db:
@@ -874,6 +876,7 @@ def process_file_enhanced(file_path, config):
 
         manifest_copy_path = file_output_folder / f"{timestamp}_{clean_base}.origin.json"
         try:
+            manifest_copy_path.parent.mkdir(parents=True, exist_ok=True)
             dump_json(manifest_data, manifest_copy_path)
             artifacts_for_distribution.append(manifest_copy_path)
         except Exception as manifest_copy_error:  # noqa: BLE001
