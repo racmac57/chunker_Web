@@ -1,18 +1,23 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 7 * * *"   # daily 07:00 UTC
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
-    runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.11','3.12','3.13']
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
       - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+        with: { python-version: ${{ matrix.python-version }} }
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -24,6 +29,12 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          pytest -q
-          if ($LASTEXITCODE -eq 5) { Write-Host "No tests collected. Treat as success."; exit 0 }
+          pytest -q --junitxml=test-results.xml
+          if ($LASTEXITCODE -eq 5) { "No tests collected" | Out-File test-results.xml; exit 0 }
           exit $LASTEXITCODE
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.python-version }}
+          path: test-results.xml
