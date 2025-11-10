@@ -1,40 +1,60 @@
 name: ci
-on:\n  workflow_dispatch:\n  push:
+on:
+  workflow_dispatch:
+  push:
   pull_request:
   schedule:
-    - cron: "0 7 * * *"   # daily 07:00 UTC
+    - cron: "0 7 * * *"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   test:
+    runs-on: windows-latest
     strategy:
       matrix:
         python-version: ['3.11','3.12','3.13']
-    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+
+      - name: Git safe directory
+        shell: pwsh
+        run: |
+          git --version
+          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+          git rev-parse --is-inside-work-tree
+          git status
+
       - uses: actions/setup-python@v5
-        with: { python-version: ${{ matrix.python-version }} }
+        with:
+          python-version: ${{ matrix.python-version }}
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-${{ matrix.python-version }}-
+
       - name: Install deps
         run: pip install -r requirements.txt
+
       - name: Run tests
         shell: pwsh
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           pytest -q --junitxml=test-results.xml
           if ($LASTEXITCODE -eq 5) { "No tests collected" | Out-File test-results.xml; exit 0 }
           exit $LASTEXITCODE
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.python-version }}
           path: test-results.xml
-
