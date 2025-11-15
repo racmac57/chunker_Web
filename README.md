@@ -288,20 +288,30 @@ After toggling features, restart the watcher (`python watcher_splitter.py`) so r
 - [x] **Modular Architecture** - Clean separation of concerns
 - [x] **JSON Sidecar (optional)** - Per-file sidecar with chunk list, metadata, and Python code blocks
 
-### Windows “Send to” (Optional Helper)
+### Windows "Send to" (Optional Helper)
 To quickly drop files into `02_data` via right‑click:
 1. Press Win+R → type `shell:sendto` → Enter
-2. New → Shortcut → Target: `C:\_chunker\02_data` → Name: `Send to Chunker (02_data)`
-3. Right‑click any file → Send to → `Send to Chunker (02_data)`
+2. Copy `Chunker_MoveOptimized.bat` to the SendTo folder
+3. Right‑click any file → Send to → `Chunker_MoveOptimized.bat`
 
-Optional PowerShell variant (recommended): `SendTo\Chunker.ps1` + `Chunker.bat`
-- Recursively copies files/folders into `02_data`, preserving relative paths
+**PowerShell Script**: `Chunker_MoveOptimized.ps1` + `Chunker_MoveOptimized.bat`
+- Moves files/folders from OneDrive or local folders to `02_data`, preserving relative paths
 - Writes `<filename>.origin.json` manifest (original_full_path, times, size, sha256, optional hmac)
+- Automatically skips `.origin.json` manifest files to prevent processing loops
+- Handles OneDrive cloud files and reparse points using `-Force` parameter
+- Uses multi-method file detection for robust OneDrive compatibility
 - Watcher reads the manifest and populates sidecar `origin` (falls back if missing)
 
-Notes
+**Features:**
+- ✅ **OneDrive Support**: Detects and processes OneDrive online-only files and reparse points
+- ✅ **Manifest Filtering**: Automatically skips `.origin.json` metadata files
+- ✅ **Error Handling**: Retries file removal with exponential backoff for OneDrive sync issues
+- ✅ **Cleanup Utility**: Use `cleanup_origin_files.ps1` to remove leftover manifest files from Desktop
+
+**Notes:**
 - Discovery is recursive under `02_data` and case-insensitive for extensions
 - Optional sidecar copy-back to `source/` is enabled via `copy_sidecar_to_source`
+- If files remain on Desktop after "Send to", OneDrive may have restored them (check the error summary)
 
 ## KB Operations (OneDrive)
 
