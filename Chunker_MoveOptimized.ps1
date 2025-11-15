@@ -7,8 +7,41 @@ param(
     [string[]]$Paths
 )
 
+# Fix path handling - Windows "Send to" may pass paths without proper quoting
+# Reconstruct paths if they were split on spaces
+if ($Paths.Count -gt 0) {
+    $fixedPaths = @()
+    $currentPath = ""
+    
+    foreach ($arg in $Paths) {
+        if ($arg -match '^[A-Za-z]:\\.*') {
+            # This looks like the start of a path
+            if ($currentPath) {
+                # Save previous path if it exists
+                $fixedPaths += $currentPath
+            }
+            $currentPath = $arg
+        } elseif ($currentPath) {
+            # Continue building current path (handles spaces in paths)
+            $currentPath += " $arg"
+        } else {
+            # Standalone argument
+            $fixedPaths += $arg
+        }
+    }
+    
+    # Add the last path
+    if ($currentPath) {
+        $fixedPaths += $currentPath
+    }
+    
+    $Paths = $fixedPaths
+}
+
 $ErrorActionPreference = 'Continue'
 $script:HadErrors = $false
+$script:FailedFiles = @()
+$script:SkippedFiles = 0
 $DestFolder = "C:\_chunker\02_data"
 $KeyFile = "C:\_chunker\06_config\manifest_hmac.key"
 
@@ -96,17 +129,35 @@ function Process-File {
         Write-Host "[MOVE] Successfully moved: $($fileInfo.Name)" -ForegroundColor Green
 
         # Guard against OneDrive or sync clients restoring the original file immediately after move
-        Start-Sleep -Milliseconds 300
+        Start-Sleep -Milliseconds 500
         if (Test-Path $SourcePath) {
-            try {
-                Remove-Item -Path $SourcePath -Force -ErrorAction Stop
-                Write-Host "[CLEANUP] Removed residual source copy: $($fileInfo.Name)" -ForegroundColor DarkYellow
-                $manifest.source_cleanup = "removed_residual_copy"
-            } catch {
-                Write-Warning "Residual source copy could not be removed for $($fileInfo.Name): $_"
-                $manifest.source_cleanup = "cleanup_failed"
-                $manifest.source_cleanup_error = $_.ToString()
-                $script:HadErrors = $true
+            # Retry removal up to 3 times for OneDrive files
+            $removed = $false
+            for ($retry = 1; $retry -le 3; $retry++) {
+                try {
+                    Remove-Item -Path $SourcePath -Force -ErrorAction Stop
+                    Start-Sleep -Milliseconds 200
+                    if (-not (Test-Path $SourcePath)) {
+                        Write-Host "[CLEANUP] Removed residual source copy: $($fileInfo.Name) (attempt $retry)" -ForegroundColor DarkYellow
+                        $manifest.source_cleanup = "removed_residual_copy"
+                        $removed = $true
+                        break
+                    }
+                } catch {
+                    if ($retry -eq 3) {
+                        Write-Warning "Residual source copy could not be removed for $($fileInfo.Name) after 3 attempts: $_"
+                        Write-Warning "This may be due to OneDrive syncing. File may reappear on desktop."
+                        $manifest.source_cleanup = "cleanup_failed"
+                        $manifest.source_cleanup_error = $_.ToString()
+                        $script:HadErrors = $true
+                    } else {
+                        Start-Sleep -Milliseconds 300
+                    }
+                }
+            }
+            if (-not $removed) {
+                Write-Host "[WARNING] Source file still exists: $($fileInfo.Name) - OneDrive may restore it" -ForegroundColor Red
+                $script:FailedFiles += $fileInfo.FullName
             }
         } else {
             $manifest.source_cleanup = "not_required"
@@ -126,17 +177,35 @@ function Process-File {
             # Update manifest to reflect we're using original file
             $manifest.fallback_reason = $moveError.ToString()
 
-            Start-Sleep -Milliseconds 300
+            Start-Sleep -Milliseconds 500
             if (Test-Path $SourcePath) {
-                try {
-                    Remove-Item -Path $SourcePath -Force -ErrorAction Stop
-                    Write-Host "[CLEANUP] Removed source after copy fallback: $($fileInfo.Name)" -ForegroundColor DarkYellow
-                    $manifest.source_cleanup = "removed_after_copy"
-                } catch {
-                    Write-Warning "Failed to remove source after copy fallback for $($fileInfo.Name): $_"
-                    $manifest.source_cleanup = "cleanup_failed_after_copy"
-                    $manifest.source_cleanup_error = $_.ToString()
-                    $script:HadErrors = $true
+                # Retry removal up to 3 times for OneDrive files
+                $removed = $false
+                for ($retry = 1; $retry -le 3; $retry++) {
+                    try {
+                        Remove-Item -Path $SourcePath -Force -ErrorAction Stop
+                        Start-Sleep -Milliseconds 200
+                        if (-not (Test-Path $SourcePath)) {
+                            Write-Host "[CLEANUP] Removed source after copy fallback: $($fileInfo.Name) (attempt $retry)" -ForegroundColor DarkYellow
+                            $manifest.source_cleanup = "removed_after_copy"
+                            $removed = $true
+                            break
+                        }
+                    } catch {
+                        if ($retry -eq 3) {
+                            Write-Warning "Failed to remove source after copy fallback for $($fileInfo.Name) after 3 attempts: $_"
+                            Write-Warning "This may be due to OneDrive syncing. File may reappear on desktop."
+                            $manifest.source_cleanup = "cleanup_failed_after_copy"
+                            $manifest.source_cleanup_error = $_.ToString()
+                            $script:HadErrors = $true
+                        } else {
+                            Start-Sleep -Milliseconds 300
+                        }
+                    }
+                }
+                if (-not $removed) {
+                    Write-Host "[WARNING] Source file still exists: $($fileInfo.Name) - OneDrive may restore it" -ForegroundColor Red
+                    $script:FailedFiles += $fileInfo.FullName
                 }
             } else {
                 $manifest.source_cleanup = "not_found_after_copy"
@@ -207,17 +276,116 @@ function Process-Item {
         [string]$Path
     )
 
-    if (-not (Test-Path $Path)) {
-        Write-Warning "Path not found: $Path"
+    Write-Host "[DEBUG] Processing item: $Path" -ForegroundColor Gray
+    
+    if (-not $Path -or $Path.Trim() -eq "") {
+        Write-Warning "Empty path provided"
+        $script:HadErrors = $true
         return
     }
 
-    $item = Get-Item $Path
+    # Skip .origin.json manifest files - these are metadata files, not source files to process
+    $fileName = Split-Path -Leaf $Path -ErrorAction SilentlyContinue
+    if ($fileName -and $fileName -match '\.origin\.json$') {
+        Write-Host "[SKIP] Ignoring manifest file: $fileName" -ForegroundColor Yellow
+        Write-Host "[INFO] Manifest files (.origin.json) are metadata and should not be processed." -ForegroundColor Cyan
+        $script:SkippedFiles++
+        return
+    }
+
+    # Use LiteralPath to handle spaces and special characters
+    # Also try with [System.IO.File]::Exists as fallback for OneDrive files
+    $pathExists = (Test-Path -LiteralPath $Path) -or [System.IO.File]::Exists($Path) -or [System.IO.Directory]::Exists($Path)
+
+    if (-not $pathExists) {
+        Write-Warning "Path not found: $Path"
+        Write-Host "[DEBUG] Attempted to access: $Path" -ForegroundColor Yellow
+
+        # Check if parent directory exists (might be OneDrive online-only file)
+        $parentDir = Split-Path -Parent $Path -ErrorAction SilentlyContinue
+        if ($parentDir -and (Test-Path -LiteralPath $parentDir)) {
+            Write-Host "[DEBUG] Parent directory exists: $parentDir" -ForegroundColor Yellow
+            $fileName = Split-Path -Leaf $Path -ErrorAction SilentlyContinue
+            
+            # Check if file exists but might be online-only or have special attributes
+            try {
+                # Use -Force to see all files including hidden, system, and OneDrive reparse points
+                $allFiles = Get-ChildItem -LiteralPath $parentDir -Force -ErrorAction Stop
+                $matchingFile = $allFiles | Where-Object { $_.Name -eq $fileName }
+
+                if (-not $matchingFile) {
+                    # Fallback: Try System.IO methods which may see files that Get-ChildItem misses
+                    Write-Host "[DEBUG] Trying System.IO fallback for file detection..." -ForegroundColor Yellow
+                    try {
+                        $systemIOFiles = [System.IO.Directory]::GetFiles($parentDir)
+                        $matchingPath = $systemIOFiles | Where-Object { [System.IO.Path]::GetFileName($_) -eq $fileName }
+                        if ($matchingPath) {
+                            Write-Host "[INFO] File found using System.IO fallback: $matchingPath" -ForegroundColor Cyan
+                            $matchingFile = Get-Item -LiteralPath $matchingPath -Force
+                        }
+                    } catch {
+                        Write-Host "[DEBUG] System.IO fallback also failed: $_" -ForegroundColor Yellow
+                    }
+                }
+
+                if ($matchingFile) {
+                    Write-Host "[INFO] File found. Attributes: $($matchingFile.Attributes)" -ForegroundColor Cyan
+
+                    # Check if it's a OneDrive reparse point (cloud file)
+                    if ($matchingFile.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                        Write-Host "[INFO] File is a OneDrive cloud file (reparse point). Ensuring it's downloaded..." -ForegroundColor Cyan
+                    }
+
+                    # Try to access the file to trigger OneDrive download if needed
+                    try {
+                        $testContent = [System.IO.File]::ReadAllBytes($matchingFile.FullName)
+                        Write-Host "[SUCCESS] File is accessible: $($matchingFile.FullName)" -ForegroundColor Green
+                        $Path = $matchingFile.FullName
+                    } catch {
+                        Write-Warning "File exists but cannot be accessed. It may be online-only in OneDrive."
+                        Write-Warning "Please ensure the file is downloaded (right-click -> Always keep on this device)"
+                        Write-Warning "Error: $_"
+                        $script:HadErrors = $true
+                        return
+                    }
+                } else {
+                    Write-Host "[ERROR] File '$fileName' not found in parent directory" -ForegroundColor Red
+                    Write-Host "[DEBUG] Listing first 10 files in directory for reference:" -ForegroundColor Yellow
+                    $allFiles | Select-Object -First 10 | ForEach-Object {
+                        Write-Host "  - $($_.Name) [$($_.Attributes)]" -ForegroundColor Gray
+                    }
+                    if ($allFiles.Count -gt 10) {
+                        Write-Host "  ... and $($allFiles.Count - 10) more files" -ForegroundColor Gray
+                    }
+                    $script:HadErrors = $true
+                    return
+                }
+            } catch {
+                Write-Warning "Cannot list files in parent directory: $_"
+                $script:HadErrors = $true
+                return
+            }
+        } else {
+            Write-Warning "Parent directory does not exist: $parentDir"
+            $script:HadErrors = $true
+            return
+        }
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        Write-Warning "Failed to get item info for: $Path"
+        Write-Warning "Error: $_"
+        $script:HadErrors = $true
+        return
+    }
 
     if ($item.PSIsContainer) {
         # Process folder recursively
         Write-Host "[FOLDER] Processing recursively: $($item.Name)" -ForegroundColor Blue
-        $files = Get-ChildItem -Path $Path -File -Recurse
+        # Use -Force to ensure we get all files including hidden and OneDrive cloud files
+        $files = Get-ChildItem -Path $Path -File -Recurse -Force
         foreach ($file in $files) {
             $relativePath = $file.FullName.Substring($Path.Length).TrimStart('\')
             $destPath = Join-Path $DestFolder $relativePath
@@ -236,6 +404,21 @@ Write-Host "Chunker Move-Optimized SendTo Script" -ForegroundColor White
 Write-Host "===============================================" -ForegroundColor White
 Write-Host ""
 
+# Debug: Show received paths
+Write-Host "[DEBUG] Number of paths received: $($Paths.Count)" -ForegroundColor Cyan
+if ($Paths.Count -eq 0) {
+    Write-Host "[ERROR] No files were selected or passed to the script!" -ForegroundColor Red
+    Write-Host "[ERROR] Make sure you select files before using 'Send to'" -ForegroundColor Red
+    Write-Host ""
+    $script:HadErrors = $true
+} else {
+    Write-Host "[DEBUG] Paths received:" -ForegroundColor Cyan
+    foreach ($p in $Paths) {
+        Write-Host "  - $p" -ForegroundColor Cyan
+    }
+    Write-Host ""
+}
+
 foreach ($path in $Paths) {
     Write-Host "Processing: $path" -ForegroundColor White
     Process-Item -Path $path
@@ -245,6 +428,29 @@ foreach ($path in $Paths) {
 Write-Host "===============================================" -ForegroundColor White
 Write-Host "Processing Complete" -ForegroundColor Green
 Write-Host "===============================================" -ForegroundColor White
+
+# Show summary of skipped files
+if ($script:SkippedFiles -gt 0) {
+    Write-Host ""
+    Write-Host "SUMMARY: $($script:SkippedFiles) manifest file(s) skipped (.origin.json files)" -ForegroundColor Yellow
+    Write-Host "These are metadata files created by previous runs and should not be processed." -ForegroundColor Cyan
+    Write-Host "To clean up, you can delete these .origin.json files from your Desktop." -ForegroundColor Cyan
+    Write-Host ""
+}
+
+if ($script:FailedFiles.Count -gt 0) {
+    Write-Host ""
+    Write-Host "WARNING: The following files could not be removed from source location:" -ForegroundColor Red
+    Write-Host "This is likely due to OneDrive syncing. Files may reappear on your desktop." -ForegroundColor Yellow
+    Write-Host ""
+    foreach ($file in $script:FailedFiles) {
+        Write-Host "  - $file" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Host "Files were successfully copied to: $DestFolder" -ForegroundColor Green
+    Write-Host "You may need to manually delete the source files or pause OneDrive sync." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 if ($script:HadErrors) {
     exit 1

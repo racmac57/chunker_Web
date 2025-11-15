@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **OneDrive "Send to" Fix**: Fixed file detection for OneDrive-synced files by adding `-Force` parameter to `Get-ChildItem` calls, enabling detection of OneDrive reparse points and cloud files (Chunker_MoveOptimized.ps1).
+- **Manifest File Filtering**: Added automatic filtering to skip `.origin.json` manifest files during "Send to" operations, preventing infinite loops and processing of metadata files (Chunker_MoveOptimized.ps1).
+- **Multi-Method File Detection**: Implemented redundant file detection using `Test-Path`, `[System.IO.File]::Exists()`, and `[System.IO.Directory]::Exists()` for robust OneDrive file access (Chunker_MoveOptimized.ps1).
+- **System.IO Fallback**: Added .NET Framework fallback methods for file access when PowerShell cmdlets fail, improving compatibility with OneDrive online-only files (Chunker_MoveOptimized.ps1).
+- **Manifest Cleanup Script**: Created `cleanup_origin_files.ps1` utility script to remove `.origin.json` metadata files from Desktop (cleanup_origin_files.ps1).
 - **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` along with their manifests to prevent repeated processing warnings (watcher_splitter.py:677-703).
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds, and 24-48 hour review schedule for tracking SQLite contention patterns.
 - **Windows UTF-8 Troubleshooting**: Updated README/SUMMARY with steps for switching PowerShell to UTF-8 to avoid Unicode logging failures on emoji filenames.
@@ -35,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Monitoring Plan**: Established alert thresholds (> 3 errors/min = 2x baseline) and pattern analysis commands for time-based clustering, processing volume correlation, and error duration tracking.
 
 ### Fixed
+- **OneDrive File Detection**: Fixed "Send to" script failing to detect files on OneDrive-synced Desktop by using `-Force` parameter with `Get-ChildItem` to show reparse points and cloud files (Chunker_MoveOptimized.ps1).
+- **Manifest File Processing Loop**: Prevented infinite processing loops by automatically skipping `.origin.json` manifest files during "Send to" operations (Chunker_MoveOptimized.ps1).
+- **OneDrive Path Resolution**: Improved path handling for files with spaces and special characters using `-LiteralPath` and path reconstruction logic (Chunker_MoveOptimized.ps1).
 - **Repeated Warnings**: Eliminated log spam from files that don't meet minimum size threshold by archiving them on first detection instead of skipping repeatedly.
 - **Log Clutter**: Reduced noise in watcher logs by moving tiny files out of the watch folder automatically.
 

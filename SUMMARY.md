@@ -22,6 +22,8 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **`gui_app.py`** - Streamlit GUI for search, browsing results, and stats
 - **`manual_process_files.py`** - Manual file processing tool
 - **`verify_chunk_completeness.py`** - Verification script for backfill validation
+- **`Chunker_MoveOptimized.ps1`** - Windows "Send to" helper for moving files from OneDrive/Desktop to processing folder
+- **`cleanup_origin_files.ps1`** - Utility to remove leftover `.origin.json` manifest files from Desktop
 
 ## Changes in v2.1.8
 
@@ -33,6 +35,13 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **SQLite Robustness (2025-11-07)**: Extended connection timeout, layered exponential-backoff retries for department stats, and reduced "database is locked" noise during concurrent processing.
 
 ## Recent Improvements (Post-v2.1.8)
+
+### OneDrive "Send to" Integration (2025-11-14)
+- **OneDrive File Detection Fix**: Resolved issue where "Send to" script couldn't detect files on OneDrive-synced Desktop by adding `-Force` parameter to `Get-ChildItem` calls, enabling detection of OneDrive reparse points and cloud files.
+- **Manifest File Filtering**: Added automatic filtering to skip `.origin.json` manifest files during processing, preventing infinite loops when manifest files are accidentally selected.
+- **Multi-Method File Detection**: Implemented redundant file detection using PowerShell cmdlets and .NET Framework methods for robust OneDrive compatibility.
+- **Enhanced Error Reporting**: Improved debugging output and error messages to help diagnose OneDrive sync issues and file access problems.
+- **Cleanup Utility**: Created `cleanup_origin_files.ps1` script to remove leftover `.origin.json` metadata files from Desktop.
 
 ### Tiny File Handling
 - **Automatic Archiving**: Files under 100 bytes (empty files, placeholders, "No measures found" messages) are now automatically moved to `03_archive/skipped_files/` along with their manifests.
