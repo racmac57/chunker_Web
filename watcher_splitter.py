@@ -193,6 +193,20 @@ DEPARTMENT_CONFIGS = {
         "priority": "high",
         "description": "SCRPA (South County Regional Police Analytics) system"
     },
+    "fire": {
+        "chunk_size": 90,
+        "enable_redaction": True,  # Fire department data may contain sensitive incident info
+        "audit_level": "enhanced",
+        "priority": "high",
+        "description": "Fire department operations, incidents, and emergency response"
+    },
+    "ems": {
+        "chunk_size": 90,
+        "enable_redaction": True,  # EMS data may contain sensitive patient/incident info
+        "audit_level": "enhanced",
+        "priority": "high",
+        "description": "Emergency Medical Services operations, incidents, and patient care"
+    },
     "dashboard": {
         "chunk_size": 120,
         "enable_redaction": False,
@@ -889,6 +903,8 @@ def get_department_config(file_path):
         ("scrpa", ["scrpa"], 100, []),
         ("cad", ["cad", "computer-aided-dispatch", "computer aided dispatch"], 95, []),
         ("rms", ["rms", "records-management", "records management"], 95, []),
+        ("fire", ["fire", "fire-department", "fire_department", "firefighter", "firefighting"], 95, []),
+        ("ems", ["ems", "emergency-medical", "emergency_medical", "paramedic", "ambulance"], 95, []),
         
         # Product/system domains (check before code to prefer system over language)
         ("arcgis", ["arcgis", "arcpy", "gis", "geospatial"], 95, []),  # Higher priority than python

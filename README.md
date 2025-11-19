@@ -10,7 +10,7 @@
 - **Enhanced Parallel Processing**: Optional multiprocessing mode with automatic fallback to sequential processing on errors
 - **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and department detection
 - **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and path length checks
-- **Department Configuration Refactoring**: Domain-aware department detection (18 specialized departments: python, cad, claude, data-cleaning, etc.) with tailored chunk sizes and settings
+- **Department Configuration Refactoring**: Domain-aware department detection (20 specialized departments: python, cad, claude, data-cleaning, fire, ems, etc.) with tailored chunk sizes and settings
 - **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/`
 - **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters)
 - **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites

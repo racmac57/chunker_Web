@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Enhanced Parallel Processing**: Optional multiprocessing mode (`use_multiprocessing`) with automatic fallback to sequential processing (`multiprocessing_fallback`)
 - **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and domain-aware department detection
 - **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and Windows MAX_PATH handling (240 character limit)
-- **Department Configuration Refactoring**: 18 domain-specific departments (python, cad, claude, data-cleaning, excel, arcgis, powerbi, sql, etc.) with tailored chunk sizes, redaction, audit levels, and priority settings
+- **Department Configuration Refactoring**: 20 domain-specific departments (python, cad, claude, data-cleaning, excel, arcgis, powerbi, sql, fire, ems, etc.) with tailored chunk sizes, redaction, audit levels, and priority settings
 - **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/` with configurable threshold
 - **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters) using hash-based folder names
 - **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites
@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Emergency Services Departments**: Added `fire` and `ems` department configurations with high-priority processing, enhanced redaction, and optimized chunk sizes (90 sentences) for sensitive incident and patient data
 - **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` along with their manifests to prevent repeated processing warnings (watcher_splitter.py:677-703).
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds, and 24-48 hour review schedule for tracking SQLite contention patterns.
 - **Windows UTF-8 Troubleshooting**: Updated README/SUMMARY with steps for switching PowerShell to UTF-8 to avoid Unicode logging failures on emoji filenames.
