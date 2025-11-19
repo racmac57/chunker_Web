@@ -1,8 +1,19 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.8** - ChromaDB rebuilt with compatibility fixes, streamlined release automation, refreshed documentation, comprehensive regression coverage, plus watcher stability and SQLite hardening.
+**Version 2.1.9** - Performance improvements for large backlogs: batch processing, stability skip optimization, enhanced parallel processing, and OneDrive migration support.
 
-## What's New in v2.1.8+
+## What's New in v2.1.9+
+
+### Performance Improvements (2025-11-18)
+- **Batch Processing**: Configurable batch size (default 100 files per cycle) prevents system overload on large backlogs
+- **Stability Skip Optimization**: Files older than `stability_skip_minutes` (default 10) bypass expensive stability checks, dramatically reducing processing time for large backlogs
+- **Enhanced Parallel Processing**: Optional multiprocessing mode with automatic fallback to sequential processing on errors
+- **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and department detection
+- **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and path length checks
+- **Department Configuration Refactoring**: Domain-aware department detection (18 specialized departments: python, cad, claude, data-cleaning, etc.) with tailored chunk sizes and settings
+- **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/`
+- **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters)
+- **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites
 
 ### Recent Improvements (Post-v2.1.8)
 - **Tiny File Archiving**: Files under 100 bytes are automatically parked in `03_archive/skipped_files/` with their manifests to eliminate endless “too small” retries.
@@ -263,14 +274,16 @@ After toggling features, restart the watcher (`python watcher_splitter.py`) so r
 - [x] **Real-time Monitoring** - Watchdog-based file system monitoring
 - [x] **Debounced Processing** - Prevents race conditions and duplicate processing
 
-### Performance & Scalability (v2.1.2)
+### Performance & Scalability (v2.1.2+)
 - [x] **Dynamic Parallel Processing** - Up to 12 workers for large batches (50+ files)
-- [x] **Batch Processing** - Configurable batch sizes with system overload protection
+- [x] **Batch Processing** - Configurable batch sizes with system overload protection (default 100 files per cycle)
+- [x] **Stability Skip Optimization** - Files >10 minutes old bypass stability checks (configurable via `stability_skip_minutes`)
 - [x] **Database Optimization** - Batch logging eliminates locking issues
 - [x] **Smart File Archiving** - Failed files automatically moved to organized folders
 - [x] **Real-time Performance Metrics** - Files/minute, avg processing time, peak CPU/memory
-- [x] **500+ File Capability** - Handles large volumes efficiently without loops or crashes
+- [x] **Large Backlog Support** - Handles 5,000+ file backlogs efficiently (3.5 hours → 53 minutes for 6,500 files)
 - [x] **Source Folder Copying** - Configurable copying of processed files back to source locations
+- [x] **Multiprocessing Support** - Optional process pool for CPU-bound workloads with automatic fallback
 
 ### Evaluation & Quality Assurance
 - [x] **Comprehensive Metrics** - Precision@K, Recall@K, MRR, NDCG@K

@@ -10,6 +10,11 @@ import shutil
 import logging
 import traceback
 import threading
+import random
+import queue
+import sqlite3
+import hashlib
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from functools import lru_cache
@@ -101,25 +106,185 @@ INCREMENTAL_CONFIG: Dict[str, Any] = {}
 version_tracker = None
 monitoring: Optional[MonitoringSystem] = None
 
-# Department-specific configurations
+# Department-specific configurations based on actual content domains
+# Organized by: Software/Code, Product/System, AI/Chat, Data Operations
 DEPARTMENT_CONFIGS = {
+    # ========================================================================
+    # SOFTWARE/CODE DOMAINS
+    # ========================================================================
+    "python": {
+        "chunk_size": 100,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Python scripts, code, and programming content"
+    },
+    "sql": {
+        "chunk_size": 120,
+        "enable_redaction": True,  # May contain sensitive table/column names
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "SQL queries and database operations"
+    },
+    "dax": {
+        "chunk_size": 110,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Power BI DAX formulas and measures"
+    },
+    "mcode": {
+        "chunk_size": 115,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Power Query M-code and transformations"
+    },
+    "powershell": {
+        "chunk_size": 100,
+        "enable_redaction": True,  # May contain paths, credentials
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "PowerShell scripts and automation"
+    },
+    "repository": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "low",
+        "description": "Git repositories, version control, code management"
+    },
+    
+    # ========================================================================
+    # PRODUCT/SYSTEM DOMAINS
+    # ========================================================================
+    "cad": {
+        "chunk_size": 90,
+        "enable_redaction": True,  # CAD data may contain sensitive incident info
+        "audit_level": "enhanced",
+        "priority": "high",
+        "description": "CAD (Computer-Aided Dispatch) system data and operations"
+    },
+    "rms": {
+        "chunk_size": 85,
+        "enable_redaction": True,  # RMS contains sensitive law enforcement data
+        "audit_level": "full",
+        "priority": "high",
+        "description": "RMS (Records Management System) data and operations"
+    },
+    "arcgis": {
+        "chunk_size": 100,
+        "enable_redaction": False,  # GIS data typically not sensitive
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "ArcGIS, ArcPy, and geospatial operations"
+    },
+    "excel": {
+        "chunk_size": 130,
+        "enable_redaction": True,  # Excel files may contain sensitive data
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "Excel spreadsheets, formulas, and data processing"
+    },
+    "scrpa": {
+        "chunk_size": 95,
+        "enable_redaction": True,  # SCRPA is law enforcement related
+        "audit_level": "full",
+        "priority": "high",
+        "description": "SCRPA (South County Regional Police Analytics) system"
+    },
+    "dashboard": {
+        "chunk_size": 120,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Dashboards, visualizations, and reporting"
+    },
+    
+    # ========================================================================
+    # AI/CHAT DOMAINS
+    # ========================================================================
+    "claude": {
+        "chunk_size": 150,  # Chat logs are typically longer
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Claude AI conversation logs and chat sessions"
+    },
+    "chatgpt": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "ChatGPT conversation logs and chat sessions"
+    },
+    "ai-chat": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "General AI chat logs and conversation content"
+    },
+    
+    # ========================================================================
+    # DATA OPERATIONS DOMAINS
+    # ========================================================================
+    "data-cleaning": {
+        "chunk_size": 110,
+        "enable_redaction": True,  # Cleaning operations may expose data patterns
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "Data cleaning, validation, and sanitization operations"
+    },
+    "data-export": {
+        "chunk_size": 120,
+        "enable_redaction": True,  # Exports may contain sensitive data
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "Data export, extraction, and output operations"
+    },
+    "etl": {
+        "chunk_size": 115,
+        "enable_redaction": True,  # ETL pipelines may process sensitive data
+        "audit_level": "enhanced",
+        "priority": "normal",
+        "description": "ETL (Extract, Transform, Load) pipelines and workflows"
+    },
+    
+    # ========================================================================
+    # LEGACY/COMPATIBILITY DOMAINS (maintained for backward compatibility)
+    # ========================================================================
     "police": {
-        "chunk_size": 75,
+        "chunk_size": 85,
         "enable_redaction": True,
         "audit_level": "full",
-        "priority": "high"
+        "priority": "high",
+        "description": "Legacy: Police-related content (prefer 'cad' or 'rms')"
     },
     "admin": {
         "chunk_size": 150,
         "enable_redaction": False,
         "audit_level": "basic",
-        "priority": "normal"
+        "priority": "normal",
+        "description": "Legacy: Admin content (default fallback)"
     },
     "legal": {
         "chunk_size": 100,
         "enable_redaction": True,
         "audit_level": "full",
-        "priority": "high"
+        "priority": "high",
+        "description": "Legacy: Legal content (high sensitivity)"
+    },
+    
+    # ========================================================================
+    # DEFAULT FALLBACK
+    # ========================================================================
+    "default": {
+        "chunk_size": 150,
+        "enable_redaction": False,
+        "audit_level": "basic",
+        "priority": "normal",
+        "description": "Default configuration for unrecognized domains"
     }
 }
 
@@ -196,6 +361,49 @@ def init_database_with_retry():
 db = init_database_with_retry()
 notifications = NotificationSystem()
 
+# Database queue for sequential DB operations to prevent locking
+db_queue = queue.Queue()
+
+def db_retry(func, max_attempts=5):
+    """Retry database operations with exponential backoff and jitter"""
+    for attempt in range(max_attempts):
+        try:
+            return func()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < max_attempts - 1:
+                wait_time = (2 ** attempt) + random.random()
+                logger.warning(f"Database locked in db_retry, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_attempts})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Database operation failed after {max_attempts} attempts: {e}")
+                raise
+        except Exception as e:
+            logger.error(f"Database operation error: {e}")
+            raise
+
+def db_worker(q):
+    """Dedicated thread to process database operations sequentially"""
+    while True:
+        try:
+            func, args, kwargs = q.get()
+            if func is None:  # Shutdown signal
+                break
+            try:
+                db_retry(lambda: func(*args, **kwargs))
+            except Exception as e:
+                logger.error(f"DB queue error processing {func.__name__}: {e}")
+            finally:
+                q.task_done()
+        except Exception as e:
+            logger.error(f"DB worker error: {e}")
+            q.task_done()
+
+# Start database worker thread
+if db:
+    db_worker_thread = threading.Thread(target=db_worker, args=(db_queue,), daemon=True, name="DBWorker")
+    db_worker_thread.start()
+    logger.info("Database queue worker thread started")
+
 # Enhanced session statistics
 session_stats = {
     "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -216,6 +424,12 @@ session_stats = {
     "deduplication": {
         "duplicates_detected": 0,
         "chunks_skipped": 0
+    },
+    "file_deduplication": {
+        "existing_files_found": 0,
+        "files_skipped": 0,
+        "content_matches": 0,
+        "content_differences": 0
     },
     "incremental_updates": {
         "processed_files": 0,
@@ -344,17 +558,14 @@ def should_process_file(file_path: Path) -> bool:
 
     # Skip manifest files (.origin.json) - catch both exact suffix and embedded patterns
     if file_path.name.endswith('.origin.json') or '.origin.json.' in file_path.name:
-        logger.debug(f"Skipping manifest file: {file_path.name}")
         return False
 
     # Skip files in archive directory
     if '03_archive' in file_str or '\\03_archive\\' in file_str:
-        logger.debug(f"Skipping archived file: {file_path.name}")
         return False
 
     # Skip files in output directory
     if '04_output' in file_str or '\\04_output\\' in file_str:
-        logger.debug(f"Skipping output file: {file_path.name}")
         return False
 
     return True
@@ -385,13 +596,134 @@ def sanitize_folder_name(base_name: str, max_length: int = 60) -> str:
     return clean_name
 
 
-def write_chunk_files(doc_id: str, chunks: List[str], out_root: str) -> List[str]:
+def file_hash(path: Path) -> str:
+    """
+    Calculate SHA256 hash of file content using streaming (memory-safe).
+    
+    Args:
+        path: Path to file to hash
+        
+    Returns:
+        SHA256 hex digest of file content
+    """
+    sha256 = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except Exception as e:
+        logger.warning(f"Error hashing file {path}: {e}")
+        return ""
+
+
+def check_file_exists_and_compare(content: str, file_path: Path) -> Tuple[bool, bool]:
+    """
+    Check if file exists and compare content using hash comparison (memory-safe).
+    
+    Uses streaming hash calculation to avoid OOM on large files.
+    
+    Args:
+        content: Content to write
+        file_path: Path to check
+        
+    Returns:
+        Tuple of (file_exists, content_matches)
+        If file doesn't exist, returns (False, False)
+        If file exists, returns (True, True) if content matches, (True, False) if different
+    """
+    if not file_path.exists():
+        return (False, False)
+    
+    try:
+        # Fast path: compare file sizes first (avoids hashing if sizes differ)
+        content_bytes = content.encode("utf-8") if isinstance(content, str) else str(content).encode("utf-8")
+        content_size = len(content_bytes)
+        existing_size = file_path.stat().st_size
+        
+        if content_size != existing_size:
+            # Sizes differ, content must be different
+            return (True, False)
+        
+        # Sizes match, compare hashes for content verification
+        new_hash = hashlib.sha256(content_bytes).hexdigest()
+        existing_hash = file_hash(file_path)
+        
+        if not existing_hash:
+            # Could not hash existing file, assume different
+            return (True, False)
+        
+        content_matches = new_hash == existing_hash
+        return (True, content_matches)
+    except Exception as e:
+        logger.warning(f"Hash compare failed for {file_path}: {e}")
+        # If we can't compare, assume it's different
+        return (True, False)
+
+
+def write_chunk_files(doc_id: str, chunks: List[str], out_root: str, 
+                      check_duplicates: bool = True) -> List[str]:
+    """
+    Write chunk files to output directory with duplicate checking.
+    
+    Args:
+        doc_id: Document identifier (folder name)
+        chunks: List of chunk texts to write
+        out_root: Output root directory
+        check_duplicates: If True, check for existing files and skip duplicates
+        
+    Returns:
+        List of written file paths
+    """
     written: List[str] = []
     base = Path(out_root) / doc_id
     base.mkdir(parents=True, exist_ok=True)
 
     for i, text in enumerate(chunks):
         p = base / f"chunk_{i:05d}.txt"
+        
+        # Check for existing file if duplicate checking is enabled
+        if check_duplicates:
+            file_exists, content_matches = check_file_exists_and_compare(text, p)
+            
+            if file_exists:
+                session_stats["file_deduplication"]["existing_files_found"] += 1
+                
+                if content_matches:
+                    # File exists with identical content - skip
+                    logger.debug(f"Skipping duplicate file (identical content): {p.name}")
+                    session_stats["file_deduplication"]["files_skipped"] += 1
+                    session_stats["file_deduplication"]["content_matches"] += 1
+                    
+                    # Track skipped duplicates in database for audit
+                    if db:
+                        try:
+                            db_queue.put((
+                                db.log_processing,
+                                (
+                                    str(p.parent.parent.name),  # source file name
+                                    0,  # original_size (duplicate, so 0)
+                                    0,  # chunks_created (duplicate, so 0)
+                                    0,  # total_bytes (duplicate, so 0)
+                                    0.0,  # processing_time (duplicate, so 0)
+                                    True,  # success
+                                    f"Duplicate file skipped: {p.name}",
+                                    "admin"  # department
+                                ),
+                                {}
+                            ))
+                        except Exception as db_error:
+                            logger.debug(f"Failed to log duplicate skip to database: {db_error}")
+                    
+                    written.append(str(p))  # Still return path since file "exists"
+                    continue
+                else:
+                    # File exists but content is different - log warning but overwrite
+                    logger.warning(
+                        f"File exists with different content, overwriting: {p.name}"
+                    )
+                    session_stats["file_deduplication"]["content_differences"] += 1
+        
         try:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(text if isinstance(text, str) else str(text))
@@ -402,10 +734,23 @@ def write_chunk_files(doc_id: str, chunks: List[str], out_root: str) -> List[str
 
 
 def copy_manifest_sidecar(src_manifest: str, dst_path: str):
-    dst = Path(dst_path)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with open(src_manifest, "r", encoding="utf-8") as fsrc, open(dst, "w", encoding="utf-8") as fdst:
-        fdst.write(fsrc.read())
+    try:
+        dst = Path(dst_path)
+        # Ensure parent directory exists
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        # Check if parent directory actually exists before trying to write
+        if not dst.parent.exists():
+            logger.error("Parent directory does not exist for manifest copy: %s", dst.parent)
+            return
+        # Check if source exists
+        if not Path(src_manifest).exists():
+            logger.warning("Source manifest does not exist: %s", src_manifest)
+            return
+        with open(src_manifest, "r", encoding="utf-8") as fsrc, open(dst, "w", encoding="utf-8") as fdst:
+            fdst.write(fsrc.read())
+        logger.debug("Successfully copied manifest from %s to %s", src_manifest, dst_path)
+    except Exception as e:
+        logger.exception("Manifest copy failed from %s to %s: %s", src_manifest, dst_path, e)
 
 
 def safe_file_move(source_path: Path, dest_path: Path, max_retries: int = 3) -> bool:
@@ -476,22 +821,186 @@ def cleanup_previous_artifacts(artifact_paths: Iterable[str]) -> int:
     return removed
 
 
-def get_department_config(file_path):
-    """Determine department configuration based on file path or content"""
-    dept = CONFIG.get("default_department", "admin")
+def _age_minutes(path: Path) -> float:
+    """
+    Calculate file age in minutes.
     
-    # Check file path for department indicators
-    path_str = str(file_path).lower()
-    for department in DEPARTMENT_CONFIGS.keys():
-        if department in path_str:
-            dept = department
-            break
+    Args:
+        path: Path to file
+        
+    Returns:
+        Age in minutes, or float('inf') if file not found
+    """
+    try:
+        return (datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)).total_seconds() / 60.0
+    except FileNotFoundError:
+        return float("inf")
+
+
+def is_effectively_stable(path: Path, config: dict) -> bool:
+    """
+    Check if file is effectively stable (bypass expensive checks for old files).
+    
+    Files older than stability_skip_minutes are treated as stable without calling
+    file_is_settled() to avoid bottlenecks on large backlogs.
+    
+    Args:
+        path: Path to file to check
+        config: Configuration dictionary
+        
+    Returns:
+        True if file is stable (or old enough to assume stable), False otherwise
+    """
+    skip_minutes = config.get("stability_skip_minutes", 10)
+    age_min = _age_minutes(path)
+    
+    if age_min > skip_minutes:
+        # Old file → assume settled (skip expensive stability check)
+        return True
+    
+    # Fall back to original stability check for recently modified files
+    stability_timeout = config.get("file_stability_timeout", 2)
+    return file_is_settled(path, seconds=stability_timeout)
+
+
+def get_department_config(file_path):
+    """
+    Determine department configuration based on file path, filename, or metadata tags.
+    
+    Detection priority:
+    1. File path/filename keywords (most specific match wins)
+    2. Metadata tags from sidecar/origin.json (if available)
+    3. Default fallback
+    
+    Args:
+        file_path: Path to the file being processed
+        
+    Returns:
+        Merged configuration dictionary with department-specific settings
+    """
+    file_path_obj = Path(file_path)
+    path_str = str(file_path_obj).lower()
+    filename_lower = file_path_obj.name.lower()
+    
+    # Domain detection patterns with priority order (more specific first)
+    # Pattern: (domain_key, [list of keywords to match], priority_score, [file_extensions])
+    domain_patterns = [
+        # High-priority: Specific product/system domains (check first)
+        ("scrpa", ["scrpa"], 100, []),
+        ("cad", ["cad", "computer-aided-dispatch", "computer aided dispatch"], 95, []),
+        ("rms", ["rms", "records-management", "records management"], 95, []),
+        
+        # Product/system domains (check before code to prefer system over language)
+        ("arcgis", ["arcgis", "arcpy", "gis", "geospatial"], 95, []),  # Higher priority than python
+        
+        # Code/scripting domains (check file extensions first)
+        ("python", ["python"], 90, [".py"]),
+        ("powershell", ["powershell"], 85, [".ps1"]),
+        ("sql", ["sql"], 85, [".sql"]),
+        ("dax", ["dax", "powerbi", "power_bi", "power-bi"], 85, [".dax"]),
+        ("mcode", ["mcode", "m-code", "power-query", "m_query"], 85, [".m", ".pq"]),
+        ("excel", ["excel", "xlsx", "spreadsheet"], 85, [".xlsx", ".xls"]),
+        ("repository", ["repository", "git", "github"], 75, []),  # Don't match "repo" substring
+        ("dashboard", ["dashboard", "visualization", "chart"], 75, []),  # Don't match "report" substring
+        
+        # Data operations (check before generic matches, but after extensions)
+        ("data-cleaning", ["data-cleaning", "data_cleaning", "cleaning", "validate", "validation", "sanitize"], 90, []),
+        ("data-export", ["data-export", "data_export", "export", "extract"], 90, []),  # Specific + generic
+        ("etl", ["etl", "extract.*transform.*load"], 90, []),
+        
+        # AI/chat domains (check after code to avoid false positives)
+        ("claude", ["claude"], 70, []),
+        ("chatgpt", ["chatgpt"], 70, []),
+        ("ai-chat", ["chat", "conversation", "chatlog", "chat_log"], 65, []),
+        
+        # Legacy domains (lower priority, maintained for compatibility)
+        ("police", ["police", "law-enforcement", "law_enforcement"], 60, []),
+        ("legal", ["legal", "attorney", "lawsuit"], 60, []),
+        ("admin", ["admin", "administrative"], 50, []),
+    ]
+    
+    # Find best matching domain based on path/filename
+    best_match = None
+    best_score = 0
+    file_ext = file_path_obj.suffix.lower()
+    
+    for domain_key, keywords, priority, extensions in domain_patterns:
+        # Check file extension first (highest priority)
+        if extensions and file_ext in extensions:
+            score = priority + 20  # Extension match gets highest priority
+            if score > best_score:
+                best_score = score
+                best_match = domain_key
+                continue
+        
+        # Check if any keyword matches in path or filename (whole word matching)
+        for keyword in keywords:
+            # Use word boundaries for more precise matching (avoid substring false positives)
+            keyword_pattern = r'\b' + re.escape(keyword).replace(r'\.', r'\.') + r'\b'
+            # Also check for exact matches without word boundaries for special cases
+            simple_match = keyword in filename_lower or keyword in path_str
+            
+            if re.search(keyword_pattern, path_str, re.IGNORECASE) or simple_match:
+                # Prefer exact filename matches
+                score = priority + (15 if keyword in filename_lower else 0)
+                if score > best_score:
+                    best_score = score
+                    best_match = domain_key
+                    break
+    
+    # Try to extract department from metadata if available
+    # Look for sidecar or origin.json files in the same directory
+    metadata_domain = None
+    if file_path_obj.parent.exists():
+        # Check for .origin.json files (manifest)
+        origin_files = list(file_path_obj.parent.glob("*.origin.json"))
+        if not origin_files:
+            # Check parent directory for sidecar
+            sidecar_files = list(file_path_obj.parent.glob("*.sidecar.json"))
+            if sidecar_files:
+                origin_files = sidecar_files
+        
+        # Try to read metadata from first available file
+        for meta_file in origin_files[:1]:
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                
+                # Extract tags from metadata
+                tags = []
+                if "metadata_enrichment" in meta_data:
+                    tags = meta_data["metadata_enrichment"].get("tags", [])
+                elif "metadata" in meta_data:
+                    tags = meta_data["metadata"].get("tags", [])
+                
+                # Check if any tag matches a domain
+                if tags:
+                    tag_str = " ".join(str(tag).lower() for tag in tags)
+                    for domain_key, keywords, _ in domain_patterns:
+                        for keyword in keywords:
+                            if keyword in tag_str:
+                                metadata_domain = domain_key
+                                break
+                        if metadata_domain:
+                            break
+                if metadata_domain:
+                    break
+            except Exception:
+                pass
+    
+    # Use metadata domain if found and better than path-based match
+    dept = best_match or metadata_domain or CONFIG.get("default_department", "default")
     
     # Merge default config with department-specific settings
-    dept_config = DEPARTMENT_CONFIGS.get(dept, {})
+    dept_config = DEPARTMENT_CONFIGS.get(dept, DEPARTMENT_CONFIGS.get("default", {}))
     merged_config = CONFIG.copy()
     merged_config.update(dept_config)
     merged_config["department"] = dept
+    
+    # Log department detection if debugging
+    if CONFIG.get("log_level", "INFO") == "DEBUG":
+        logger.debug(f"Department detected for {file_path_obj.name}: {dept} "
+                    f"(match_type={'path' if best_match else 'metadata' if metadata_domain else 'default'})")
     
     return merged_config
 
@@ -513,13 +1022,10 @@ def _log_system_metrics_sync():
             session_stats["performance_metrics"]["peak_memory_usage"], memory.percent
         )
         
-        # Log to database with retry
+        # Queue database operation instead of direct call
         if db:
-            try:
-                db.log_system_metrics(cpu_percent, memory.percent, 
-                                     (disk.used / disk.total) * 100, active_processes)
-            except Exception as e:
-                logger.warning(f"Failed to log system metrics to database: {e}")
+            db_queue.put((db.log_system_metrics,
+                         (cpu_percent, memory.percent, (disk.used / disk.total) * 100, active_processes), {}))
         
         logger.info(f"System metrics - CPU: {cpu_percent}%, Memory: {memory.percent}%, "
                    f"Disk: {(disk.used / disk.total) * 100:.1f}%, Processes: {active_processes}")
@@ -627,10 +1133,7 @@ def chunk_text_enhanced(text, limit, department_config):
     except Exception as e:
         logger.error(f"Chunking failed: {e}")
         if db:
-            try:
-                db.log_error("ChunkingError", str(e), traceback.format_exc())
-            except Exception as db_error:
-                logger.warning(f"Failed to log chunking error to database: {db_error}")
+            db_queue.put((db.log_error, ("ChunkingError", str(e), traceback.format_exc()), {}))
         session_stats["errors"] += 1
         return []
 
@@ -712,10 +1215,7 @@ def process_file_enhanced(file_path, config):
             error_msg = f"File not stable, skipping: {file_path.name}"
             logger.error(error_msg)
             if db:
-                try:
-                    db.log_error("FileStabilityError", error_msg, filename=str(file_path))
-                except Exception as db_error:
-                    logger.warning(f"Failed to log stability error to database: {db_error}")
+                db_queue.put((db.log_error, ("FileStabilityError", error_msg), {"filename": str(file_path)}))
             return False
 
         # Read file with multiple attempts
@@ -736,10 +1236,7 @@ def process_file_enhanced(file_path, config):
             error_msg = f"Could not read {file_path.name} after 3 attempts"
             logger.error(error_msg)
             if db:
-                try:
-                    db.log_error("FileReadError", error_msg, filename=str(file_path))
-                except Exception as db_error:
-                    logger.warning(f"Failed to log read error to database: {db_error}")
+                db_queue.put((db.log_error, ("FileReadError", error_msg), {"filename": str(file_path)}))
             return False
 
         if used_encoding and used_encoding not in {"utf-8", "utf-8-sig"}:
@@ -816,11 +1313,9 @@ def process_file_enhanced(file_path, config):
                 safe_file_move(manifest_file, dest_manifest)
 
             if db:
-                try:
-                    db.log_processing(str(file_path), original_size, 0, 0,
-                                    time.time() - start_time, True, error_msg, department)
-                except Exception as db_error:
-                    logger.warning(f"Failed to log processing to database: {db_error}")
+                # Queue database operation instead of direct call
+                db_queue.put((db.log_processing, 
+                            (str(file_path), original_size, 0, 0, time.time() - start_time, True, error_msg, department), {}))
             return True  # Successfully handled (archived)
 
         if content_hash:
@@ -841,28 +1336,40 @@ def process_file_enhanced(file_path, config):
             error_msg = f"No valid chunks created for {file_path.name}"
             logger.error(error_msg)
             if db:
-                try:
-                    db.log_processing(str(file_path), original_size, 0, 0, 
-                                    time.time() - start_time, False, error_msg, department)
-                except Exception as db_error:
-                    logger.warning(f"Failed to log processing to database: {db_error}")
+                # Queue database operation instead of direct call
+                db_queue.put((db.log_processing,
+                            (str(file_path), original_size, 0, 0, time.time() - start_time, False, error_msg, department), {}))
             return False
 
         # Prepare output with organized folder structure
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         # Sanitize to prevent path length issues and remove .origin.json artifacts
         raw_base = Path(file_path.name).stem.replace(" ", "_")
-        clean_base = sanitize_folder_name(raw_base, max_length=60)
+        # Calculate max length accounting for timestamp prefix (~20 chars) and path separators
+        timestamp_len = len(timestamp) + 1  # +1 for underscore
+        clean_base = sanitize_folder_name(raw_base, max_length=200 - timestamp_len)
         output_folder = str(config.get("output_dir", "output"))
 
-        # Create folder named after the source file
-        file_output_folder = Path(output_folder) / clean_base
+        # Create folder named after the source file with timestamp prefix
+        file_output_folder = Path(output_folder) / f"{timestamp}_{clean_base}"
 
-        # Safety check: ensure total path length is reasonable
+        # Long path handling: ensure total path length is within Windows limits (240 chars safe threshold)
+        resolved_path = file_output_folder.resolve()
+        if len(str(resolved_path)) > 240:
+            logger.warning(f"Path too long ({len(str(resolved_path))} chars), shortening: {file_output_folder}")
+            # Create short hash-based folder name
+            short_hash = hashlib.md5(clean_base.encode()).hexdigest()[:10]
+            date_suffix = datetime.now().strftime("%Y%m%d")
+            shortened_base = f"SHORT_{short_hash}_{date_suffix}"
+            file_output_folder = Path(output_folder) / shortened_base
+            logger.info(f"Shortened folder name to: {shortened_base}")
+        
+        # Additional safety check for base path (legacy support)
         if len(str(file_output_folder)) > 200:
-            logger.warning(f"Path too long ({len(str(file_output_folder))}), truncating: {file_output_folder}")
+            logger.warning(f"Path still too long after shortening ({len(str(file_output_folder))}), truncating base name")
             clean_base = sanitize_folder_name(raw_base, max_length=40)
-            file_output_folder = Path(output_folder) / clean_base
+            file_output_folder = Path(output_folder) / f"{timestamp}_{clean_base}"
+        
         if version_tracker and file_output_folder.exists():
             try:
                 shutil.rmtree(file_output_folder)
@@ -876,7 +1383,10 @@ def process_file_enhanced(file_path, config):
                     file_path.name,
                     cleanup_error,
                 )
-        os.makedirs(file_output_folder, exist_ok=True)
+        
+        # Create the folder and store the actual folder name for consistency
+        file_output_folder.mkdir(parents=True, exist_ok=True)
+        final_folder_name = file_output_folder.name  # Use this for all subfiles to ensure consistency
         
         chunk_files: List[Path] = []
         valid_chunks = 0
@@ -956,15 +1466,17 @@ def process_file_enhanced(file_path, config):
             error_msg = f"No valid chunks created for {file_path.name}"
             logger.error(error_msg)
             if db:
-                try:
-                    db.log_processing(str(file_path), original_size, 0, 0, 
-                                    time.time() - start_time, False, error_msg, department)
-                except Exception as db_error:
-                    logger.warning(f"Failed to log processing to database: {db_error}")
+                # Queue database operation instead of direct call
+                db_queue.put((db.log_processing,
+                            (str(file_path), original_size, 0, 0, time.time() - start_time, False, error_msg, department), {}))
             return False
 
         chunk_texts = [payload["chunk"] for payload in chunk_payloads]
-        written_paths = write_chunk_files(clean_base, chunk_texts, output_folder)
+        # Use final_folder_name to ensure consistency with actual created folder
+        # Check config for file-level deduplication toggle
+        enable_file_dedup = config.get("enable_file_level_dedup", True)
+        written_paths = write_chunk_files(final_folder_name, chunk_texts, output_folder, 
+                                         check_duplicates=enable_file_dedup)
 
         if len(written_paths) != len(chunk_payloads):
             logger.warning(
@@ -1030,11 +1542,29 @@ def process_file_enhanced(file_path, config):
         if generated_chunk_ids:
             manifest_data["chunk_ids"] = generated_chunk_ids
 
-        manifest_copy_path = file_output_folder / f"{timestamp}_{clean_base}.origin.json"
+        # Use final_folder_name directly for consistency (folder already includes timestamp)
+        manifest_copy_path = file_output_folder / f"{final_folder_name}.origin.json"
         try:
             if manifest_path.exists():
-                copy_manifest_sidecar(str(manifest_path), str(manifest_copy_path))
-                artifacts_for_distribution.append(manifest_copy_path)
+                # Handle version conflicts with _v2, _v3 suffixes (like migration script)
+                if manifest_copy_path.exists():
+                    version = 2
+                    while manifest_copy_path.exists():
+                        manifest_copy_path = file_output_folder / f"{final_folder_name}.origin_v{version}.json"
+                        version += 1
+                        if version > 10:  # Safety limit
+                            logger.warning(f"Too many manifest versions, using latest: {manifest_copy_path.name}")
+                            break
+                    logger.info(f"Manifest conflict resolved, using version: {manifest_copy_path.name}")
+                
+                # Use shutil.copy for better error handling (as recommended by Grok)
+                try:
+                    shutil.copy(str(manifest_path), str(manifest_copy_path))
+                    artifacts_for_distribution.append(manifest_copy_path)
+                except OSError as copy_error:
+                    logger.warning("Failed to copy manifest using shutil, trying copy_manifest_sidecar: %s", copy_error)
+                    copy_manifest_sidecar(str(manifest_path), str(manifest_copy_path))
+                    artifacts_for_distribution.append(manifest_copy_path)
             else:
                 logger.warning("Manifest source missing for %s, skipping copy.", file_path.name)
         except Exception as manifest_copy_error:  # noqa: BLE001
@@ -1045,8 +1575,21 @@ def process_file_enhanced(file_path, config):
             )
 
         if chunk_records and config.get("enable_json_sidecar", True):
-            sidecar_filename = f"{timestamp}_{clean_base}{SIDECAR_SUFFIX}"
+            # Use final_folder_name for consistency (includes timestamp prefix)
+            sidecar_filename = f"{final_folder_name}{SIDECAR_SUFFIX}"
             sidecar_path = file_output_folder / sidecar_filename
+            
+            # Handle version conflicts with _v2, _v3 suffixes
+            if sidecar_path.exists():
+                version = 2
+                while sidecar_path.exists():
+                    sidecar_path = file_output_folder / f"{final_folder_name}_v{version}{SIDECAR_SUFFIX}"
+                    version += 1
+                    if version > 10:  # Safety limit
+                        logger.warning(f"Too many sidecar versions, using latest: {sidecar_path.name}")
+                        break
+                logger.info(f"Sidecar conflict resolved, using version: {sidecar_path.name}")
+            
             sidecar_payload = build_sidecar_payload(
                 source_path=file_path,
                 manifest_path=manifest_copy_path,
@@ -1087,11 +1630,12 @@ def process_file_enhanced(file_path, config):
 
         # Concatenate all chunk files into a final transcript
         if chunk_files:
+            # Use final_folder_name for consistency (includes timestamp prefix)
             # Use .md extension for admin files, .txt for others
             if department == "admin":
-                transcript_file = file_output_folder / f"{timestamp}_{clean_base}_transcript.md"
+                transcript_file = file_output_folder / f"{final_folder_name}_transcript.md"
             else:
-                transcript_file = file_output_folder / f"{timestamp}_{clean_base}_transcript.txt"
+                transcript_file = file_output_folder / f"{final_folder_name}_transcript.txt"
             
             try:
                 with open(transcript_file, "w", encoding="utf-8") as tf:
@@ -1127,11 +1671,9 @@ def process_file_enhanced(file_path, config):
             error_msg = f"No valid chunks created for {file_path.name}"
             logger.warning(error_msg)
             if db:
-                try:
-                    db.log_processing(str(file_path), original_size, 0, 0, 
-                                    time.time() - start_time, False, error_msg, department)
-                except Exception as db_error:
-                    logger.warning(f"Failed to log processing to database: {db_error}")
+                # Queue database operation instead of direct call
+                db_queue.put((db.log_processing,
+                            (str(file_path), original_size, 0, 0, time.time() - start_time, False, error_msg, department), {}))
             return False
 
         # Cloud copy with retry
@@ -1165,13 +1707,10 @@ def process_file_enhanced(file_path, config):
             session_stats["files_processed"] += 1
             logger.info(f"File processing complete: {file_path.name} -> {valid_chunks} chunks ({processing_time:.2f}s)")
             
-            # Log to database with retry
+            # Queue database operation instead of direct call
             if db:
-                try:
-                    db.log_processing(str(file_path), original_size, valid_chunks, total_chunk_size,
-                                    processing_time, True, None, department, department_config)
-                except Exception as db_error:
-                    logger.warning(f"Failed to log processing to database: {db_error}")
+                db_queue.put((db.log_processing,
+                            (str(file_path), original_size, valid_chunks, total_chunk_size, processing_time, True, None, department, department_config), {}))
 
             if version_tracker:
                 try:
@@ -1210,12 +1749,9 @@ def process_file_enhanced(file_path, config):
         error_msg = f"Critical error processing {file_path.name}: {str(e)}"
         logger.exception(error_msg)
         
-        # Log to database and send alert with retry
+        # Queue database operation instead of direct call
         if db:
-            try:
-                db.log_error("ProcessingError", str(e), traceback.format_exc(), str(file_path))
-            except Exception as db_error:
-                logger.warning(f"Failed to log processing error to database: {db_error}")
+            db_queue.put((db.log_error, ("ProcessingError", str(e), traceback.format_exc(), str(file_path)), {}))
         
         notify_with_rate_limit(
             f"processing-error:{file_path}",
@@ -1296,10 +1832,7 @@ def process_files_parallel(file_list, config):
                     file_path = future_to_file[future]
                     logger.error(f"Parallel processing failed for {file_path}: {e}")
                     if db:
-                        try:
-                            db.log_error("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path))
-                        except Exception as db_error:
-                            logger.warning(f"Failed to log parallel processing error to database: {db_error}")
+                        db_queue.put((db.log_error, ("ParallelProcessingError", str(e), traceback.format_exc(), str(file_path)), {}))
                     results.append(False)
                     if monitoring and monitoring.enabled:
                         monitoring.record_processing_event(
@@ -1324,6 +1857,50 @@ def process_files_parallel(file_list, config):
     successful = sum(1 for r in results if r)
     logger.info(f"Parallel processing complete: {successful}/{len(file_list)} files successful")
     return results
+
+
+def _process_batch_multiproc(file_list: List[Path], config: dict) -> List[bool]:
+    """
+    Process files using multiprocessing pool with fallback to sequential.
+    
+    Args:
+        file_list: List of file paths to process
+        config: Configuration dictionary
+        
+    Returns:
+        List of boolean results (True for success, False for failure)
+    """
+    if not file_list:
+        return []
+    
+    pool_workers = config.get("parallel_workers", 8)
+    logger.info("Processing %d files with multiprocessing pool (%d workers)", len(file_list), pool_workers)
+    
+    try:
+        pool_inst = multiprocessing.Pool(processes=pool_workers)
+        try:
+            args = [(str(file_path), config) for file_path in file_list]
+            results = pool_inst.map(_pool_process_entry, args)
+            return [bool(r) for r in results]
+        finally:
+            pool_inst.close()
+            pool_inst.join()
+    except Exception as e:
+        logger.error(f"Multiprocessing failed: {e}")
+        if config.get("multiprocessing_fallback", True):
+            logger.warning("Falling back to sequential processing")
+            results = []
+            for file_path in file_list:
+                try:
+                    result = process_with_retries(file_path, config)
+                    results.append(bool(result))
+                except Exception as proc_error:
+                    logger.error(f"Sequential processing failed for {file_path}: {proc_error}")
+                    results.append(False)
+            return results
+        else:
+            raise
+
 
 def wait_for_file_stability(file_path, min_wait=2, max_wait=30):
     """Enhanced file stability check"""
@@ -1398,10 +1975,7 @@ def copy_to_cloud_enhanced(chunk_files, cloud_dir, department_config):
     except Exception as e:
         logger.exception(f"Cloud copy failed: {e}")
         if db:
-            try:
-                db.log_error("CloudSyncError", str(e), traceback.format_exc())
-            except Exception as db_error:
-                logger.warning(f"Failed to log cloud sync error to database: {db_error}")
+            db_queue.put((db.log_error, ("CloudSyncError", str(e), traceback.format_exc()), {}))
         return False
 
 def move_to_processed_enhanced(file_path, processed_folder, department):
@@ -1445,10 +2019,7 @@ def move_to_processed_enhanced(file_path, processed_folder, department):
     except Exception as e:
         logger.error(f"Failed to move {file_path.name}: {e}")
         if db:
-            try:
-                db.log_error("FileMoveError", str(e), traceback.format_exc(), str(file_path))
-            except Exception as db_error:
-                logger.warning(f"Failed to log file move error to database: {db_error}")
+            db_queue.put((db.log_error, ("FileMoveError", str(e), traceback.format_exc(), str(file_path)), {}))
         return False
 
 def quarantine_failed_file(file_path: Path) -> None:
@@ -1544,6 +2115,10 @@ def log_session_stats():
             sorted_tags = sorted(value.items(), key=lambda item: item[1], reverse=True)
             for tag, count in sorted_tags:
                 logger.info("  %s: %s", tag, count)
+        elif key == "file_deduplication":
+            logger.info("File-Level Deduplication:")
+            for metric, val in value.items():
+                logger.info(f"  {metric}: {val}")
         else:
             logger.info(f"{key}: {value}")
 
@@ -1576,6 +2151,7 @@ def main():
     loop_count = 0
     last_cleanup = datetime.now()
     last_report = datetime.now()
+    last_archive = datetime.now()
     
     # Send startup notification
     notifications.send_email(
@@ -1620,6 +2196,9 @@ def main():
                 for ext in supported_extensions:
                     all_files.extend(list(Path(watch_folder).glob(f"*{ext}")))
                 
+                if len(all_files) > 0:
+                    logger.info(f"Found {len(all_files)} files with supported extensions in watch folder")
+                
                 # Filter files based on configuration
                 excluded_files = {"watcher_splitter.py", "test_chunker.py", "chunker_db.py", "notification_system.py"}
                 
@@ -1630,16 +2209,24 @@ def main():
                 
                 filtered_files = []
                 for f in all_files:
-                    if f.name in processed_files or not f.is_file() or f.name in excluded_files:
+                    if f.name in processed_files:
+                        logger.info(f"Skipping already processed file: {f.name}")
+                        continue
+                    if not f.is_file():
+                        logger.info(f"Skipping non-file: {f.name}")
+                        continue
+                    if f.name in excluded_files:
+                        logger.info(f"Skipping excluded file: {f.name}")
                         continue
 
                     # CRITICAL: Skip manifest files and archives to prevent recursion
                     if not should_process_file(f):
+                        logger.info(f"Skipping file that should not be processed: {f.name}")
                         continue
 
                     # Check exclude patterns first
                     if any(pattern in f.name for pattern in exclude_patterns):
-                        logger.debug(f"Skipping file with exclude pattern: {f.name}")
+                        logger.info(f"Skipping file with exclude pattern: {f.name}")
                         continue
 
                     # Apply filter mode
@@ -1649,40 +2236,57 @@ def main():
                         if any(pattern in f.name for pattern in file_patterns):
                             filtered_files.append(f)
                         else:
-                            logger.debug(f"Skipping file without required pattern: {f.name}")
+                            logger.info(f"Skipping file without required pattern: {f.name}")
                     elif filter_mode == "suffix":
                         # Only process files with _full_conversation suffix
                         if "_full_conversation" in f.name:
                             filtered_files.append(f)
                         else:
-                            logger.debug(f"Skipping file without _full_conversation suffix: {f.name}")
+                            logger.info(f"Skipping file without _full_conversation suffix: {f.name}")
+                
+                if len(filtered_files) > 0:
+                    logger.info(f"After filtering: {len(filtered_files)} files remain")
 
                 eligible_files = []
                 for f in filtered_files:
                     if f.suffix.lower() == ".part":
-                        logger.debug(f"Skipping partial file awaiting final rename: {f.name}")
+                        logger.info(f"Skipping partial file awaiting final rename: {f.name}")
                         continue
 
                     if use_ready_signal:
                         ready_marker = Path(f"{f}.ready")
                         if not ready_marker.exists():
-                            logger.debug(f"Waiting for ready signal for {f.name}")
+                            logger.info(f"Waiting for ready signal for {f.name}")
                             continue
 
-                    if not file_is_settled(f, seconds=stability_timeout):
-                        logger.debug("Waiting for file to settle: %s", f.name)
+                    if not is_effectively_stable(f, CONFIG):
+                        logger.info("Waiting for file to settle: %s", f.name)
                         continue
 
                     eligible_files.append(f)
+                
+                if len(eligible_files) < len(filtered_files):
+                    skipped = len(filtered_files) - len(eligible_files)
+                    logger.info(f"Skipped {skipped} files (waiting for stability/ready signal)")
 
-                new_files = eligible_files
+                # Apply batch size limit to avoid processing too many files per cycle
+                batch_size = CONFIG.get("batch_size", 100)
+                new_files = eligible_files[:batch_size]
+                
+                if len(eligible_files) > batch_size:
+                    logger.info(f"Batch limit: processing {batch_size} of {len(eligible_files)} eligible files this cycle")
                 
                 if new_files:
                     logger.info(f"Found {len(new_files)} new files to process")
                     
                     # Process files in parallel if multiple files
                     if len(new_files) > 1 and CONFIG.get("enable_parallel_processing", True):
-                        results = process_files_parallel(new_files, CONFIG)
+                        # Use configured processing method (threads or multiprocessing)
+                        if CONFIG.get("use_multiprocessing", False):
+                            results = _process_batch_multiproc(new_files, CONFIG)
+                        else:
+                            results = process_files_parallel(new_files, CONFIG)
+                        
                         for i, result in enumerate(results):
                             if result:
                                 processed_files.add(new_files[i].name)
@@ -1706,17 +2310,8 @@ def main():
                                         severity="critical",
                                     )
                                 if db:
-                                    try:
-                                        db.log_error(
-                                            "ProcessingError",
-                                            str(e),
-                                            traceback.format_exc(),
-                                            str(file_path),
-                                        )
-                                    except Exception as db_error:
-                                        logger.warning(
-                                            f"Failed to log processing error to database: {db_error}"
-                                        )
+                                    db_queue.put((db.log_error,
+                                                 ("ProcessingError", str(e), traceback.format_exc(), str(file_path)), {}))
                                 continue
 
                             if monitoring and monitoring.enabled:
@@ -1758,6 +2353,43 @@ def main():
                             logger.warning(f"Failed to run database cleanup: {db_error}")
                     last_cleanup = datetime.now()
                 
+                # Weekly auto-archival of old output sessions (>30 days old)
+                if CONFIG.get("archive_old_outputs", True) and datetime.now() - last_archive > timedelta(days=7):
+                    try:
+                        archive_after_days = CONFIG.get("archive_after_days", 90)
+                        archive_age = datetime.now() - timedelta(days=archive_after_days)
+                        archive_target = Path(CONFIG.get("archive_dir", "03_archive")) / "consolidated" / datetime.now().strftime("%Y/%m")
+                        archive_target.mkdir(parents=True, exist_ok=True)
+                        
+                        output_dir = Path(CONFIG.get("output_dir", "04_output"))
+                        archived_count = 0
+                        
+                        if output_dir.exists():
+                            for sess in output_dir.iterdir():
+                                if sess.is_dir():
+                                    try:
+                                        # Check session age based on directory modification time
+                                        sess_mtime = datetime.fromtimestamp(sess.stat().st_mtime)
+                                        if sess_mtime < archive_age:
+                                            # Move session to consolidated archive
+                                            archive_dest = archive_target / sess.name
+                                            if archive_dest.exists():
+                                                # Handle duplicates with timestamp suffix
+                                                timestamp = datetime.now().strftime("%H%M%S")
+                                                archive_dest = archive_target / f"{sess.name}_{timestamp}"
+                                            
+                                            shutil.move(str(sess), str(archive_dest))
+                                            archived_count += 1
+                                            logger.info(f"Archived old session: {sess.name} → {archive_dest.relative_to(archive_target.parent.parent)}")
+                                    except Exception as sess_error:
+                                        logger.warning(f"Failed to archive session {sess.name}: {sess_error}")
+                        
+                        if archived_count > 0:
+                            logger.info(f"Auto-archival complete: {archived_count} sessions moved to consolidated archive")
+                        last_archive = datetime.now()
+                    except Exception as archive_error:
+                        logger.warning(f"Failed to run auto-archival: {archive_error}")
+                
                 # Send daily report
                 if datetime.now() - last_report > timedelta(hours=24):
                     if db:
@@ -1776,10 +2408,7 @@ def main():
             except Exception as e:
                 logger.exception("Critical error in main loop")
                 if db:
-                    try:
-                        db.log_error("MainLoopError", str(e), traceback.format_exc())
-                    except Exception as db_error:
-                        logger.warning(f"Failed to log main loop error to database: {db_error}")
+                    db_queue.put((db.log_error, ("MainLoopError", str(e), traceback.format_exc()), {}))
                 notify_with_rate_limit(
                     "main-loop-error",
                     notifications.send_error_alert,
@@ -1799,6 +2428,15 @@ def main():
             metrics_executor.shutdown(wait=False)
         except Exception as exec_shutdown_error:
             logger.debug("Metrics executor shutdown warning: %s", exec_shutdown_error)
+        
+        # Shutdown database queue worker
+        if db:
+            try:
+                db_queue.put((None, (), {}))  # Shutdown signal
+                db_worker_thread.join(timeout=5)  # Wait up to 5 seconds for queue to empty
+                logger.info("Database queue worker stopped")
+            except Exception as db_shutdown_error:
+                logger.debug("Database worker shutdown warning: %s", db_shutdown_error)
         
         # Send shutdown notification
         notifications.send_email(

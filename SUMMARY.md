@@ -1,4 +1,4 @@
-# Enterprise Chunker v2.1.8 - Project Summary
+# Enterprise Chunker v2.1.9 - Project Summary
 
 ## Overview
 
@@ -22,6 +22,16 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **`gui_app.py`** - Streamlit GUI for search, browsing results, and stats
 - **`manual_process_files.py`** - Manual file processing tool
 - **`verify_chunk_completeness.py`** - Verification script for backfill validation
+
+## Changes in v2.1.9 (2025-11-18)
+
+- **Performance Improvements**: Batch processing (100 files per cycle), stability skip for old files (>10 minutes), and enhanced parallel processing options dramatically reduce processing time for large backlogs (6,500 files: 3.5 hours → 53 minutes).
+- **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and domain-aware department detection.
+- **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and Windows MAX_PATH handling.
+- **Department Refactoring**: 18 domain-specific departments (python, cad, claude, data-cleaning, etc.) with tailored configurations and priority settings.
+- **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/`.
+- **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters).
+- **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests.
 
 ## Changes in v2.1.8
 

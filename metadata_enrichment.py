@@ -94,6 +94,70 @@ DEPARTMENT_HINTS: Dict[str, Sequence[str]] = {
     "admin": ("admin", "administration", "general"),
 }
 
+# Comprehensive tag detection patterns organized by category (from chunk_and_tag.py)
+# These use regex patterns for more robust and flexible matching than simple keywords
+TAG_PATTERNS: Dict[str, List[str]] = {
+    # Technical/Programming
+    "python": [r"\bpython\b", r"\.py\b", r"\bdef\s+\w+", r"\bimport\s+", r"\bclass\s+\w+"],
+    "json": [r"\bjson\b", r'\{[\s\S]*"[\w]+":', r"\.json\b"],
+    "regex": [r"\bregex\b", r"\bregexp?\b", r'r"[^"]*[\\][^"]*"', r"re\.\w+\("],
+    "loop": [r"\bfor\s+\w+\s+in\b", r"\bwhile\s+", r"\bloop\b", r"\biterat"],
+    "config": [r"\bconfig\b", r"\bconfigur", r"\bsettings?\b", r"\bparameters?\b", r"\boptions?\b"],
+    "function": [r"\bfunction\b", r"\bdef\s+", r"\bcallable\b", r"\bmethod\b", r"\breturn\b"],
+    "input/output": [r"\binput\b", r"\boutput\b", r"\bread\b", r"\bwrite\b", r"\bfile\b", r"\bpath\b"],
+    "API": [r"\bAPI\b", r"\bendpoint", r"\bREST\b", r"\bHTTP\b", r"\brequest\b", r"\bresponse\b"],
+    "error handling": [r"\btry\b", r"\bexcept\b", r"\berror\b", r"\bexception\b", r"\braise\b"],
+    "variable": [r"\bvariable\b", r"\bassign", r'=\s*["\'\[\{]'],
+
+    # Procedural/Workflow
+    "workflow": [r"\bworkflow\b", r"\bprocess\b", r"\bpipeline\b", r"\bsequence\b"],
+    "steps": [r"\bstep\s*\d+", r"\bfirst\b.*\bthen\b", r"\bnext\b", r"\bprocedure\b"],
+    "automation": [r"\bautomat", r"\bscript\b", r"\bschedul", r"\bcron\b", r"\btask\b"],
+    "logging": [r"\blog\b", r"\blogging\b", r"\blogger\b", r"\bdebug\b", r"\bprint\("],
+    "monitoring": [r"\bmonitor", r"\balert", r"\bnotif", r"\bwatch", r"\btrack"],
+
+    # Data-related
+    "columns": [r"\bcolumn\b", r"\bfield\b", r"\battribute\b"],
+    "schema": [r"\bschema\b", r"\bmodel\b", r"\bstructure\b"],
+    "csv": [r"\bcsv\b", r"\bcomma.separated", r"\.csv\b"],
+    "table": [r"\btable\b", r"\brows?\b", r"\bdataframe\b", r"\bpandas\b"],
+    "ETL": [r"\bETL\b", r"\bextract\b", r"\btransform\b", r"\bload\b"],
+    "data cleaning": [r"\bclean", r"\bsanitiz", r"\bnormaliz", r"\bvalidat", r"\bfilter\b"],
+    "database": [r"\bdatabase\b", r"\bSQL\b", r"\bquery\b", r"\bSELECT\b", r"\bINSERT\b"],
+
+    # UI/UX
+    "GUI": [r"\bGUI\b", r"\binterface\b", r"\bwindow\b", r"\bbutton\b", r"\bwidget\b"],
+    "Streamlit": [r"\bstreamlit\b", r"\bst\.\w+", r"\.streamlit\b"],
+    "form": [r"\bform\b", r"\bsubmit\b", r"\binput\s+field"],
+    "input field": [r"\btext_input\b", r"\bnumber_input\b", r"\bslider\b", r"\bcheckbox\b"],
+    "visualization": [r"\bchart\b", r"\bplot\b", r"\bgraph\b", r"\bvisuali"],
+
+    # RAG/Pipeline
+    "RAG": [r"\bRAG\b", r"\bretrieval.augmented", r"\bgenerat"],
+    "embedding": [r"\bembedding\b", r"\bvector\b", r"\bencode\b"],
+    "vector store": [r"\bvector\s*store\b", r"\bchroma\b", r"\bfaiss\b", r"\bpinecone\b"],
+    "retrieval": [r"\bretrieval\b", r"\bsearch\b", r"\bquery\b", r"\bfetch\b"],
+    "chunking": [r"\bchunk", r"\bsplit", r"\bsegment", r"\btokeniz"],
+    "LLM": [r"\bLLM\b", r"\blanguage\s*model\b", r"\bGPT\b", r"\bClaude\b", r"\bOpenAI\b"],
+
+    # Metadata/Structure
+    "sidecar": [r"\bsidecar\b", r"\bcompanion\b", r"\bauxiliary\b"],
+    "manifest": [r"\bmanifest\b", r"\bindex\b", r"\bcatalog\b"],
+    "metadata": [r"\bmetadata\b", r"\bmeta\b", r"\btag\b", r"\blabel\b"],
+    "enrichment": [r"\benrich", r"\baugment", r"\benhance\b", r"\bannotat"],
+
+    # File/Format types
+    "markdown": [r"\bmarkdown\b", r"\.md\b", r"\b##+\s+"],
+    "PDF": [r"\bPDF\b", r"\.pdf\b"],
+    "Excel": [r"\bExcel\b", r"\bxlsx?\b", r"\bspreadsheet\b"],
+    "YAML": [r"\bYAML\b", r"\.ya?ml\b"],
+
+    # Security/Validation
+    "redaction": [r"\bredact", r"\bmask\b", r"\bhide\b", r"\bprivacy\b", r"\bsensitive\b"],
+    "validation": [r"\bvalidat", r"\bverif", r"\bcheck\b", r"\bassert\b"],
+    "authentication": [r"\bauth", r"\blogin\b", r"\btoken\b", r"\bpassword\b", r"\bcredential"],
+}
+
 
 @dataclass
 class EnrichmentResult:
@@ -111,6 +175,8 @@ def enrich_metadata(
 ) -> EnrichmentResult:
     """
     Perform lightweight enrichment based on the file content and source context.
+    Now uses robust regex pattern matching (from chunk_and_tag.py) in addition to
+    keyword-based matching for comprehensive tag detection.
     """
     manifest_data = manifest_data or {}
     lower_text = text.lower()
@@ -131,6 +197,11 @@ def enrich_metadata(
     if looks_like_chat_transcript(lower_text):
         tags.append("ai-chat")
 
+    # Use robust regex pattern matching (primary method)
+    pattern_tags = generate_tags_from_patterns(text)
+    tags.extend(pattern_tags)
+
+    # Keep keyword-based matching as supplementary (for backward compatibility)
     tags.extend(find_matching_tags(lower_text, original_path, TOPIC_KEYWORDS))
     tags.extend(find_matching_tags(lower_text, original_path, TECH_KEYWORDS))
 
@@ -173,11 +244,18 @@ def enrich_chunk(
 ) -> Dict[str, Any]:
     """
     Produce per-chunk metadata derived from the chunk body combined with the
-    file-level tags.
+    file-level tags. Now uses robust regex pattern matching for comprehensive
+    chunk-level tag detection.
     """
     lower_chunk = chunk_text.lower()
     chunk_terms = extract_key_terms(lower_chunk, max_terms=max_key_terms)
     candidate_tags = set(t.lower() for t in base_tags)
+    
+    # Use robust regex pattern matching for chunk-specific tags (primary method)
+    chunk_pattern_tags = generate_tags_from_patterns(chunk_text)
+    candidate_tags.update(tag.lower() for tag in chunk_pattern_tags)
+    
+    # Keep keyword-based matching as supplementary
     candidate_tags.update(
         find_matching_tags(lower_chunk, None, {"ai-chat": ("assistant:", "user:")})
     )
@@ -260,6 +338,68 @@ def find_matching_tags(
                 matches.append(tag)
                 break
     return matches
+
+
+def generate_tags_from_patterns(chunk: str) -> List[str]:
+    """
+    Generate tags using robust regex pattern matching (from chunk_and_tag.py).
+    This provides more comprehensive and accurate tagging than simple keyword matching.
+    """
+    text_lower = chunk.lower()
+    tags = []
+
+    # Use regex pattern matching for each tag category
+    for tag, patterns in TAG_PATTERNS.items():
+        for pattern in patterns:
+            try:
+                if re.search(pattern, chunk, re.IGNORECASE):
+                    tags.append(tag)
+                    break  # One match per tag is enough
+            except re.error:
+                # Skip invalid regex patterns (shouldn't happen but be safe)
+                continue
+
+    # Fallback: extract potential tags from frequent words if no patterns match
+    if not tags:
+        words = re.findall(r"\b[a-z]{4,}\b", text_lower)
+        word_freq = {}
+        for word in words:
+            if word not in [
+                "this",
+                "that",
+                "with",
+                "from",
+                "have",
+                "been",
+                "were",
+                "will",
+                "would",
+                "could",
+                "should",
+                "than",
+                "then",
+                "there",
+                "their",
+                "them",
+                "these",
+                "those",
+            ]:
+                word_freq[word] = word_freq.get(word, 0) + 1
+
+        # Get top frequent words as fallback tags
+        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+        tags = [word for word, _ in sorted_words[:3]]
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_tags = []
+    for tag in tags:
+        tag_lower = tag.lower()
+        if tag_lower not in seen:
+            seen.add(tag_lower)
+            unique_tags.append(tag)
+
+    return unique_tags[:8]  # Limit to 8 most relevant tags
 
 
 def unique_preserve_order(items: Iterable[str]) -> List[str]:
