@@ -1,4 +1,4 @@
-# Enterprise Chunker v2.1.8 - Project Summary
+# Enterprise Chunker v2.1.9 - Project Summary
 
 ## Overview
 
@@ -22,6 +22,30 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **`gui_app.py`** - Streamlit GUI for search, browsing results, and stats
 - **`manual_process_files.py`** - Manual file processing tool
 - **`verify_chunk_completeness.py`** - Verification script for backfill validation
+
+## Changes in v2.1.9 (2025-11-18)
+
+- **Performance Improvements**: Batch processing (100 files per cycle), stability skip for old files (>10 minutes), and enhanced parallel processing options dramatically reduce processing time for large backlogs (6,500 files: 3.5 hours → 53 minutes).
+- **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and domain-aware department detection.
+- **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and Windows MAX_PATH handling.
+- **Department Refactoring**: 20 domain-specific departments (python, cad, claude, data-cleaning, fire, ems, etc.) with tailored configurations and priority settings. Fire and EMS departments added with high-priority processing and enhanced redaction for sensitive incident/patient data.
+- **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/`.
+- **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters).
+- **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests.
+
+## Changes in v2.1.9 (2025-11-19)
+
+- **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by file type, size, time patterns, and reprocessing potential. Identifies which files are good candidates for reprocessing (supported types, reasonable size, recent failures).
+- **OneDrive Failed Directory**: Updated `config.json` and `watcher_splitter.py` to use OneDrive path for failed directory (`%OneDriveCommercial%\\KB_Shared\\03_archive\\failed`) for consistency with archive and output directories.
+- **Environment Variable Expansion**: Enhanced `load_cfg()` function to expand environment variables for `failed_dir` configuration, ensuring proper path resolution.
+
+## Changes in v2.1.9 (2025-11-20)
+
+- **Failed File Tracker**: Added `failed_file_tracker.py` with SQLite backend to track failed files, classify failure types (e.g. encrypted PDF, corrupt file, invalid chunk), enforce capped retries with exponential backoff, and provide CLI stats/JSON exports.
+- **Batch Reprocessing Orchestration**: Added `batch_reprocess_failed.py` to safely requeue retryable failures from `03_archive/failed` into `source/` in batches, with categorization (retryable vs permanent chunk vs tracker-permanent) and detailed JSON stats (`05_logs/batch_reprocess_stats.json`).
+- **Reprocessing Run Plan**: Documented a full reprocessing workflow in `REPROCESSING_RUN_PLAN.md` for draining historical failures and validating OneDrive outputs.
+- **Reprocessing Metrics**: Enhanced `reprocess_output.py` with per-extension success/fail/skip metrics and JSON reporting (`05_logs/reprocess_stats.json`) to measure reprocessing effectiveness.
+- **Enhanced PDF/Excel/SLX Support**: Improved `file_processors.py` and `watcher_splitter.py` for PDF (page markers, metadata extraction, encrypted PDF handling) and SLX (larger per-file XML content limits with safety caps), ensuring better RAG context and stability.\n
 
 ## Changes in v2.1.8
 

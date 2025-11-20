@@ -5,9 +5,99 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.1.9] - 2025-11-19–20 - Performance Improvements, Large Backlog Support & Failed File Analysis
+
+### Added (2025-11-19)
+- **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by:
+  - File type and extension distribution
+  - Size analysis and categorization
+  - Time pattern analysis (failure bursts, age distribution)
+  - Reprocessing potential assessment (identifies files that might succeed with updated code)
+- **OneDrive Failed Directory**: Failed files now default to OneDrive path (`%OneDriveCommercial%\\KB_Shared\\03_archive\\failed`) for consistency with archive and output directories
+- **Environment Variable Expansion**: Enhanced `load_cfg()` function to expand environment variables for `failed_dir` configuration
+
+### Changed (2025-11-19)
+- **config.json**: Added `"failed_dir": "%OneDriveCommercial%\\KB_Shared\\03_archive\\failed"` to use OneDrive path for failed files
+- **watcher_splitter.py**: Updated `load_cfg()` function to expand environment variables for `failed_dir` configuration key
+
+### Documentation (2025-11-19)
+- Added `HANDOFF_PROMPT.md` - Comprehensive handoff documentation for AI assistants with project context, current state, and recommendations
+- Updated README.md with failed file analysis tools and OneDrive failed directory configuration
+- Updated SUMMARY.md with v2.1.9 changes for November 19
+
+---
+
+### Added (2025-11-20)
+- **Failed File Tracker**: New `failed_file_tracker.py` module with SQLite backend to track failed files, classify failure types (e.g. `encrypted_pdf`, `corrupt_file`, `invalid_chunk_file`), enforce capped retries with exponential backoff, and expose CLI stats and JSON exports.
+- **Batch Failed-File Reprocessing**: New `batch_reprocess_failed.py` script that:
+  - Categorizes `03_archive/failed` into `retryable`, `permanent_chunk` (Oct 27 incident chunk files), and `permanent_tracker` sets.
+  - Requeues retryable failures into the `source` directory in batches (default 500, supports `--pilot` and `--all`).
+  - Writes detailed JSON stats to `05_logs/batch_reprocess_stats.json`.
+- **Reprocessing Metrics & Planning**:
+  - Enhanced `reprocess_output.py` with per-extension success/fail/skip metrics and JSON reporting (`05_logs/reprocess_stats.json`).
+  - Added `REPROCESSING_RUN_PLAN.md` documenting the end-to-end workflow for reprocessing historical failures and validating OneDrive outputs.
+- **Enhanced PDF/SLX Support**:
+  - `file_processors.py` now adds page markers (e.g. `=== [PAGE 1/10] ===`), extracts basic PDF metadata (title, author, total pages), and handles encrypted PDFs gracefully by returning a clear marker instead of raising.
+  - Improved `.slx` handling in `watcher_splitter.py` with per-file content limits increased from 5 KB to 50 KB and a total 100 MB safety cap for ZIP extraction.
+
+### Changed (2025-11-20)
+- **Reprocessing Configuration**: Updated `config.json` to:
+  - Confirm `min_file_size_bytes` = 100, aligning code and docs for tiny-file archiving into `03_archive/skipped_files/`.
+  - Enable dedup auto-remove (`deduplication.auto_remove = true`, `log_only = false`) so detected duplicates are actively removed from ChromaDB rather than only logged.
+- **Watcher Integration**: Integrated `failed_file_tracker` into `watcher_splitter.py` error handling paths so that:
+  - Files are checked with `should_retry()` before processing.
+  - `record_success()` and `record_failure()` are called appropriately.
+  - Certain failure types are immediately marked permanent (e.g. `invalid_chunk_file` for Oct 27 chunk artifacts).
+
+### Documentation (2025-11-20)
+- Updated `README.md` and `SUMMARY.md` to document:
+  - Failed-file analysis tools and OneDrive failed directory behavior.
+  - `failed_file_tracker.py`, `batch_reprocess_failed.py`, and `REPROCESSING_RUN_PLAN.md`.
+  - Enhanced PDF/Excel/SLX processing behavior and its impact on RAG.
+
+---
+
+## [v2.1.9] - 2025-11-18 - Performance Improvements & Large Backlog Support
+
+### Added
+- **Batch Processing**: Configurable batch size (default 100 files per cycle) to prevent system overload on large backlogs
+- **Stability Skip Optimization**: Files older than `stability_skip_minutes` (default 10) bypass expensive 2-second stability checks, dramatically reducing processing time
+- **Enhanced Parallel Processing**: Optional multiprocessing mode (`use_multiprocessing`) with automatic fallback to sequential processing (`multiprocessing_fallback`)
+- **Archive Reprocessing**: New `reprocess_output.py` script enables reprocessing of archived files with enhanced tagging and domain-aware department detection
+- **OneDrive Migration**: `migrate_to_onedrive.py` safely migrates local archives to OneDrive with conflict resolution and Windows MAX_PATH handling (240 character limit)
+- **Department Configuration Refactoring**: 20 domain-specific departments (python, cad, claude, data-cleaning, excel, arcgis, powerbi, sql, fire, ems, etc.) with tailored chunk sizes, redaction, audit levels, and priority settings
+- **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/` with configurable threshold
+- **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters) using hash-based folder names
+- **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites
+
+### Changed
+- **watcher_splitter.py**: Added `_age_minutes()` and `is_effectively_stable()` helpers to skip stability checks for old files, implemented batch size limiting, and enhanced parallel processing options
+- **config.json**: Added `batch_size` (100), `stability_skip_minutes` (10), `use_multiprocessing` (false), `multiprocessing_fallback` (true), `archive_old_outputs` (true), and `archive_after_days` (90)
+- **Performance**: Reduced processing time for 6,500 files from ~3.5 hours to ~53 minutes (90% improvement) by bypassing stability checks on old files and implementing batch processing
+- **Department Detection**: Enhanced `get_department_config()` to use file extensions, filename/path keywords, and metadata tags with priority-based matching
+
+### Performance
+- **Large Backlog Processing**: 6,500 files processed in ~53 minutes (average 4.03 seconds per file with 8 parallel workers)
+- **Stability Check Bypass**: Files >10 minutes old skip 2-second stability checks, eliminating ~3.5 hours of wait time on large backlogs
+- **Batch Size Control**: Limited to 100 files per cycle to prevent system overload while maintaining throughput
+- **Parallel Processing**: Thread pool (default) or process pool (optional) with automatic fallback on errors
+
+### Documentation
+- Updated README.md with v2.1.9 performance improvements and configuration options
+- Updated SUMMARY.md with latest changes and performance metrics
+- CHANGELOG.md entries for all v2.1.9 improvements
+
+### Migration & Archive
+- Successfully migrated 15,612 files (4.55 GB) from local directories to OneDrive
+- 109 files skipped due to Windows MAX_PATH limit (logged separately)
+- Archive reprocessing supports enhanced tagging and department detection
+
+---
+
 ## [Unreleased]
 
 ### Added
+- **Emergency Services Departments**: Added `fire` and `ems` department configurations with high-priority processing, enhanced redaction, and optimized chunk sizes (90 sentences) for sensitive incident and patient data
 - **Tiny File Archiving**: Files under 100 bytes are now automatically archived to `03_archive/skipped_files/` along with their manifests to prevent repeated processing warnings (watcher_splitter.py:677-703).
 - **Database Lock Monitoring**: Created `MONITOR_DB_LOCKS.md` with comprehensive monitoring commands, alert thresholds, and 24-48 hour review schedule for tracking SQLite contention patterns.
 - **Windows UTF-8 Troubleshooting**: Updated README/SUMMARY with steps for switching PowerShell to UTF-8 to avoid Unicode logging failures on emoji filenames.
