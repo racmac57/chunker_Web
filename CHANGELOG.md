@@ -5,7 +5,7 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2.1.9] - 2025-11-19 - Performance Improvements, Large Backlog Support & Failed File Analysis
+## [v2.1.9] - 2025-11-19–20 - Performance Improvements, Large Backlog Support & Failed File Analysis
 
 ### Added (2025-11-19)
 - **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by:
@@ -24,6 +24,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `HANDOFF_PROMPT.md` - Comprehensive handoff documentation for AI assistants with project context, current state, and recommendations
 - Updated README.md with failed file analysis tools and OneDrive failed directory configuration
 - Updated SUMMARY.md with v2.1.9 changes for November 19
+
+---
+
+### Added (2025-11-20)
+- **Failed File Tracker**: New `failed_file_tracker.py` module with SQLite backend to track failed files, classify failure types (e.g. `encrypted_pdf`, `corrupt_file`, `invalid_chunk_file`), enforce capped retries with exponential backoff, and expose CLI stats and JSON exports.
+- **Batch Failed-File Reprocessing**: New `batch_reprocess_failed.py` script that:
+  - Categorizes `03_archive/failed` into `retryable`, `permanent_chunk` (Oct 27 incident chunk files), and `permanent_tracker` sets.
+  - Requeues retryable failures into the `source` directory in batches (default 500, supports `--pilot` and `--all`).
+  - Writes detailed JSON stats to `05_logs/batch_reprocess_stats.json`.
+- **Reprocessing Metrics & Planning**:
+  - Enhanced `reprocess_output.py` with per-extension success/fail/skip metrics and JSON reporting (`05_logs/reprocess_stats.json`).
+  - Added `REPROCESSING_RUN_PLAN.md` documenting the end-to-end workflow for reprocessing historical failures and validating OneDrive outputs.
+- **Enhanced PDF/SLX Support**:
+  - `file_processors.py` now adds page markers (e.g. `=== [PAGE 1/10] ===`), extracts basic PDF metadata (title, author, total pages), and handles encrypted PDFs gracefully by returning a clear marker instead of raising.
+  - Improved `.slx` handling in `watcher_splitter.py` with per-file content limits increased from 5 KB to 50 KB and a total 100 MB safety cap for ZIP extraction.
+
+### Changed (2025-11-20)
+- **Reprocessing Configuration**: Updated `config.json` to:
+  - Confirm `min_file_size_bytes` = 100, aligning code and docs for tiny-file archiving into `03_archive/skipped_files/`.
+  - Enable dedup auto-remove (`deduplication.auto_remove = true`, `log_only = false`) so detected duplicates are actively removed from ChromaDB rather than only logged.
+- **Watcher Integration**: Integrated `failed_file_tracker` into `watcher_splitter.py` error handling paths so that:
+  - Files are checked with `should_retry()` before processing.
+  - `record_success()` and `record_failure()` are called appropriately.
+  - Certain failure types are immediately marked permanent (e.g. `invalid_chunk_file` for Oct 27 chunk artifacts).
+
+### Documentation (2025-11-20)
+- Updated `README.md` and `SUMMARY.md` to document:
+  - Failed-file analysis tools and OneDrive failed directory behavior.
+  - `failed_file_tracker.py`, `batch_reprocess_failed.py`, and `REPROCESSING_RUN_PLAN.md`.
+  - Enhanced PDF/Excel/SLX processing behavior and its impact on RAG.
 
 ---
 

@@ -1,10 +1,10 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.9** - Performance improvements for large backlogs: batch processing, stability skip optimization, enhanced parallel processing, OneDrive migration support, and failed file analysis tools.
+**Version 2.1.9** - Performance improvements for large backlogs, enhanced reprocessing and failed-file handling, OneDrive migration support, and expanded file type processing (PDF/XLSX/SLX).
 
 ## What's New in v2.1.9+
 
-### Performance Improvements (2025-11-18)
+### Performance Improvements & Reprocessing (2025-11-18–20)
 - **Batch Processing**: Configurable batch size (default 100 files per cycle) prevents system overload on large backlogs
 - **Stability Skip Optimization**: Files older than `stability_skip_minutes` (default 10) bypass expensive stability checks, dramatically reducing processing time for large backlogs
 - **Enhanced Parallel Processing**: Optional multiprocessing mode with automatic fallback to sequential processing on errors
@@ -15,7 +15,13 @@
 - **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters)
 - **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites
 - **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by type, size, time patterns, and reprocessing potential
-- **OneDrive Failed Directory**: Failed files now use OneDrive path by default for consistency with archive and output directories
+- **OneDrive Failed Directory**: Failed files now use OneDrive path by default for consistency with archive and output directories (`failed_dir` in `config.json`)
+- **Failed File Tracker**: New `failed_file_tracker.py` module tracks failures with a SQLite backend, classifies failure types, applies capped retries with exponential backoff, and exposes CLI stats/exports
+- **Batch Failed-File Reprocessing**: New `batch_reprocess_failed.py` safely requeues retryable failures from `03_archive/failed` into `source/` with categorization (retryable vs permanent chunk vs tracker-permanent) and JSON stats
+- **Reprocessing Run Plan**: `REPROCESSING_RUN_PLAN.md` documents the end-to-end plan for reprocessing historical failures and confirming OneDrive outputs
+- **Reprocessing Metrics**: `reprocess_output.py` now tracks per-extension success/fail/skip counts and writes JSON reports to `05_logs/reprocess_stats.json`
+- **Enhanced PDF Processing**: `file_processors.py` now adds page markers (e.g. `=== [PAGE 1/10] ===`), extracts basic metadata (title, author, total pages), and handles encrypted PDFs gracefully with clear markers instead of hard failures
+- **Enhanced SLX Handling**: `.slx` (Simulink) support improved with larger per-file content limits (50 KB per XML/MDL file, 100 MB safety cap) and ZIP-based extraction
 
 ### Recent Improvements (Post-v2.1.8)
 - **Tiny File Archiving**: Files under 100 bytes are automatically parked in `03_archive/skipped_files/` with their manifests to eliminate endless “too small” retries.
