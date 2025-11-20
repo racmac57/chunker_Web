@@ -1,6 +1,6 @@
 # Chunker_v2 - Enterprise RAG-Powered File Processing System
 
-**Version 2.1.9** - Performance improvements for large backlogs: batch processing, stability skip optimization, enhanced parallel processing, and OneDrive migration support.
+**Version 2.1.9** - Performance improvements for large backlogs: batch processing, stability skip optimization, enhanced parallel processing, OneDrive migration support, and failed file analysis tools.
 
 ## What's New in v2.1.9+
 
@@ -14,6 +14,8 @@
 - **Auto-Archival**: Optional weekly archival of old output sessions (>90 days) to `03_archive/consolidated/YYYY/MM/`
 - **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters)
 - **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests to prevent overwrites
+- **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by type, size, time patterns, and reprocessing potential
+- **OneDrive Failed Directory**: Failed files now use OneDrive path by default for consistency with archive and output directories
 
 ### Recent Improvements (Post-v2.1.8)
 - **Tiny File Archiving**: Files under 100 bytes are automatically parked in `03_archive/skipped_files/` with their manifests to eliminate endless “too small” retries.

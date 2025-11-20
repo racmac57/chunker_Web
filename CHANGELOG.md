@@ -5,6 +5,28 @@ All notable changes to the Enterprise Chunker system will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.1.9] - 2025-11-19 - Performance Improvements, Large Backlog Support & Failed File Analysis
+
+### Added (2025-11-19)
+- **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by:
+  - File type and extension distribution
+  - Size analysis and categorization
+  - Time pattern analysis (failure bursts, age distribution)
+  - Reprocessing potential assessment (identifies files that might succeed with updated code)
+- **OneDrive Failed Directory**: Failed files now default to OneDrive path (`%OneDriveCommercial%\\KB_Shared\\03_archive\\failed`) for consistency with archive and output directories
+- **Environment Variable Expansion**: Enhanced `load_cfg()` function to expand environment variables for `failed_dir` configuration
+
+### Changed (2025-11-19)
+- **config.json**: Added `"failed_dir": "%OneDriveCommercial%\\KB_Shared\\03_archive\\failed"` to use OneDrive path for failed files
+- **watcher_splitter.py**: Updated `load_cfg()` function to expand environment variables for `failed_dir` configuration key
+
+### Documentation (2025-11-19)
+- Added `HANDOFF_PROMPT.md` - Comprehensive handoff documentation for AI assistants with project context, current state, and recommendations
+- Updated README.md with failed file analysis tools and OneDrive failed directory configuration
+- Updated SUMMARY.md with v2.1.9 changes for November 19
+
+---
+
 ## [v2.1.9] - 2025-11-18 - Performance Improvements & Large Backlog Support
 
 ### Added

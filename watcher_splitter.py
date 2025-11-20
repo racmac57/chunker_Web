@@ -86,7 +86,7 @@ except:
 def load_cfg(path: str):
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    for k in ["watch_folder", "archive_dir", "output_dir"]:
+    for k in ["watch_folder", "archive_dir", "output_dir", "failed_dir"]:
         if k in cfg:
             cfg[k] = os.path.expandvars(cfg[k])
     return cfg
@@ -1819,8 +1819,10 @@ def process_files_parallel(file_list, config):
             use_pool = False
 
     if not use_pool:
-        max_workers = min(4, multiprocessing.cpu_count(), len(file_list))
-        logger.info(f"Processing {len(file_list)} files with {max_workers} workers")
+        # Use configured parallel_workers instead of hardcoded 4
+        configured_workers = config.get("parallel_workers", 8)
+        max_workers = min(configured_workers, multiprocessing.cpu_count(), len(file_list))
+        logger.info(f"Processing {len(file_list)} files with {max_workers} workers (configured: {configured_workers})")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
@@ -2158,7 +2160,8 @@ def main():
         logger.info(f"Required patterns: {', '.join(patterns)}")
     elif filter_mode == "suffix":
         logger.info("Required suffix: _full_conversation")
-    logger.info(f"Parallel processing: {min(4, multiprocessing.cpu_count())} workers")
+    configured_workers = CONFIG.get("parallel_workers", 8)
+    logger.info(f"Parallel processing: {min(configured_workers, multiprocessing.cpu_count())} workers (configured: {configured_workers})")
     logger.info(f"Database tracking: Enabled")
     logger.info(f"Notifications: {'Enabled' if notifications.config.get('enable_notifications') else 'Disabled'}")
     logger.info(f"Event-driven watcher: {'enabled' if use_events else 'disabled'}")
@@ -2177,7 +2180,7 @@ def main():
         f"Monitoring: {watch_folder}\n"
         f"File types: {', '.join(supported_extensions)} files\n"
         f"Filter mode: {filter_mode}\n"
-        f"Parallel workers: {min(4, multiprocessing.cpu_count())}\n"
+        f"Parallel workers: {min(configured_workers, multiprocessing.cpu_count())} (configured: {configured_workers})\n"
         f"Database: Enabled\n"
         f"Dashboard: http://localhost:5000"
     )

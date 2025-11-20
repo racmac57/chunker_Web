@@ -33,6 +33,12 @@ Enterprise Chunker is a production-ready file processing system with RAG (Retrie
 - **Long Path Handling**: Automatic path shortening for Windows MAX_PATH limits (>240 characters).
 - **Version Conflict Resolution**: Automatic `_v2`, `_v3` suffix handling for sidecars and manifests.
 
+## Changes in v2.1.9 (2025-11-19)
+
+- **Failed File Analysis**: New `analyze_failed_files.py` script provides comprehensive analysis of failed files by file type, size, time patterns, and reprocessing potential. Identifies which files are good candidates for reprocessing (supported types, reasonable size, recent failures).
+- **OneDrive Failed Directory**: Updated `config.json` and `watcher_splitter.py` to use OneDrive path for failed directory (`%OneDriveCommercial%\\KB_Shared\\03_archive\\failed`) for consistency with archive and output directories.
+- **Environment Variable Expansion**: Enhanced `load_cfg()` function to expand environment variables for `failed_dir` configuration, ensuring proper path resolution.
+
 ## Changes in v2.1.8
 
 - Upgraded to `chromadb 1.3.4`, rebuilt the collection, and re-ran the backfill so 2,907 enriched chunks reflect the latest pipeline.
